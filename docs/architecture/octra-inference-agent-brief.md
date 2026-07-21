@@ -41,6 +41,11 @@ PATH=/home/exedev/.cargo/bin:$PATH opam exec -- \
     --request request.json
 ```
 
+`tools/inference_admit.exe` is a Dune build target, not a checked-in file. A
+built checkout may also invoke
+`_build/default/tools/inference_admit.exe` directly after `dune build`, but the
+portable command is `dune exec tools/inference_admit.exe -- ...`.
+
 For the demo, `--program` should be a program envelope, not raw bytecode, so
 the existing bytecode certificate path is exercised.
 
@@ -56,6 +61,10 @@ alignment, but it is not node capability advertisement.
 - `requirement.json`;
 - `target.json`; and
 - `request.json`.
+
+Smoke tests may use raw bytecode to validate packet shape. The Bonsai demo
+packet must use an OCPG program envelope so LiteNode checks the existing
+program certificate and type-flow path.
 
 The requirement object:
 
@@ -140,3 +149,11 @@ octra-inference emit-vm-packet <packed-model> \
 The command should produce the four files above and then invoke the LiteNode
 admission harness as a readiness gate. Once that passes, the Bonsai runtime
 proof flow can consume the same packet before local execution.
+
+## Current Interop Check
+
+The `octra-inference` branch `codex/emit-vm-packet` at commit `6a06128`
+produced a smoke packet accepted by the LiteNode harness on the VPS. The smoke
+packet proves the roots and JSON boundary line up. It used a tiny raw bytecode
+program, so the next packet must switch to a real program envelope before it is
+used as Bonsai demo evidence.

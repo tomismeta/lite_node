@@ -89,6 +89,10 @@ dune exec tools/inference_admit.exe -- \
   --request request.json
 ```
 
+`tools/inference_admit.exe` is a Dune target, not a checked-in executable. Use
+`dune exec tools/inference_admit.exe -- ...`, or invoke
+`_build/default/tools/inference_admit.exe` directly after building.
+
 `--program` accepts a program envelope or raw bytecode. A real demo should use
 the program envelope path so the existing bytecode certificate is checked.
 `--support` may point at explicit node support JSON. If omitted, the harness
