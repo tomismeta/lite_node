@@ -38,6 +38,7 @@ PATH=/home/exedev/.cargo/bin:$PATH opam exec -- \
     --program program.ocpg \
     --requirement requirement.json \
     --target target.json \
+    --support node-support.json \
     --model-ranges model-ranges.json \
     --range-source <owner-root>=owner.bin \
     --request request.json \
@@ -52,9 +53,10 @@ portable command is `dune exec tools/inference_admit.exe -- ...`.
 For the demo, `--program` should be a program envelope, not raw bytecode, so
 the existing bytecode certificate path is exercised.
 
-`--support` is optional for local bring-up. If omitted, the harness derives
-exact support from the supplied requirement. That is acceptable for packet
-alignment, but it is not node capability advertisement.
+`--support` is required for `--run-session` and represents node capability
+advertisement. For packet-shape smoke testing without `--run-session`, the
+harness may derive support from the supplied requirement; that is not a node
+capability check.
 `--model-ranges` is optional for smoke packets and should be present for the
 Bonsai demo packet.
 `--range-source` and `--run-session` are local proof options. They are required

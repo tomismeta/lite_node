@@ -478,6 +478,5 @@ Before a capability is activated, conformance covers:
 - isolation under mixed consensus, private, and inference load.
 
 Pure requirement, policy, effort, and tensor conformance must run without PVAC.
-Full-node integration may link an accepted PVAC backend or an explicit
-unavailable backend that fails closed for every PVAC entrypoint. No fake
-cryptographic behavior is accepted as a production or integration-test boundary.
+Full-node integration links the accepted PVAC backend. No fake cryptographic
+behavior or unavailable replacement is part of the production boundary.

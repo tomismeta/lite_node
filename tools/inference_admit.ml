@@ -598,7 +598,9 @@ let () =
       "--program", Arg.String set_program, "program envelope or raw bytecode";
       "--requirement", Arg.String set_requirement, "execution requirement JSON";
       "--target", Arg.String set_target, "inference target JSON";
-      "--support", Arg.String set_support, "optional node support JSON";
+      "--support",
+      Arg.String set_support,
+      "node support JSON (required for --run-session)";
       "--model-ranges",
       Arg.String set_model_ranges,
       "optional immutable model ranges JSON";
@@ -620,10 +622,12 @@ let () =
     json_file requirement_path parse_requirement_json
   in
   let requirement = requirement_packet.requirement in
-  let support =
-    match paths.support with
-    | Some path -> json_file path parse_support_json
-    | None -> support_from_requirement requirement
+  let support, support_mode =
+    match paths.support, paths.run_session with
+    | None, true ->
+      fail "--run-session requires --support NODE_SUPPORT.json"
+    | Some path, _ -> json_file path parse_support_json, "file"
+    | None, false -> support_from_requirement requirement, "derived"
   in
   let target_packet = json_file target_path parse_target_json in
   let model_packet =
@@ -805,10 +809,7 @@ let () =
                   (Admission.effects admitted
                    |> Octra_vm.Program_effects.names);
                 "support_mode",
-                `String
-                  (match paths.support with
-                   | Some _ -> "file"
-                   | None -> "derived");
+                `String support_mode;
                 "entrypoints", entrypoints_json target_packet.target;
               ]
               @ model_fields

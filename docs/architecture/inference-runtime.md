@@ -114,7 +114,7 @@ format or reconstruct a model graph.
 | Prepared views | Views are acceleration only, never canonical state. |
 | Sampling | Sampling policy is target-owned and rooted with the request. |
 | Effort schedules | Capability roots and effort roots are matched together. |
-| Encrypted inference | PVAC is explicitly unavailable and fail-closed in this fork. |
+| Encrypted inference | A separate PVAC-backed capability family; not part of the plain inference path. |
 | Model names | Runtime code admits capabilities and roots, never model names. |
 
 ## Runtime Shape
@@ -421,8 +421,8 @@ true:
 5. The result includes a semantic receipt, separate diagnostics, exact source
    and binary roots, and `consensus_accepted=false`.
 6. No model-family identifier appears in LiteNode runtime code or tooling.
-7. PVAC remains either an accepted real backend or the explicit unavailable
-   backend that fails closed for every private-operation entrypoint.
+7. PVAC remains an external encrypted-workload boundary. Plain inference does
+   not invoke it, and no substitute crypto implementation is shipped here.
 
 That is the demo-done line. It is not the devnet-done or encrypted-done line.
 Remote capability advertisement, cross-node receipts, consensus activation,
@@ -467,8 +467,8 @@ unless implementation reveals a factual contradiction.
 2. Create the implementation branch from the then-current `upstream/main` and
    record the exact Git commit.
 3. Carry over only the accepted design packet and test fixtures.
-4. Establish a clean full-node build. If PVAC is absent, it must be an explicit
-   unavailable backend that fails closed.
+4. Establish a clean full-node build against the accepted PVAC backend. The
+   inference conformance path must remain independent of PVAC operations.
 5. Establish PVAC-independent requirement, policy, effort, and tensor
    conformance.
 6. Add a source scan rejecting Qwen and Bonsai identifiers from LiteNode runtime
