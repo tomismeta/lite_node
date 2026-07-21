@@ -421,7 +421,7 @@ Before a capability is activated, conformance covers:
 - scalar and optimized numerical vectors; and
 - isolation under mixed consensus, private, and inference load.
 
-Pure profile, policy, effort, and tensor conformance must run without PVAC.
-Full-node integration continues to exercise the ordinary private capability
-family with pinned, compatible PVAC artifacts. No fake cryptographic stubs are
-accepted as a production or integration-test boundary.
+Pure requirement, policy, effort, and tensor conformance must run without PVAC.
+Full-node integration may link an accepted PVAC backend or an explicit
+unavailable backend that fails closed for every PVAC entrypoint. No fake
+cryptographic behavior is accepted as a production or integration-test boundary.

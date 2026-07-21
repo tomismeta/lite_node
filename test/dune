@@ -1,3 +1,9 @@
 (test
  (name vm_opcode_policy_test)
+ (modules vm_opcode_policy_test)
+ (libraries octra_vm))
+
+(test
+ (name execution_requirement_test)
+ (modules execution_requirement_test)
  (libraries octra_vm))

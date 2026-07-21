@@ -5,6 +5,7 @@ type t = {
   admitted_code : Contract_vm.instr array;
   admitted_effects : Program_effects.t;
   profile : profile;
+  requirement : Execution_requirement.t option;
 }
 
 and profile =
@@ -57,6 +58,7 @@ let admit ~program code =
         admitted_code = Array.copy code;
         admitted_effects = Program_effects.scan code;
         profile = if program then Program Program_type_flow.empty_facts else Legacy;
+        requirement = None;
       }
 
 let of_code code = admit ~program:false code
@@ -73,6 +75,21 @@ let of_program ?(facts = Program_type_flow.empty_facts) code =
     (match Program_type_flow.check ~facts admitted.admitted_code with
      | Ok () -> Ok { admitted with profile = Program facts }
      | Error error -> Error (Verify_error ("Program type flow: " ^ Program_type_flow.error_message error)))
+
+let of_program_with_requirement
+    ?(facts = Program_type_flow.empty_facts)
+    ~support
+    ~requirement
+    code =
+  match Execution_requirement.check support requirement with
+  | Error error ->
+    Error (Unsafe_error
+             ("execution requirement: "
+              ^ Execution_requirement.error_message error))
+  | Ok () ->
+    (match of_program ~facts code with
+     | Error error -> Error error
+     | Ok admitted -> Ok { admitted with requirement = Some requirement })
 
 let cert_field name fields =
   match List.filter (fun (key, _) -> String.equal key name) fields with
@@ -363,6 +380,9 @@ let effects admitted =
 
 let profile admitted =
   admitted.profile
+
+let requirement admitted =
+  admitted.requirement
 
 let error_message = function
   | Decode_error message

@@ -81,21 +81,39 @@ no second hashing stack.
 
 ## Ownership
 
-| Surface | Owner |
-| --- | --- |
-| Source model parsing and model-family rules | `octra-inference` |
-| Tensor packing, aliases, and physical bundle layout | `octra-inference` |
-| Generated layer schedule and tensor bindings | `octra-inference` |
-| Target, model, tokenizer, and execution roots | `octra-inference` |
-| Bytecode, verification, type flow, and effort | LiteNode VM |
-| Model-neutral tensor and sequence operations | LiteNode VM |
-| Authenticated immutable ranges and prepared views | LiteNode runtime |
-| Model residency and session state | LiteNode runtime |
-| Admission, scheduling, cancellation, and receipts | LiteNode runtime |
-| Encrypted values and cryptographic operations | Private VM capabilities |
+The fork has two authors of truth. `octra-inference` produces a rooted target.
+The Octra VM admits and executes that target without learning source-model
+rules.
+
+| Surface | `octra-inference` responsibility | Octra VM responsibility |
+| --- | --- | --- |
+| Source model | Parse and convert releases | Treat model identity as rooted data |
+| Target program | Generate bytecode and ABI | Verify code, flow, effects, and policy |
+| Execution requirement | Declare roots, capabilities, and limits | Match roots and limits exactly |
+| Tensor layout | Choose packing and bundle layout | Execute model-neutral memory ops |
+| Numerical behavior | Produce qualification evidence | Implement semantics named by the root |
+| Scheduling shape | Declare per-advance expectations | Reserve, dispatch, cancel, and meter |
+| Sessions | Define advance ABI and canonical payloads | Enforce sequence CAS and atomic mutation |
+| Model residency | Build bundles and content roots | Authenticate ranges and prepare views |
+| Sampling | Generate rooted sampling policy | Execute target-owned selection |
+| Encrypted work | Declare private values and capabilities | Fail closed without crypto support |
+| Receipts | Provide target and diagnostic evidence | Commit execution and output roots |
 
 The public boundary is a rooted target. LiteNode does not inspect a model
 format or reconstruct a model graph.
+
+### Controversial boundaries
+
+| Boundary | Current decision |
+| --- | --- |
+| Target correctness | VM proves safety; `octra-inference` owns qualification evidence. |
+| Numerical roots | Roots bind semantics; performance evidence is separate. |
+| Tensor packing | Packing belongs to target data; VM operations stay model neutral. |
+| Prepared views | Views are acceleration only, never canonical state. |
+| Sampling | Sampling policy is target-owned and rooted with the request. |
+| Effort schedules | Capability roots and effort roots are matched together. |
+| Encrypted inference | PVAC is explicitly unavailable and fail-closed in this fork. |
+| Model names | Runtime code admits capabilities and roots, never model names. |
 
 ## Runtime Shape
 
@@ -363,7 +381,7 @@ Expected modules are deliberately few:
 
 | Module | Responsibility |
 | --- | --- |
-| `Execution_profile` | Canonical requirements and capability matching |
+| `Execution_requirement` | Canonical requirements and capability matching |
 | `Admission` | Existing verification plus optional profiled-program admission |
 | `Opcode_policy` | One authoritative opcode classification |
 | `Inference_target` | Root binding and target admission |
@@ -410,9 +428,10 @@ unless implementation reveals a factual contradiction.
 2. Create the implementation branch from the then-current `upstream/main` and
    record the exact Git commit.
 3. Carry over only the accepted design packet and test fixtures.
-4. Establish an unchanged full-node build with pinned compatible PVAC artifacts.
-5. Establish PVAC-independent profile, policy, effort, and tensor conformance
-   without fake cryptographic stubs.
+4. Establish a clean full-node build. If PVAC is absent, it must be an explicit
+   unavailable backend that fails closed.
+5. Establish PVAC-independent requirement, policy, effort, and tensor
+   conformance.
 6. Add a source scan rejecting Qwen and Bonsai identifiers from LiteNode runtime
    code.
 
