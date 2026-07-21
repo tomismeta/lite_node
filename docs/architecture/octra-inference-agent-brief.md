@@ -71,10 +71,10 @@ session and receipt roots.
 - `model-ranges.json`; and
 - `request.json`.
 
-Smoke tests may still emit only the first four files and may use raw bytecode
-to validate packet shape. The Bonsai demo packet must include
-`model-ranges.json` and must use an OCPG program envelope so LiteNode checks
-the existing program certificate and type-flow path.
+Smoke tests may omit `model-ranges.json` and may use raw bytecode to validate
+packet shape. The Bonsai demo packet must include all five files and must use
+an OCPG program envelope so LiteNode checks the existing program certificate
+and type-flow path.
 The OCPG certificate must be a LiteNode-compatible
 `aml_bytecode_certificate_v2`; an envelope with placeholder certificate bytes
 will be rejected.
@@ -105,7 +105,7 @@ The target object:
 
 ```json
 {
-  "program_root": "<sha256 over admitted bytecode encoding>",
+  "program_root": "<sha256 over domain-tagged admitted bytecode encoding>",
   "requirement_root": "<computed requirement root>",
   "model_root": "<64 lowercase hex>",
   "execution_descriptor_root": "<64 lowercase hex>",

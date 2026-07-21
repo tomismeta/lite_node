@@ -39,6 +39,11 @@
  (libraries octra_vm digestif digestif.c base64))
 
 (test
+ (name inference_root_vectors_test)
+ (modules inference_root_vectors_test)
+ (libraries octra_vm digestif digestif.c))
+
+(test
  (name inference_plan_test)
  (modules inference_plan_test)
  (libraries octra_vm digestif digestif.c))

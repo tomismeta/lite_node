@@ -183,13 +183,18 @@ When `--run-session` is present, successful output also includes:
 - `final_receipt_root`;
 - `output_root`;
 - `candidate_root`;
-- `committed_effort`; and
+- `effort_delta` for the executed advance transition; and
 - `consensus_accepted`, always `false` for this local proof path.
 
 The current local session fixture proves plan validation, authenticated input
 and range binding, candidate isolation, lifecycle transitions, and output and
-candidate roots with a tiny target-owned program. It does not claim Bonsai
-numerical execution or resident model state.
+diagnostic candidate roots with a tiny target-owned program. It does not claim
+Bonsai numerical execution or resident model state.
+
+The root fixture test locks the current canonical encodings for the
+requirement, admitted program, target, request, session, and receipt objects.
+Those fixtures are compatibility evidence, not a release-version mechanism;
+changes belong in Git and require an intentional fixture review.
 
 The local output contract is deliberately small: the target places an output
 base in `r0`, an output cell count in `r1`, and writes the canonical span before

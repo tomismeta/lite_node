@@ -22,7 +22,7 @@ type t = {
   next_sequence : int;
   output_root : string;
   candidate_root : string;
-  committed_effort : int;
+  effort_delta : int;
   completion_status : string;
   consensus_accepted : bool;
 }

@@ -95,7 +95,10 @@ let root target =
 
 let program_root admitted =
   Digestif.SHA256.(
-    digest_string (Bytecode.encode (Admission.code admitted)) |> to_hex)
+    digest_string
+      ("octra:inference:program\000"
+       ^ Bytecode.encode (Admission.code admitted))
+    |> to_hex)
 
 let rec check_entrypoints seen = function
   | [] -> Ok ()

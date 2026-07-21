@@ -431,8 +431,9 @@ and encrypted inference remain later phases.
 Current implementation status: the local fork can admit a five-file packet,
 authenticate and pin immutable owner bytes, bind them with a request and
 authenticated input into one execution plan, execute one target-owned
-`advance`, finalize, and emit output and candidate roots. The plan-bound runner
-is still local candidate evidence: it does not provide resident model state,
+`advance`, finalize, and emit output and diagnostic candidate roots. The
+plan-bound runner is still local candidate evidence: it does not provide
+resident model state,
 node scheduling, or qualified Bonsai numerical semantics. The Bonsai canary is
 not complete until accepted tensor primitives execute the target-owned
 numerical path inside LiteNode.

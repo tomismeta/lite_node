@@ -100,7 +100,7 @@ let check_root_fixture () =
   check "request root fixture"
     (String.equal
        (Request.root (request ()))
-       "7d1563bdd7fc21a902d33552616863cf92f66ebeecf4f423e803d60914a1e4c7")
+       "aa3e73c5af4cb387f7bd02cf05d1da9eab329e9d3988cea26a74a2a602274919")
 
 let check_supported () =
   match Request.check ~target:(target ()) ~requirement (request ()) with

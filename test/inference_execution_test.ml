@@ -197,6 +197,29 @@ let check_capability_gate () =
   | Error (Admission.Unsafe_error _) -> ()
   | _ -> failwith "expected consensus-safe host-float rejection"
 
+let check_opcode_capability_gate () =
+  let code = [|
+    VM.JDEST 100;
+    VM.LDI (0, VM.VString "missing-range");
+    VM.FLOAD (1, 0);
+    VM.STOP;
+  |] in
+  let requirement =
+    Req.{
+      requirement with
+      capabilities = [capability "tensor.fixed" (hex_root 'e')];
+    }
+  in
+  let support = Req.{ support with support_capabilities = requirement.capabilities } in
+  match
+    Admission.of_inference_program_with_requirement ~support ~requirement code
+  with
+  | Error (Admission.Unsafe_error message) ->
+    check
+      "missing opcode capability is named"
+      (starts_with "inference opcode FLOAD" message)
+  | _ -> failwith "expected authenticated-range capability rejection"
+
 let check_data_rooted_execution () =
   let left = run "\001\002\003\004" in
   let right = run "\004\003\002\001" in
@@ -228,5 +251,6 @@ let check_output_contract () =
 
 let () =
   check_capability_gate ();
+  check_opcode_capability_gate ();
   check_data_rooted_execution ();
   check_output_contract ()

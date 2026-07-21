@@ -20,6 +20,7 @@ type result = {
 }
 
 type error =
+  | Entrypoint_unsupported of string
   | Entrypoint_missing of int
   | Opaque_value
   | Invalid_output of string
@@ -204,7 +205,7 @@ let run ~plan () =
   let request = Inference_plan.request plan in
   let pins = Inference_plan.pins plan in
   match Inference_target.entry_label target request.entrypoint with
-  | None -> Error (Entrypoint_missing (-1))
+  | None -> Error (Entrypoint_unsupported request.entrypoint)
   | Some label ->
     (match entrypoint_pc (Admission.code admitted) label with
      | None -> Error (Entrypoint_missing label)
@@ -254,6 +255,8 @@ let run ~plan () =
           | _, Error error -> Error error))
 
 let error_message = function
+  | Entrypoint_unsupported name ->
+    Printf.sprintf "unsupported inference entrypoint: %s" name
   | Entrypoint_missing label ->
     Printf.sprintf "missing inference entrypoint label: %d" label
   | Opaque_value ->

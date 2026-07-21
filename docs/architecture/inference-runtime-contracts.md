@@ -30,15 +30,17 @@ the encoded object, not in capability names or module names.
 
 ## Root Domains
 
-Every root uses canonical encoding and a distinct domain separator. The exact
-canonical encoder will be selected with the first implementation and covered
-by golden fixtures.
+Every root uses canonical encoding and a distinct domain separator. The local
+implementation uses LiteNode's canonical JSON encoders for descriptor objects
+and the existing bytecode encoder for programs; golden fixtures preserve those
+decisions.
 
 `H` reuses LiteNode's existing hash implementation and canonical encoding
 infrastructure. Inference adds domain tags, not a second hashing stack.
 
 ```text
 requirement_root = H("octra:inference:requirement\0" || requirement)
+program_root     = H("octra:inference:program\0"     || admitted_program)
 target_root      = H("octra:inference:target\0"      || target)
 range_root       = H("octra:inference:model-range\0" || range)
 model_ranges_root = H("octra:inference:model-ranges\0" || model_ranges)
@@ -77,6 +79,14 @@ target.
 The requirement root binds capability and effort schedule roots together. A
 node cannot advertise an accepted capability with a different schedule that
 undercharges it. Golden fixtures cover accepted and rejected pairings.
+
+Inference admission also checks the instruction stream against the declared
+capability names. Authenticated range loads require
+`storage.authenticated-range`; fixed-point tensor instructions require
+`tensor.fixed`. Host-floating-point instructions remain rejected by the
+consensus-safe admission path until a numerical profile defines and enforces
+their semantics. A capability declaration never turns an otherwise unsafe
+instruction into a consensus-safe one.
 
 Multiple definitions may coexist during a rollout because their roots differ.
 Removing support is an operator and network activation decision recorded in
@@ -164,7 +174,7 @@ A canonical session contains only logical progress:
 - append-only output-prefix root;
 - cumulative committed effort;
 - optional committed target-state root;
-- candidate-state root for the current transition;
+- candidate-state root for diagnostics and receipts, excluded from session identity;
 - terminal status; and
 - optional final output root.
 
@@ -185,9 +195,19 @@ ordinary KV or recurrent caches.
 When committed target state exists, its payload is durable canonical session
 data. It is not stored only in an optional checkpoint.
 
+The first local runner accepts at most one successful advance. Its candidate
+root is a physical execution snapshot for diagnostics, not committed target
+state and not part of the session root. Multi-advance execution requires a
+canonical position and either replayable target progress or explicitly committed
+target state.
+
 The output prefix is append-only and hash-chained. A successful advance may
 append output, replace logical phase or position, increase cumulative effort,
 and increment the sequence exactly once.
+
+Receipts expose `effort_delta`, the effort consumed by that transition. The
+session retains cumulative committed effort for admission and accounting; it
+is not repeated as the per-receipt value.
 
 ## Checkpoints
 

@@ -50,7 +50,7 @@ let phase_name = function
   | Finalized -> "finalized"
   | Canceled -> "canceled"
 
-let to_json session =
+let identity_json session =
   `Assoc [
     "target_root", `String session.target_root;
     "request_root", `String session.request_root;
@@ -58,12 +58,11 @@ let to_json session =
     "sequence", `Int session.sequence;
     "phase", `String (phase_name session.phase);
     "output_root", `String session.output_root;
-    "candidate_root", `String session.candidate_root;
     "committed_effort", `Int session.committed_effort;
   ]
 
 let root session =
-  let payload = Yojson.Safe.to_string (to_json session) in
+  let payload = Yojson.Safe.to_string (identity_json session) in
   Digestif.SHA256.(
     digest_string ("octra:inference:session\000" ^ payload) |> to_hex)
 
@@ -114,7 +113,7 @@ let receipt ~status (prior : t) (next : t) =
     next_sequence = next.sequence;
     output_root = next.output_root;
     candidate_root = next.candidate_root;
-    committed_effort = next.committed_effort - prior.committed_effort;
+    effort_delta = next.committed_effort - prior.committed_effort;
     completion_status = status;
     consensus_accepted = false;
   }
@@ -146,12 +145,10 @@ let advance ~plan ~expected_sequence session =
       | Error error -> Error error
       | Ok () ->
         (match Inference_execution.run ~plan () with
+         | Error (Inference_execution.Entrypoint_unsupported name) ->
+           Error (Entrypoint_unsupported name)
          | Error (Inference_execution.Entrypoint_missing label) ->
-           if label = -1 then
-             Error
-               (Entrypoint_unsupported
-                  (Inference_plan.request plan).Inference_request.entrypoint)
-           else Error (Entrypoint_missing label)
+           Error (Entrypoint_missing label)
          | Error error ->
            Error (Execution_error (Inference_execution.error_message error))
          | Ok execution ->

@@ -784,8 +784,8 @@ let () =
                                       `String (Session.output_root finalized);
                                       "candidate_root",
                                       `String (Session.candidate_root finalized);
-                                      "committed_effort",
-                                      `Int (Session.committed_effort finalized);
+                                      "effort_delta",
+                                      `Int advance_receipt.Receipt.effort_delta;
                                       "consensus_accepted", `Bool false;
                                     ]))))))
               | _ ->

@@ -20,6 +20,7 @@ type result = {
 }
 
 type error =
+  | Entrypoint_unsupported of string
   | Entrypoint_missing of int
   | Opaque_value
   | Invalid_output of string

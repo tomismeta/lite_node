@@ -145,6 +145,7 @@ let check_lifecycle () =
   | Ok (advanced, receipt) ->
     check "advanced sequence" (Session.sequence advanced = 1);
     check "effort committed" (Session.committed_effort advanced > 0);
+    check "advance effort delta" (receipt.Receipt.effort_delta > 0);
     check "receipt root" (String.length (Receipt.root receipt) = 64);
     check "candidate root" (String.length (Session.candidate_root advanced) = 64);
     (match Session.advance ~plan ~expected_sequence:1 advanced with
@@ -154,6 +155,7 @@ let check_lifecycle () =
     | Error error -> failwith (Session.error_message error)
     | Ok (finalized, receipt) ->
       check "finalized sequence" (Session.sequence finalized = 2);
+      check "finalize effort delta" (receipt.Receipt.effort_delta = 0);
       check "final receipt root" (String.length (Receipt.root receipt) = 64)
 
 let check_sequence_mismatch () =

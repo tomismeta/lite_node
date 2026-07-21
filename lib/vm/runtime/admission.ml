@@ -100,7 +100,20 @@ let of_inference_program_with_requirement
      A numerical capability is not sufficient to make host floating-point
      operations deterministic; a numerical profile must bind those semantics
      to execution before this path is widened. *)
-  of_program_with_requirement ~facts ~support ~requirement code
+  match Execution_requirement.check support requirement with
+  | Error error ->
+    Error (Unsafe_error
+             ("execution requirement: "
+              ^ Execution_requirement.error_message error))
+  | Ok () ->
+    (match of_program ~facts code with
+     | Error error -> Error error
+     | Ok admitted ->
+       (match Inference_opcode_policy.first_missing ~requirement code with
+        | Some missing ->
+          Error
+            (Unsafe_error (Inference_opcode_policy.error_message missing))
+        | None -> Ok { admitted with requirement = Some requirement }))
 
 let cert_field name fields =
   match List.filter (fun (key, _) -> String.equal key name) fields with
