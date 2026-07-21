@@ -426,6 +426,13 @@ That is the demo-done line. It is not the devnet-done or encrypted-done line.
 Remote capability advertisement, cross-node receipts, consensus activation,
 and encrypted inference remain later phases.
 
+Current implementation status: the local fork can admit a five-file packet,
+authenticate and pin immutable owner bytes, execute one target-owned
+`advance`, finalize, and emit semantic session and receipt roots. This is the
+generic lifecycle substrate. The Bonsai canary is not complete until the
+accepted tensor primitives execute the target-owned numerical path inside
+LiteNode.
+
 ## Roadmap
 
 The order below is a dependency order, not a calendar estimate.
@@ -473,15 +480,17 @@ conformance boundaries.
 3. Add profiled program admission by composing the existing verifier,
    certificate, effect scan, and type-flow checks.
 4. Add target, request, and immutable range-descriptor root binding against an
-   admitted program and execution requirement. Authenticated range I/O and
-   session execution remain Phase 6 work.
-5. Add the unsigned checked effort representation and schedule roots.
-6. Keep legacy and ordinary program admission behaviorally compatible.
+   admitted program and execution requirement.
+5. Add local authenticated owner-byte pinning and a minimal session/receipt
+   proof harness.
+6. Add the unsigned checked effort representation and schedule roots.
+7. Keep legacy and ordinary program admission behaviorally compatible.
 
 No tensor opcode is added in this phase.
 
-Exit gate: a program can declare model-neutral requirements and fail closed on
-an unsupported node while existing admission remains unchanged.
+Exit gate: a program can declare model-neutral requirements, bind target,
+request, and immutable data roots, and fail closed on an unsupported node while
+existing admission remains unchanged.
 
 ### Phase 3: tensor substrate
 

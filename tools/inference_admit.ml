@@ -18,8 +18,11 @@ module Bytecode = Octra_vm.Bytecode
 module Program_envelope = Octra_vm.Program_envelope
 module Program_type_flow = Octra_vm.Program_type_flow
 module Model = Octra_vm.Inference_model
+module Receipt = Octra_vm.Inference_receipt
 module Req = Octra_vm.Execution_requirement
 module Request = Octra_vm.Inference_request
+module Session = Octra_vm.Inference_session
+module Store = Octra_vm.Inference_store
 module Target = Octra_vm.Inference_target
 
 type paths = {
@@ -29,6 +32,8 @@ type paths = {
   mutable support : string option;
   mutable request : string option;
   mutable model_ranges : string option;
+  mutable range_sources : (string * string) list;
+  mutable run_session : bool;
 }
 
 type target_packet = {
@@ -65,6 +70,16 @@ let read_file path =
 let require_path name = function
   | Some path -> path
   | None -> fail ("missing " ^ name)
+
+let split_pair value message =
+  match String.index_opt value '=' with
+  | None -> fail message
+  | Some index ->
+    let left = String.sub value 0 index in
+    let right =
+      String.sub value (index + 1) (String.length value - index - 1)
+    in
+    if left = "" || right = "" then fail message else left, right
 
 let field name fields =
   match List.filter (fun (key, _) -> String.equal key name) fields with
@@ -548,9 +563,16 @@ let check_declared_root name declared actual =
   | Some expected ->
     Error (Printf.sprintf "%s mismatch: expected %s actual %s" name expected actual)
 
+let read_range_source sources owner_root =
+  match List.assoc_opt owner_root sources with
+  | None -> None
+  | Some path ->
+    try Some (read_file path) with Sys_error error -> fail error
+
 let usage =
   "usage: inference_admit --program FILE --requirement FILE --target FILE \
-   [--support FILE] [--model-ranges FILE] [--request FILE]"
+   [--support FILE] [--model-ranges FILE] [--range-source ROOT=FILE] \
+   [--request FILE] [--run-session]"
 
 let () =
   let paths =
@@ -561,6 +583,8 @@ let () =
       support = None;
       request = None;
       model_ranges = None;
+      range_sources = [];
+      run_session = false;
     }
   in
   let set_program value = paths.program <- Some value in
@@ -569,6 +593,13 @@ let () =
   let set_support value = paths.support <- Some value in
   let set_request value = paths.request <- Some value in
   let set_model_ranges value = paths.model_ranges <- Some value in
+  let add_range_source value =
+    let owner_root, path =
+      split_pair value "--range-source requires <owner-root=file>"
+    in
+    paths.range_sources <- (owner_root, path) :: paths.range_sources
+  in
+  let set_run_session () = paths.run_session <- true in
   Arg.parse
     [
       "--program", Arg.String set_program, "program envelope or raw bytecode";
@@ -578,7 +609,13 @@ let () =
       "--model-ranges",
       Arg.String set_model_ranges,
       "optional immutable model ranges JSON";
+      "--range-source",
+      Arg.String add_range_source,
+      "authenticated local owner bytes, as owner-root=file";
       "--request", Arg.String set_request, "optional request fixture JSON";
+      "--run-session",
+      Arg.Unit set_run_session,
+      "run a local open/advance/finalize session after admission";
     ]
     (fun value -> fail ("unexpected argument: " ^ value))
     usage;
@@ -644,7 +681,7 @@ let () =
                      model_ranges_root
                  with
                  | Error error -> fail error
-                 | Ok () ->
+                | Ok () ->
                    [
                      "model_ranges_root", `String model_ranges_root;
                      "model_range_count",
@@ -678,6 +715,74 @@ let () =
                      `String packet.request.Request.entrypoint;
                    ])
           in
+          let session_fields =
+            if not paths.run_session then []
+            else
+              match model_packet, request_packet with
+              | Some model_packet, Some request_packet ->
+                (match
+                   Model.check
+                     ~target:target_packet.target
+                     model_packet.model
+                 with
+                 | Error error -> fail (Model.error_message error)
+                 | Ok () ->
+                   let read =
+                     read_range_source paths.range_sources
+                   in
+                   match
+                     Store.pin
+                       ~limits:requirement.Req.limits
+                       ~read
+                       model_packet.model
+                   with
+                   | Error error -> fail (Store.error_message error)
+                   | Ok pins ->
+                     (match
+                        Session.open_session
+                          ~target:target_packet.target
+                          ~request:request_packet.request
+                          ~pins
+                      with
+                      | Error error -> fail (Session.error_message error)
+                      | Ok opened ->
+                        (match
+                           Session.advance
+                             ~admitted
+                             ~target:target_packet.target
+                             ~request:request_packet.request
+                             ~expected_sequence:0
+                             opened
+                         with
+                         | Error error -> fail (Session.error_message error)
+                         | Ok (advanced, advance_receipt) ->
+                           (match
+                              Session.finalize
+                                ~expected_sequence:advanced.Session.sequence
+                                advanced
+                            with
+                            | Error error -> fail (Session.error_message error)
+                            | Ok (finalized, final_receipt) ->
+                              [
+                                "opened_session_root",
+                                `String (Session.root opened);
+                                "advanced_session_root",
+                                `String (Session.root advanced);
+                                "final_session_root",
+                                `String (Session.root finalized);
+                                "advance_receipt_root",
+                                `String (Receipt.root advance_receipt);
+                                "final_receipt_root",
+                                `String (Receipt.root final_receipt);
+                                "output_root",
+                                `String finalized.Session.output_root;
+                                "committed_effort",
+                                `Int finalized.Session.committed_effort;
+                                "consensus_accepted", `Bool false;
+                              ]))))
+              | _ ->
+                fail "--run-session requires --model-ranges and --request"
+          in
           let report =
             `Assoc (
               [
@@ -699,6 +804,7 @@ let () =
                 "entrypoints", entrypoints_json target_packet.target;
               ]
               @ model_fields
-              @ request_field)
+              @ request_field
+              @ session_fields)
           in
           print_endline (Yojson.Safe.pretty_to_string report)))

@@ -39,7 +39,9 @@ PATH=/home/exedev/.cargo/bin:$PATH opam exec -- \
     --requirement requirement.json \
     --target target.json \
     --model-ranges model-ranges.json \
-    --request request.json
+    --range-source <owner-root>=owner.bin \
+    --request request.json \
+    --run-session
 ```
 
 `tools/inference_admit.exe` is a Dune build target, not a checked-in file. A
@@ -55,6 +57,9 @@ exact support from the supplied requirement. That is acceptable for packet
 alignment, but it is not node capability advertisement.
 `--model-ranges` is optional for smoke packets and should be present for the
 Bonsai demo packet.
+`--range-source` and `--run-session` are local proof options. They are required
+only when the agent wants LiteNode to authenticate owner bytes and emit local
+session and receipt roots.
 
 ## Required Output Packet
 
@@ -70,6 +75,9 @@ Smoke tests may still emit only the first four files and may use raw bytecode
 to validate packet shape. The Bonsai demo packet must include
 `model-ranges.json` and must use an OCPG program envelope so LiteNode checks
 the existing program certificate and type-flow path.
+The OCPG certificate must be a LiteNode-compatible
+`aml_bytecode_certificate_v2`; an envelope with placeholder certificate bytes
+will be rejected.
 
 The requirement object:
 
@@ -152,6 +160,9 @@ The model ranges object:
 LiteNode checks only descriptor identity and byte bounds here. It does not
 trust a filesystem path, load the model, prepare native views, or prove model
 correctness from this descriptor.
+For local `--run-session` proof, provide each owner byte source with
+`--range-source <owner-root>=<path>`. LiteNode hashes the file contents and
+rejects the run if the digest does not equal `owner_root`.
 
 ## Acceptance
 
@@ -164,12 +175,19 @@ The harness must return:
   "requirement_root": "...",
   "target_root": "...",
   "model_ranges_root": "...",
-  "request_root": "..."
+  "request_root": "...",
+  "final_session_root": "...",
+  "final_receipt_root": "...",
+  "consensus_accepted": false
 }
 ```
 
 This proves packet compatibility only. It does not prove model correctness,
 consensus execution, private execution, or encrypted inference.
+When `--run-session` is used, it additionally proves the local lifecycle
+boundary for the supplied target-owned program and authenticated range bytes.
+It still does not prove Bonsai numerical correctness unless the supplied
+program implements that path with accepted generic VM primitives.
 
 ## Guardrails
 
@@ -198,8 +216,9 @@ runtime proof flow can consume the same packet before local execution.
 
 ## Current Interop Check
 
-The `octra-inference` branch `codex/emit-vm-packet` at commit `6a06128`
-produced a smoke packet accepted by the LiteNode harness on the VPS. The smoke
-packet proves the roots and JSON boundary line up. It used a tiny raw bytecode
-program, so the next packet must switch to a real program envelope before it is
-used as Bonsai demo evidence.
+The latest local interop smoke produced a five-file packet with a
+LiteNode-compatible OCPG envelope, authenticated owner bytes, local
+open/advance/finalize session roots, receipt roots, and
+`consensus_accepted=false`. It used a tiny effect-free target program. The next
+packet must replace that tiny program with the generic numerical target path
+before it can serve as Bonsai demo evidence.

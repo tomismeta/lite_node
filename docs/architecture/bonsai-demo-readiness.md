@@ -36,11 +36,11 @@ network admission, or publisher endorsement.
 | Requirement admission | Exact root and limit matching | `octra-inference` emits matching roots |
 | Target admission | Root binding module added | Wire target descriptor into a harness |
 | Request admission | Target and limit checks added | Feed runtime proof from admitted roots |
-| Immutable ranges | Descriptor admission added | Back with authenticated range reader |
+| Immutable ranges | Local authenticated pinning added | Back with resident reader |
 | Ontology guard | Runtime source scan added | No model-family names enter VM code |
 | Tensor substrate | Not started | Add only generic accepted primitives |
-| Sessions | Not started | Add local open/advance/finalize runner |
-| Receipts | Not started | Emit semantic receipt plus diagnostics |
+| Sessions | Minimal local runner added | Add node residency and scheduler |
+| Receipts | Local semantic roots added | Add full diagnostics object |
 
 ## Handoff Shape
 
@@ -90,6 +90,7 @@ dune exec tools/inference_admit.exe -- \
   --requirement requirement.json \
   --target target.json \
   --model-ranges model-ranges.json \
+  --range-source <owner-root>=owner.bin \
   --request request.json
 ```
 
@@ -106,6 +107,13 @@ packet bring-up but is not a substitute for node capability advertisement.
 should be present and should bind the target's `model_root` and `store_root`
 to concrete immutable owner ranges before any runtime execution proof is
 claimed.
+`--range-source` supplies local owner bytes for the harness. The harness hashes
+those bytes, checks them against `owner_root`, slices the admitted immutable
+range, and pins it for the optional local session run. The path itself is never
+part of model identity.
+`--run-session` turns the same tool into a local proof harness: after
+admission it opens a session, executes one target-owned `advance`, finalizes,
+and reports session and receipt roots with `consensus_accepted=false`.
 
 The requirement JSON contains:
 
@@ -155,9 +163,24 @@ When present, the model ranges JSON contains:
 - optional `model_ranges_root`, which is checked when present.
 
 The harness verifies that model and store roots match the admitted target, each
-range has a valid owner root and encoding, byte bounds are checked, and
-duplicate ranges are rejected. This is descriptor admission only; storage I/O,
-publisher provenance, and prepared views are later runtime work.
+range has a valid owner root and encoding, byte bounds are checked, duplicate
+ranges are rejected, and local owner bytes match the declared owner root before
+pinning. Publisher provenance, long-lived residency, and prepared views are
+later runtime work.
+
+When `--run-session` is present, successful output also includes:
+
+- `opened_session_root`;
+- `advanced_session_root`;
+- `final_session_root`;
+- `advance_receipt_root`;
+- `final_receipt_root`;
+- `output_root`;
+- `committed_effort`; and
+- `consensus_accepted`, always `false` for this local proof path.
+
+The current local session fixture proves the lifecycle and receipt boundary
+with a tiny target-owned program. It does not claim Bonsai numerical execution.
 
 ## Demo Gate
 
@@ -170,6 +193,7 @@ Run the demo only when all of these are true:
   sources and rooted model artifacts;
 - the LiteNode harness accepts the requirement and target before execution;
 - immutable model ranges are admitted before execution;
+- the local session path emits session and receipt roots;
 - every failed admission case leaves no session or output state;
 - the Bonsai canary produces the expected token sequence and internal roots;
 - local evidence records the exact LiteNode binary and source roots; and

@@ -24,5 +24,15 @@
  (libraries octra_vm))
 
 (test
+ (name inference_store_test)
+ (modules inference_store_test)
+ (libraries octra_vm digestif digestif.c))
+
+(test
+ (name inference_session_test)
+ (modules inference_session_test)
+ (libraries octra_vm digestif digestif.c))
+
+(test
  (name runtime_ontology_test)
  (modules runtime_ontology_test))
