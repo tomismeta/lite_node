@@ -80,4 +80,4 @@ let () =
     (fun dir ->
       let path = Filename.concat root dir in
       if Sys.file_exists path then scan_tree path)
-    ["lib"; "node_runtime"; "circle_runtime"; "pvac_ffi"]
+    ["lib"; "node_runtime"; "circle_runtime"; "pvac_ffi"; "tools"]

@@ -75,6 +75,48 @@ evidence remain outside LiteNode.
    require exact token, hidden, norm, logits, requirement, target, request, and
    output roots.
 
+## Local Admission Harness
+
+The current harness is intentionally local tooling:
+
+```sh
+dune exec tools/inference_admit.exe -- \
+  --program program.ocpg \
+  --requirement requirement.json \
+  --target target.json \
+  --request request.json
+```
+
+`--program` accepts a program envelope or raw bytecode. A real demo should use
+the program envelope path so the existing bytecode certificate is checked.
+`--support` may point at explicit node support JSON. If omitted, the harness
+derives exact support from the supplied requirement, which is useful for local
+packet bring-up but is not a substitute for node capability advertisement.
+
+The requirement JSON contains:
+
+- `vm_semantics_root`;
+- `numerical_root`;
+- `effort_root`;
+- `capabilities`, as `{ "name": "...", "root": "..." }` objects;
+- `limits`; and
+- optional `requirement_root`, which is checked when present.
+
+The target JSON contains:
+
+- `program_root`;
+- `requirement_root`;
+- `model_root`;
+- `execution_descriptor_root`;
+- `store_root`;
+- `session_abi_root`;
+- `entrypoints`, as `{ "name": "...", "label": 100 }` objects; and
+- optional `target_root`, which is checked when present.
+
+Successful output is a JSON report containing accepted program, requirement,
+target, optional request roots, admitted instruction count, effects, support
+mode, and entrypoints.
+
 ## Demo Gate
 
 Run the demo only when all of these are true:

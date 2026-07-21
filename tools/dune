@@ -1,0 +1,3 @@
+(executable
+ (name inference_admit)
+ (libraries octra_vm yojson digestif digestif.c))
