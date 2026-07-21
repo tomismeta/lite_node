@@ -17,6 +17,7 @@ module Admission = Octra_vm.Admission
 module Bytecode = Octra_vm.Bytecode
 module Program_envelope = Octra_vm.Program_envelope
 module Program_type_flow = Octra_vm.Program_type_flow
+module Model = Octra_vm.Inference_model
 module Req = Octra_vm.Execution_requirement
 module Request = Octra_vm.Inference_request
 module Target = Octra_vm.Inference_target
@@ -27,6 +28,7 @@ type paths = {
   mutable target : string option;
   mutable support : string option;
   mutable request : string option;
+  mutable model_ranges : string option;
 }
 
 type target_packet = {
@@ -41,6 +43,11 @@ type requirement_packet = {
 
 type request_packet = {
   request : Request.t;
+  declared_root : string option;
+}
+
+type model_packet = {
+  model : Model.t;
   declared_root : string option;
 }
 
@@ -91,6 +98,14 @@ let optional_string_field name fields =
   | Ok None -> Ok None
   | Ok (Some (`String value)) -> Ok (Some value)
   | Ok (Some _) -> Error ("field must be a string: " ^ name)
+  | Error error -> Error error
+
+let optional_nullable_string_field name fields =
+  match optional_field name fields with
+  | Ok None -> Ok None
+  | Ok (Some `Null) -> Ok None
+  | Ok (Some (`String value)) -> Ok (Some value)
+  | Ok (Some _) -> Error ("field must be a string or null: " ^ name)
   | Error error -> Error error
 
 let int_field name fields =
@@ -354,6 +369,79 @@ let parse_target_json json =
         | _, _, _, _, _, _, _, Error error -> Error error))
   | _ -> Error "target must be an object"
 
+let parse_range = function
+  | `Assoc fields ->
+    (match
+       check_known fields [
+         "owner_root";
+         "offset";
+         "length";
+         "encoding";
+         "shape_root";
+       ]
+     with
+     | Error error -> Error error
+     | Ok () ->
+       (match
+          string_field "owner_root" fields,
+          int_field "offset" fields,
+          int_field "length" fields,
+          string_field "encoding" fields,
+          optional_nullable_string_field "shape_root" fields
+        with
+        | Ok owner_root,
+          Ok offset,
+          Ok length,
+          Ok encoding,
+          Ok shape_root ->
+          Ok Model.{ owner_root; offset; length; encoding; shape_root }
+        | Error error, _, _, _, _
+        | _, Error error, _, _, _
+        | _, _, Error error, _, _
+        | _, _, _, Error error, _
+        | _, _, _, _, Error error -> Error error))
+  | _ -> Error "range must be an object"
+
+let rec parse_ranges acc = function
+  | [] -> Ok (List.rev acc)
+  | value :: rest ->
+    (match parse_range value with
+     | Error error -> Error error
+     | Ok range -> parse_ranges (range :: acc) rest)
+
+let parse_model_ranges_json json =
+  match json with
+  | `Assoc fields ->
+    (match
+       check_known fields [
+         "model_root";
+         "store_root";
+         "ranges";
+         "model_ranges_root";
+       ]
+     with
+     | Error error -> Error error
+     | Ok () ->
+       (match
+          string_field "model_root" fields,
+          string_field "store_root" fields,
+          list_field "ranges" fields,
+          optional_string_field "model_ranges_root" fields
+        with
+        | Ok model_root, Ok store_root, Ok ranges, Ok declared_root ->
+          (match parse_ranges [] ranges with
+           | Error error -> Error error
+           | Ok ranges ->
+             Ok {
+               model = Model.{ model_root; store_root; ranges };
+               declared_root;
+             })
+        | Error error, _, _, _
+        | _, Error error, _, _
+        | _, _, Error error, _
+        | _, _, _, Error error -> Error error))
+  | _ -> Error "model ranges must be an object"
+
 let parse_request_json json =
   match json with
   | `Assoc fields ->
@@ -462,7 +550,7 @@ let check_declared_root name declared actual =
 
 let usage =
   "usage: inference_admit --program FILE --requirement FILE --target FILE \
-   [--support FILE] [--request FILE]"
+   [--support FILE] [--model-ranges FILE] [--request FILE]"
 
 let () =
   let paths =
@@ -472,6 +560,7 @@ let () =
       target = None;
       support = None;
       request = None;
+      model_ranges = None;
     }
   in
   let set_program value = paths.program <- Some value in
@@ -479,12 +568,16 @@ let () =
   let set_target value = paths.target <- Some value in
   let set_support value = paths.support <- Some value in
   let set_request value = paths.request <- Some value in
+  let set_model_ranges value = paths.model_ranges <- Some value in
   Arg.parse
     [
       "--program", Arg.String set_program, "program envelope or raw bytecode";
       "--requirement", Arg.String set_requirement, "execution requirement JSON";
       "--target", Arg.String set_target, "inference target JSON";
       "--support", Arg.String set_support, "optional node support JSON";
+      "--model-ranges",
+      Arg.String set_model_ranges,
+      "optional immutable model ranges JSON";
       "--request", Arg.String set_request, "optional request fixture JSON";
     ]
     (fun value -> fail ("unexpected argument: " ^ value))
@@ -502,6 +595,11 @@ let () =
     | None -> support_from_requirement requirement
   in
   let target_packet = json_file target_path parse_target_json in
+  let model_packet =
+    Option.map
+      (fun path -> json_file path parse_model_ranges_json)
+      paths.model_ranges
+  in
   let request_packet =
     Option.map
       (fun path -> json_file path parse_request_json)
@@ -531,6 +629,28 @@ let () =
         | Error error, _
         | _, Error error -> fail error
         | Ok (), Ok () ->
+          let model_fields =
+            match model_packet with
+            | None -> []
+            | Some packet ->
+              (match Model.check ~target:target_packet.target packet.model with
+               | Error error -> fail (Model.error_message error)
+               | Ok () ->
+                 let model_ranges_root = Model.root packet.model in
+                 match
+                   check_declared_root
+                     "declared model ranges root"
+                     packet.declared_root
+                     model_ranges_root
+                 with
+                 | Error error -> fail error
+                 | Ok () ->
+                   [
+                     "model_ranges_root", `String model_ranges_root;
+                     "model_range_count",
+                     `Int (List.length packet.model.Model.ranges);
+                   ])
+          in
           let request_field =
             match request_packet with
             | None -> []
@@ -578,6 +698,7 @@ let () =
                    | None -> "derived");
                 "entrypoints", entrypoints_json target_packet.target;
               ]
+              @ model_fields
               @ request_field)
           in
           print_endline (Yojson.Safe.pretty_to_string report)))

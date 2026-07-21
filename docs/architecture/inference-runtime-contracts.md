@@ -40,6 +40,8 @@ infrastructure. Inference adds domain tags, not a second hashing stack.
 ```text
 requirement_root = H("octra:inference:requirement\0" || requirement)
 target_root      = H("octra:inference:target\0"      || target)
+range_root       = H("octra:inference:model-range\0" || range)
+model_ranges_root = H("octra:inference:model-ranges\0" || model_ranges)
 request_root     = H("octra:inference:request\0"     || request)
 session_root     = H("octra:inference:session\0"     || session)
 checkpoint_root  = H("octra:inference:checkpoint\0"  || checkpoint)
@@ -343,6 +345,13 @@ The model release contains a content-rooted manifest. An immutable range read
 binds owner root, offset, length, encoding, and shape to the authenticated store
 root. Publisher signatures or release policy may establish provenance, but
 range authenticity does not depend on a trusted filesystem path.
+
+The first local range descriptor binds `model_root`, `store_root`, and a sorted
+set of immutable ranges. Each range contains `owner_root`, `offset`, `length`,
+`encoding`, and optional `shape_root`. Admission checks roots, names, positive
+lengths, checked byte bounds, duplicate ranges, and equality with the admitted
+target's model and store roots. It does not perform storage I/O, prepare native
+views, or assert publisher provenance.
 
 Programs may read authenticated immutable ranges and allocate bounded
 session-local scratch. Scratch is not authenticated model state. It becomes

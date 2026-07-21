@@ -38,6 +38,7 @@ PATH=/home/exedev/.cargo/bin:$PATH opam exec -- \
     --program program.ocpg \
     --requirement requirement.json \
     --target target.json \
+    --model-ranges model-ranges.json \
     --request request.json
 ```
 
@@ -52,19 +53,23 @@ the existing bytecode certificate path is exercised.
 `--support` is optional for local bring-up. If omitted, the harness derives
 exact support from the supplied requirement. That is acceptable for packet
 alignment, but it is not node capability advertisement.
+`--model-ranges` is optional for smoke packets and should be present for the
+Bonsai demo packet.
 
 ## Required Output Packet
 
-`octra-inference` should emit four files:
+`octra-inference` should emit five files for the Bonsai demo:
 
 - `program.ocpg`, a LiteNode program envelope;
 - `requirement.json`;
-- `target.json`; and
+- `target.json`;
+- `model-ranges.json`; and
 - `request.json`.
 
-Smoke tests may use raw bytecode to validate packet shape. The Bonsai demo
-packet must use an OCPG program envelope so LiteNode checks the existing
-program certificate and type-flow path.
+Smoke tests may still emit only the first four files and may use raw bytecode
+to validate packet shape. The Bonsai demo packet must include
+`model-ranges.json` and must use an OCPG program envelope so LiteNode checks
+the existing program certificate and type-flow path.
 
 The requirement object:
 
@@ -125,6 +130,29 @@ LiteNode checks that the request targets the admitted target, the entrypoint is
 declared by the target, request limits fit inside the execution requirement,
 and an optional `request_root` matches the computed root.
 
+The model ranges object:
+
+```json
+{
+  "model_root": "<target model_root>",
+  "store_root": "<target store_root>",
+  "ranges": [
+    {
+      "owner_root": "<64 lowercase hex>",
+      "offset": 0,
+      "length": 4096,
+      "encoding": "octets",
+      "shape_root": null
+    }
+  ],
+  "model_ranges_root": "<optional expected root>"
+}
+```
+
+LiteNode checks only descriptor identity and byte bounds here. It does not
+trust a filesystem path, load the model, prepare native views, or prove model
+correctness from this descriptor.
+
 ## Acceptance
 
 The harness must return:
@@ -135,6 +163,7 @@ The harness must return:
   "program_root": "...",
   "requirement_root": "...",
   "target_root": "...",
+  "model_ranges_root": "...",
   "request_root": "..."
 }
 ```
@@ -163,9 +192,9 @@ octra-inference emit-vm-packet <packed-model> \
   --out /home/exedev/evidence/<run>/vm-packet
 ```
 
-The command should produce the four files above and then invoke the LiteNode
-admission harness as a readiness gate. Once that passes, the Bonsai runtime
-proof flow can consume the same packet before local execution.
+The command should produce the five demo files above and then invoke the
+LiteNode admission harness as a readiness gate. Once that passes, the Bonsai
+runtime proof flow can consume the same packet before local execution.
 
 ## Current Interop Check
 

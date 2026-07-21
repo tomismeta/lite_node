@@ -36,6 +36,7 @@ network admission, or publisher endorsement.
 | Requirement admission | Exact root and limit matching | `octra-inference` emits matching roots |
 | Target admission | Root binding module added | Wire target descriptor into a harness |
 | Request admission | Target and limit checks added | Feed runtime proof from admitted roots |
+| Immutable ranges | Descriptor admission added | Back with authenticated range reader |
 | Ontology guard | Runtime source scan added | No model-family names enter VM code |
 | Tensor substrate | Not started | Add only generic accepted primitives |
 | Sessions | Not started | Add local open/advance/finalize runner |
@@ -51,7 +52,8 @@ network admission, or publisher endorsement.
 | Execution requirement | `octra-inference` | Exact support check and root binding |
 | Inference target | `octra-inference` | Program, requirement, data, and ABI roots |
 | Request | `octra-inference` | Prompt tokens, generation policy, and seed root |
-| Model store locator | `octra-inference` | Authenticated immutable range access |
+| Immutable range descriptor | `octra-inference` | Model and store root range admission |
+| Model store locator | `octra-inference` | Later authenticated range access |
 | Canary evidence | `octra-inference` | Qualification input, not VM admission proof |
 | Local receipt | LiteNode | Output root and semantic execution evidence |
 | Diagnostics | LiteNode | Timing, residency, cache, and binary roots |
@@ -87,6 +89,7 @@ dune exec tools/inference_admit.exe -- \
   --program program.ocpg \
   --requirement requirement.json \
   --target target.json \
+  --model-ranges model-ranges.json \
   --request request.json
 ```
 
@@ -99,6 +102,10 @@ the program envelope path so the existing bytecode certificate is checked.
 `--support` may point at explicit node support JSON. If omitted, the harness
 derives exact support from the supplied requirement, which is useful for local
 packet bring-up but is not a substitute for node capability advertisement.
+`--model-ranges` is optional during smoke testing. For the Bonsai demo it
+should be present and should bind the target's `model_root` and `store_root`
+to concrete immutable owner ranges before any runtime execution proof is
+claimed.
 
 The requirement JSON contains:
 
@@ -139,6 +146,19 @@ The harness verifies that `target_root` matches the admitted target, the
 entrypoint exists in the target, and request limits fit inside the execution
 requirement.
 
+When present, the model ranges JSON contains:
+
+- `model_root`;
+- `store_root`;
+- `ranges`, as `owner_root`, `offset`, `length`, `encoding`, and optional
+  `shape_root` objects; and
+- optional `model_ranges_root`, which is checked when present.
+
+The harness verifies that model and store roots match the admitted target, each
+range has a valid owner root and encoding, byte bounds are checked, and
+duplicate ranges are rejected. This is descriptor admission only; storage I/O,
+publisher provenance, and prepared views are later runtime work.
+
 ## Demo Gate
 
 Run the demo only when all of these are true:
@@ -149,6 +169,7 @@ Run the demo only when all of these are true:
 - `octra-inference` can reproduce the candidate packet from Git-tracked
   sources and rooted model artifacts;
 - the LiteNode harness accepts the requirement and target before execution;
+- immutable model ranges are admitted before execution;
 - every failed admission case leaves no session or output state;
 - the Bonsai canary produces the expected token sequence and internal roots;
 - local evidence records the exact LiteNode binary and source roots; and

@@ -19,5 +19,10 @@
  (libraries octra_vm))
 
 (test
+ (name inference_model_test)
+ (modules inference_model_test)
+ (libraries octra_vm))
+
+(test
  (name runtime_ontology_test)
  (modules runtime_ontology_test))

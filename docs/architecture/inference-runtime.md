@@ -388,7 +388,7 @@ Expected modules are deliberately few:
 | `Opcode_policy` | One authoritative opcode classification |
 | `Inference_target` | Root binding and target admission |
 | `Inference_request` | Request root binding and target compatibility checks |
-| `Inference_model` | Authenticated immutable residency and prepared views |
+| `Inference_model` | Authenticated immutable range descriptors and later views |
 | `Inference_session` | Sequenced state and lifecycle transitions |
 | `Inference_scheduler` | Resource reservation and bounded dispatch |
 | `Inference_receipt` | Stable semantic receipt construction |
@@ -401,6 +401,30 @@ The existing `Admission.of_code`, `Admission.of_program`, and deployment paths
 retain their behavior. Profiled admission is additive and generic. It should
 reuse the existing program certificate and verifier rather than introduce an
 `Admission.Inference` bytecode category or a parallel decoder.
+
+## Workable Fork Done Line
+
+The fork is workable for the first plain inference demo when all of these are
+true:
+
+1. `octra-inference` emits a Git-reproducible packet with an OCPG program
+   envelope, execution requirement, target, request, and immutable range
+   descriptor.
+2. LiteNode admits that packet from a clean branch and rejects mismatched roots,
+   unsupported requirements, over-limit requests, and invalid ranges.
+3. A local session runner can `open`, `advance`, `status`, `finalize`, and
+   `cancel` without mutating committed state on failure.
+4. The Bonsai canary produces the expected token sequence and internal roots
+   through target-owned execution, not caller-owned layer orchestration.
+5. The result includes a semantic receipt, separate diagnostics, exact source
+   and binary roots, and `consensus_accepted=false`.
+6. No model-family identifier appears in LiteNode runtime code or tooling.
+7. PVAC remains either an accepted real backend or the explicit unavailable
+   backend that fails closed for every private-operation entrypoint.
+
+That is the demo-done line. It is not the devnet-done or encrypted-done line.
+Remote capability advertisement, cross-node receipts, consensus activation,
+and encrypted inference remain later phases.
 
 ## Roadmap
 
@@ -448,9 +472,9 @@ conformance boundaries.
    changing current decisions.
 3. Add profiled program admission by composing the existing verifier,
    certificate, effect scan, and type-flow checks.
-4. Add target and request root binding against an admitted program and
-   execution requirement. Authenticated data and session execution remain
-   Phase 6 work.
+4. Add target, request, and immutable range-descriptor root binding against an
+   admitted program and execution requirement. Authenticated range I/O and
+   session execution remain Phase 6 work.
 5. Add the unsigned checked effort representation and schedule roots.
 6. Keep legacy and ordinary program admission behaviorally compatible.
 
