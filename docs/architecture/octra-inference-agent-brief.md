@@ -105,8 +105,25 @@ The target object:
 }
 ```
 
-The request object can remain `octra-inference` owned. The LiteNode harness
-only canonicalizes it and reports `request_root`.
+The request object remains `octra-inference` owned, but the LiteNode harness
+now admits the following boundary fields:
+
+```json
+{
+  "schema": 1,
+  "target_root": "<computed target root>",
+  "entrypoint": "advance",
+  "input_root": "<64 lowercase hex>",
+  "request_nonce": "<64 lowercase hex>",
+  "max_output_bytes": 0,
+  "max_advance_effort": 0,
+  "request_root": "<optional expected root>"
+}
+```
+
+LiteNode checks that the request targets the admitted target, the entrypoint is
+declared by the target, request limits fit inside the execution requirement,
+and an optional `request_root` matches the computed root.
 
 ## Acceptance
 

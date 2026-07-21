@@ -387,6 +387,7 @@ Expected modules are deliberately few:
 | `Admission` | Existing verification plus optional profiled-program admission |
 | `Opcode_policy` | One authoritative opcode classification |
 | `Inference_target` | Root binding and target admission |
+| `Inference_request` | Request root binding and target compatibility checks |
 | `Inference_model` | Authenticated immutable residency and prepared views |
 | `Inference_session` | Sequenced state and lifecycle transitions |
 | `Inference_scheduler` | Resource reservation and bounded dispatch |
@@ -447,8 +448,9 @@ conformance boundaries.
    changing current decisions.
 3. Add profiled program admission by composing the existing verifier,
    certificate, effect scan, and type-flow checks.
-4. Add target root binding against an admitted program and execution
-   requirement. Request admission and authenticated data remain Phase 6 work.
+4. Add target and request root binding against an admitted program and
+   execution requirement. Authenticated data and session execution remain
+   Phase 6 work.
 5. Add the unsigned checked effort representation and schedule roots.
 6. Keep legacy and ordinary program admission behaviorally compatible.
 

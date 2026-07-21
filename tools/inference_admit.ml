@@ -18,6 +18,7 @@ module Bytecode = Octra_vm.Bytecode
 module Program_envelope = Octra_vm.Program_envelope
 module Program_type_flow = Octra_vm.Program_type_flow
 module Req = Octra_vm.Execution_requirement
+module Request = Octra_vm.Inference_request
 module Target = Octra_vm.Inference_target
 
 type paths = {
@@ -35,6 +36,11 @@ type target_packet = {
 
 type requirement_packet = {
   requirement : Req.t;
+  declared_root : string option;
+}
+
+type request_packet = {
+  request : Request.t;
   declared_root : string option;
 }
 
@@ -348,6 +354,63 @@ let parse_target_json json =
         | _, _, _, _, _, _, _, Error error -> Error error))
   | _ -> Error "target must be an object"
 
+let parse_request_json json =
+  match json with
+  | `Assoc fields ->
+    (match
+       check_known fields [
+         "schema";
+         "target_root";
+         "entrypoint";
+         "input_root";
+         "request_nonce";
+         "max_output_bytes";
+         "max_advance_effort";
+         "request_root";
+       ]
+     with
+     | Error error -> Error error
+     | Ok () ->
+       (match
+          int_field "schema" fields,
+          string_field "target_root" fields,
+          string_field "entrypoint" fields,
+          string_field "input_root" fields,
+          string_field "request_nonce" fields,
+          int_field "max_output_bytes" fields,
+          int_field "max_advance_effort" fields,
+          optional_string_field "request_root" fields
+        with
+        | Ok schema,
+          Ok target_root,
+          Ok entrypoint,
+          Ok input_root,
+          Ok request_nonce,
+          Ok max_output_bytes,
+          Ok max_advance_effort,
+          Ok declared_root ->
+          Ok {
+            request = Request.{
+              schema;
+              target_root;
+              entrypoint;
+              input_root;
+              request_nonce;
+              max_output_bytes;
+              max_advance_effort;
+            };
+            declared_root;
+          }
+        | Error error, _, _, _, _, _, _, _
+        | _, Error error, _, _, _, _, _, _
+        | _, _, Error error, _, _, _, _, _
+        | _, _, _, Error error, _, _, _, _
+        | _, _, _, _, Error error, _, _, _
+        | _, _, _, _, _, Error error, _, _
+        | _, _, _, _, _, _, Error error, _
+        | _, _, _, _, _, _, _, Error error -> Error error))
+  | _ -> Error "request must be an object"
+
 let json_file path parse =
   try
     match parse (Yojson.Safe.from_file path) with
@@ -379,28 +442,6 @@ let admit_program ~support ~requirement raw =
       ~support
       ~requirement
       (Admission.code admitted)
-
-let rec canonical = function
-  | `Assoc fields ->
-    let fields =
-      fields
-      |> List.map (fun (key, value) -> key, canonical value)
-      |> List.sort (fun (left, _) (right, _) -> String.compare left right)
-    in
-    `Assoc fields
-  | `List values -> `List (List.map canonical values)
-  | value -> value
-
-let request_root path =
-  try
-    let json = Yojson.Safe.from_file path |> canonical in
-    Some Digestif.SHA256.(
-      digest_string
-        ("octra:inference:request\000" ^ Yojson.Safe.to_string json)
-      |> to_hex)
-  with
-  | Yojson.Json_error error -> fail (path ^ ": " ^ error)
-  | Sys_error error -> fail error
 
 let list_json values =
   `List (List.map (fun value -> `String value) values)
@@ -461,6 +502,11 @@ let () =
     | None -> support_from_requirement requirement
   in
   let target_packet = json_file target_path parse_target_json in
+  let request_packet =
+    Option.map
+      (fun path -> json_file path parse_request_json)
+      paths.request
+  in
   let raw_program =
     try read_file program_path with Sys_error error -> fail error
   in
@@ -485,11 +531,32 @@ let () =
         | Error error, _
         | _, Error error -> fail error
         | Ok (), Ok () ->
-          let request_root = Option.bind paths.request request_root in
           let request_field =
-            match request_root with
+            match request_packet with
             | None -> []
-            | Some root -> ["request_root", `String root]
+            | Some packet ->
+              (match
+                 Request.check
+                   ~target:target_packet.target
+                   ~requirement
+                   packet.request
+               with
+               | Error error -> fail (Request.error_message error)
+               | Ok () ->
+                 let request_root = Request.root packet.request in
+                 match
+                   check_declared_root
+                     "declared request root"
+                     packet.declared_root
+                     request_root
+                 with
+                 | Error error -> fail error
+                 | Ok () ->
+                   [
+                     "request_root", `String request_root;
+                     "request_entrypoint",
+                     `String packet.request.Request.entrypoint;
+                   ])
           in
           let report =
             `Assoc (

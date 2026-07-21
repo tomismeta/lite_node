@@ -35,6 +35,7 @@ network admission, or publisher endorsement.
 | Opcode policy | Centralized classification | New opcodes enter through one policy |
 | Requirement admission | Exact root and limit matching | `octra-inference` emits matching roots |
 | Target admission | Root binding module added | Wire target descriptor into a harness |
+| Request admission | Target and limit checks added | Feed runtime proof from admitted roots |
 | Ontology guard | Runtime source scan added | No model-family names enter VM code |
 | Tensor substrate | Not started | Add only generic accepted primitives |
 | Sessions | Not started | Add local open/advance/finalize runner |
@@ -122,6 +123,21 @@ The target JSON contains:
 Successful output is a JSON report containing accepted program, requirement,
 target, optional request roots, admitted instruction count, effects, support
 mode, and entrypoints.
+
+When present, the request JSON contains:
+
+- `schema`, currently `1`;
+- `target_root`;
+- `entrypoint`;
+- `input_root`;
+- `request_nonce`;
+- `max_output_bytes`;
+- `max_advance_effort`; and
+- optional `request_root`, which is checked when present.
+
+The harness verifies that `target_root` matches the admitted target, the
+entrypoint exists in the target, and request limits fit inside the execution
+requirement.
 
 ## Demo Gate
 

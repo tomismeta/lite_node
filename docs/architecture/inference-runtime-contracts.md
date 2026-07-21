@@ -115,6 +115,14 @@ A request binds:
 - caller authority where required; and
 - a caller nonce.
 
+The first local admission packet uses the narrower boundary fields `schema`,
+`target_root`, `entrypoint`, `input_root`, `request_nonce`,
+`max_output_bytes`, and `max_advance_effort`. Admission checks target-root
+equality, declared entrypoint presence, and request limits against the
+execution requirement. Generation policy, stop policy, caller authority, and
+sampling roots remain target/request-owned extensions before network
+activation.
+
 Raw prompt bytes, tokenization rules, and chat templates remain outside
 LiteNode unless a separately admitted target explicitly implements them. The
 first runtime accepts canonical token input generated and rooted by
