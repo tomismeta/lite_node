@@ -16,6 +16,8 @@ Baseline: `octra-labs/lite_node` `main` at
   is the non-normative working inventory of model-driven compute needs.
 - [`vm-semantic-inventory.md`](vm-semantic-inventory.md) is the observational
   audit of the current VM surface and has no authority over runtime contracts.
+- [`bonsai-demo-readiness.md`](bonsai-demo-readiness.md) records the current
+  local demo path and is not a protocol authority.
 
 On conflict, contracts override this document for roots, identity, effort,
 sessions, cancellation, and receipts. The capability inventory cannot override
@@ -445,8 +447,10 @@ conformance boundaries.
    changing current decisions.
 3. Add profiled program admission by composing the existing verifier,
    certificate, effect scan, and type-flow checks.
-4. Add the unsigned checked effort representation and schedule roots.
-5. Keep legacy and ordinary program admission behaviorally compatible.
+4. Add target root binding against an admitted program and execution
+   requirement. Request admission and authenticated data remain Phase 6 work.
+5. Add the unsigned checked effort representation and schedule roots.
+6. Keep legacy and ordinary program admission behaviorally compatible.
 
 No tensor opcode is added in this phase.
 
