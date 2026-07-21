@@ -135,17 +135,36 @@ policy and deterministic seed; the target consumes those values through generic
 selection operations. LiteNode does not receive logits and apply an informal
 runtime or RPC sampling policy.
 
+## Output ABI
+
+The first local execution path uses one fixed, model-neutral output convention:
+
+- `r0` is the non-negative base memory address;
+- `r1` is the non-negative number of memory cells; and
+- the canonical output is the ordered value encoding of that span.
+
+The span must be initialized, its encoded size must fit `max_output_bytes`, and
+opaque values fail closed. Scratch memory and register state remain candidate
+state and do not affect `output_root`. The convention is bound into the output
+root with the target's `session_abi_root`; a future ABI descriptor may replace
+the fixed convention without changing the surrounding session protocol.
+
+This is an execution boundary, not a model-format contract. Token sequences,
+logits, tensor layouts, and sampling behavior remain target-owned.
+
 ## Canonical Session
 
 A canonical session contains only logical progress:
 
 - target root;
 - request root;
+- model-ranges root;
 - sequence counter;
 - phase and logical position;
 - append-only output-prefix root;
 - cumulative committed effort;
 - optional committed target-state root;
+- candidate-state root for the current transition;
 - terminal status; and
 - optional final output root.
 

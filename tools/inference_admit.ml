@@ -18,6 +18,7 @@ module Bytecode = Octra_vm.Bytecode
 module Program_envelope = Octra_vm.Program_envelope
 module Program_type_flow = Octra_vm.Program_type_flow
 module Model = Octra_vm.Inference_model
+module Plan = Octra_vm.Inference_plan
 module Receipt = Octra_vm.Inference_receipt
 module Req = Octra_vm.Execution_requirement
 module Request = Octra_vm.Inference_request
@@ -31,6 +32,7 @@ type paths = {
   mutable target : string option;
   mutable support : string option;
   mutable request : string option;
+  mutable input : string option;
   mutable model_ranges : string option;
   mutable range_sources : (string * string) list;
   mutable run_session : bool;
@@ -524,27 +526,16 @@ let json_file path parse =
   | Sys_error error -> fail error
 
 let admit_program ~support ~requirement raw =
-  let decoded =
-    if Program_envelope.is_program raw then
-      Admission.decode_program_source raw
-    else
-      match Bytecode.decode raw with
-      | Error error -> Error (Admission.Decode_error error)
-      | Ok code -> Admission.of_program code
-  in
-  match decoded with
-  | Error error -> Error error
-  | Ok admitted ->
-    let facts =
-      match Admission.profile admitted with
-      | Admission.Program facts -> facts
-      | Admission.Legacy -> Program_type_flow.empty_facts
-    in
-    Admission.of_program_with_requirement
-      ~facts
-      ~support
-      ~requirement
-      (Admission.code admitted)
+  if Program_envelope.is_program raw then
+    Admission.decode_inference_program_source ~support ~requirement raw
+  else
+    match Bytecode.decode raw with
+    | Error error -> Error (Admission.Decode_error error)
+    | Ok code ->
+      Admission.of_inference_program_with_requirement
+        ~support
+        ~requirement
+        code
 
 let list_json values =
   `List (List.map (fun value -> `String value) values)
@@ -572,7 +563,7 @@ let read_range_source sources owner_root =
 let usage =
   "usage: inference_admit --program FILE --requirement FILE --target FILE \
    [--support FILE] [--model-ranges FILE] [--range-source ROOT=FILE] \
-   [--request FILE] [--run-session]"
+   [--request FILE] [--input FILE] [--run-session]"
 
 let () =
   let paths =
@@ -582,6 +573,7 @@ let () =
       target = None;
       support = None;
       request = None;
+      input = None;
       model_ranges = None;
       range_sources = [];
       run_session = false;
@@ -592,6 +584,7 @@ let () =
   let set_target value = paths.target <- Some value in
   let set_support value = paths.support <- Some value in
   let set_request value = paths.request <- Some value in
+  let set_input value = paths.input <- Some value in
   let set_model_ranges value = paths.model_ranges <- Some value in
   let add_range_source value =
     let owner_root, path =
@@ -613,6 +606,7 @@ let () =
       Arg.String add_range_source,
       "authenticated local owner bytes, as owner-root=file";
       "--request", Arg.String set_request, "optional request fixture JSON";
+      "--input", Arg.String set_input, "authenticated request input bytes";
       "--run-session",
       Arg.Unit set_run_session,
       "run a local open/advance/finalize session after admission";
@@ -641,6 +635,11 @@ let () =
     Option.map
       (fun path -> json_file path parse_request_json)
       paths.request
+  in
+  let input =
+    if paths.run_session then
+      Some (read_file (require_path "--input" paths.input))
+    else None
   in
   let raw_program =
     try read_file program_path with Sys_error error -> fail error
@@ -738,48 +737,57 @@ let () =
                    with
                    | Error error -> fail (Store.error_message error)
                    | Ok pins ->
-                     (match
-                        Session.open_session
-                          ~target:target_packet.target
-                          ~request:request_packet.request
-                          ~pins
-                      with
-                      | Error error -> fail (Session.error_message error)
-                      | Ok opened ->
+                     (match input with
+                      | None -> fail "--run-session requires --input"
+                      | Some input ->
                         (match
-                           Session.advance
+                           Plan.create
                              ~admitted
                              ~target:target_packet.target
                              ~request:request_packet.request
-                             ~expected_sequence:0
-                             opened
+                             ~model:model_packet.model
+                             ~pins
+                             ~input
                          with
-                         | Error error -> fail (Session.error_message error)
-                         | Ok (advanced, advance_receipt) ->
-                           (match
-                              Session.finalize
-                                ~expected_sequence:advanced.Session.sequence
-                                advanced
-                            with
+                         | Error error -> fail (Plan.error_message error)
+                         | Ok plan ->
+                           (match Session.open_session ~plan with
                             | Error error -> fail (Session.error_message error)
-                            | Ok (finalized, final_receipt) ->
-                              [
-                                "opened_session_root",
-                                `String (Session.root opened);
-                                "advanced_session_root",
-                                `String (Session.root advanced);
-                                "final_session_root",
-                                `String (Session.root finalized);
-                                "advance_receipt_root",
-                                `String (Receipt.root advance_receipt);
-                                "final_receipt_root",
-                                `String (Receipt.root final_receipt);
-                                "output_root",
-                                `String finalized.Session.output_root;
-                                "committed_effort",
-                                `Int finalized.Session.committed_effort;
-                                "consensus_accepted", `Bool false;
-                              ]))))
+                            | Ok opened ->
+                              (match
+                                 Session.advance
+                                   ~plan
+                                   ~expected_sequence:0
+                                   opened
+                               with
+                               | Error error -> fail (Session.error_message error)
+                               | Ok (advanced, advance_receipt) ->
+                                 (match
+                                    Session.finalize
+                                      ~expected_sequence:(Session.sequence advanced)
+                                      advanced
+                                  with
+                                  | Error error -> fail (Session.error_message error)
+                                  | Ok (finalized, final_receipt) ->
+                                    [
+                                      "opened_session_root",
+                                      `String (Session.root opened);
+                                      "advanced_session_root",
+                                      `String (Session.root advanced);
+                                      "final_session_root",
+                                      `String (Session.root finalized);
+                                      "advance_receipt_root",
+                                      `String (Receipt.root advance_receipt);
+                                      "final_receipt_root",
+                                      `String (Receipt.root final_receipt);
+                                      "output_root",
+                                      `String (Session.output_root finalized);
+                                      "candidate_root",
+                                      `String (Session.candidate_root finalized);
+                                      "committed_effort",
+                                      `Int (Session.committed_effort finalized);
+                                      "consensus_accepted", `Bool false;
+                                    ]))))))
               | _ ->
                 fail "--run-session requires --model-ranges and --request"
           in

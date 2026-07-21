@@ -61,8 +61,8 @@ let check_pin () =
   match Store.pin ~limits:(limits 32) ~read model with
   | Error error -> failwith (Store.error_message error)
   | Ok pins ->
-    check "one range pinned" (List.length pins.ranges = 1);
-    match pins.ranges with
+    check "one range pinned" (List.length (Store.ranges pins) = 1);
+    match Store.ranges pins with
     | [range] -> check "range bytes" (String.equal range.bytes "authenticated")
     | _ -> failwith "unexpected ranges"
 
@@ -91,9 +91,22 @@ let check_limit () =
   | Error (Store.Model_limit_exceeded (_, _)) -> ()
   | _ -> failwith "expected model limit exceeded"
 
+let check_limit_preflight () =
+  let reads = ref 0 in
+  let base_read = read in
+  let read root =
+    incr reads;
+    base_read root
+  in
+  match Store.pin ~limits:(limits 4) ~read model with
+  | Error (Store.Model_limit_exceeded (_, _)) ->
+    check "oversized model is rejected before reads" (!reads = 0)
+  | _ -> failwith "expected preflight model limit exceeded"
+
 let () =
   check_pin ();
   check_missing_owner ();
   check_owner_mismatch ();
   check_bounds ();
-  check_limit ()
+  check_limit ();
+  check_limit_preflight ()

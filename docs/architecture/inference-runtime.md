@@ -342,9 +342,10 @@ The exact floating-point oracle, compiler and toolchain lock, golden vectors,
 and cross-build matrix live in Git and are identified by content roots. They
 do not require a manually named profile generation.
 
-Host floating-point tensor operations remain consensus-disabled until that
-profile passes cross-build and cross-machine replay. First-class local or
-attested inference does not require premature consensus activation.
+Host floating-point tensor operations remain admission-disabled until that
+profile passes cross-build and cross-machine replay. A capability label alone
+does not authorize host floating point. First-class local or attested inference
+does not require premature consensus activation.
 
 ### Sampling and selection
 
@@ -389,6 +390,7 @@ Expected modules are deliberately few:
 | `Inference_target` | Root binding and target admission |
 | `Inference_request` | Request root binding and target compatibility checks |
 | `Inference_model` | Authenticated immutable range descriptors and later views |
+| `Inference_plan` | One validated binding of program, target, request, model, pins, and input |
 | `Inference_session` | Sequenced state and lifecycle transitions |
 | `Inference_scheduler` | Resource reservation and bounded dispatch |
 | `Inference_receipt` | Stable semantic receipt construction |
@@ -427,11 +429,13 @@ Remote capability advertisement, cross-node receipts, consensus activation,
 and encrypted inference remain later phases.
 
 Current implementation status: the local fork can admit a five-file packet,
-authenticate and pin immutable owner bytes, execute one target-owned
-`advance`, finalize, and emit semantic session and receipt roots. This is the
-generic lifecycle substrate. The Bonsai canary is not complete until the
-accepted tensor primitives execute the target-owned numerical path inside
-LiteNode.
+authenticate and pin immutable owner bytes, bind them with a request and
+authenticated input into one execution plan, execute one target-owned
+`advance`, finalize, and emit output and candidate roots. The plan-bound runner
+is still local candidate evidence: it does not provide resident model state,
+node scheduling, or qualified Bonsai numerical semantics. The Bonsai canary is
+not complete until accepted tensor primitives execute the target-owned
+numerical path inside LiteNode.
 
 ## Roadmap
 

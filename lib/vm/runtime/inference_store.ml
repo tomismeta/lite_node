@@ -78,20 +78,47 @@ let rec pin_ranges ~read acc total = function
          let next_total = total + pinned.length in
          pin_ranges ~read (pinned :: acc) next_total rest)
 
-let pin ~limits ~read model =
-  match pin_ranges ~read [] 0 model.Inference_model.ranges with
-  | Error error -> Error error
-  | Ok (ranges, total) ->
-    if total > limits.Execution_requirement.max_model_bytes then
-      Error (Model_limit_exceeded
-               (total, limits.Execution_requirement.max_model_bytes))
+let rec preflight_total limit total (ranges : Inference_model.range list) =
+  match ranges with
+  | [] -> Ok total
+  | (range : Inference_model.range) :: rest ->
+    if range.offset < 0 || range.length < 0 then
+      Error (Range_out_of_bounds
+               (range.owner_root, range.offset, range.length, 0))
+    else if range.offset > max_int - range.length then
+      Error (Range_overflow (range.offset, range.length))
+    else if total > max_int - range.length then
+      Error (Range_overflow (total, range.length))
     else
-      Ok {
-        model_root = model.model_root;
-        store_root = model.store_root;
-        model_ranges_root = Inference_model.root model;
-        ranges;
-      }
+      let next_total = total + range.length in
+      if next_total > limit then
+        Error (Model_limit_exceeded (next_total, limit))
+      else
+        preflight_total limit next_total rest
+
+let pin ~limits ~read model =
+  match
+    preflight_total
+      limits.Execution_requirement.max_model_bytes
+      0
+      model.Inference_model.ranges
+  with
+  | Error error -> Error error
+  | Ok _ ->
+    (match pin_ranges ~read [] 0 model.Inference_model.ranges with
+     | Error error -> Error error
+     | Ok (ranges, _) ->
+       Ok {
+         model_root = model.model_root;
+         store_root = model.store_root;
+         model_ranges_root = Inference_model.root model;
+         ranges;
+       })
+
+let model_root pins = pins.model_root
+let store_root pins = pins.store_root
+let model_ranges_root pins = pins.model_ranges_root
+let ranges pins = pins.ranges
 
 let error_message = function
   | Missing_owner root -> Printf.sprintf "missing range owner: %s" root

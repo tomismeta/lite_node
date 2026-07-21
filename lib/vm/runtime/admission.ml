@@ -87,9 +87,20 @@ let of_program_with_requirement
              ("execution requirement: "
               ^ Execution_requirement.error_message error))
   | Ok () ->
-    (match of_program ~facts code with
+     (match of_program ~facts code with
      | Error error -> Error error
      | Ok admitted -> Ok { admitted with requirement = Some requirement })
+
+let of_inference_program_with_requirement
+    ?(facts = Program_type_flow.empty_facts)
+    ~support
+    ~requirement
+    code =
+  (* Inference uses the same consensus-safe admission policy as programs.
+     A numerical capability is not sufficient to make host floating-point
+     operations deterministic; a numerical profile must bind those semantics
+     to execution before this path is widened. *)
+  of_program_with_requirement ~facts ~support ~requirement code
 
 let cert_field name fields =
   match List.filter (fun (key, _) -> String.equal key name) fields with
@@ -371,6 +382,29 @@ let decode_program_source raw =
       (match verify_program_cert ~attested:false ~trusted:[] envelope.code code envelope.cert with
        | Error error -> Error (Verify_error error)
        | Ok facts -> of_program ~facts code)
+
+let decode_inference_program_source ~support ~requirement raw =
+  match Program_envelope.decode raw with
+  | Error error -> Error (Decode_error (Program_envelope.error_message error))
+  | Ok envelope ->
+    (match Bytecode.decode envelope.code with
+     | Error error -> Error (Decode_error error)
+     | Ok code ->
+       (match
+          verify_program_cert
+            ~attested:false
+            ~trusted:[]
+            envelope.code
+            code
+            envelope.cert
+        with
+        | Error error -> Error (Verify_error error)
+        | Ok facts ->
+          of_inference_program_with_requirement
+            ~facts
+            ~support
+            ~requirement
+            code))
 
 let code admitted =
   Array.copy admitted.admitted_code

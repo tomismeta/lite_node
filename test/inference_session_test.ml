@@ -15,6 +15,7 @@ Include at startup:
 
 module Admission = Octra_vm.Admission
 module Model = Octra_vm.Inference_model
+module Plan = Octra_vm.Inference_plan
 module Receipt = Octra_vm.Inference_receipt
 module Req = Octra_vm.Execution_requirement
 module Request = Octra_vm.Inference_request
@@ -38,7 +39,7 @@ let capability name capability_root =
 let limits =
   Req.{
     max_model_bytes = 64;
-    max_view_bytes = 0;
+    max_view_bytes = 64;
     max_session_bytes = 64;
     max_scratch_bytes = 0;
     max_output_bytes = 32;
@@ -88,15 +89,13 @@ let model target =
   Model.{
     model_root = target.Target.model_root;
     store_root = target.Target.store_root;
-    ranges = [
-      {
-        owner_root;
-        offset = 0;
-        length = String.length owner;
-        encoding = "octets";
-        shape_root = None;
-      };
-    ];
+    ranges = [{
+      owner_root;
+      offset = 0;
+      length = String.length owner;
+      encoding = "octets";
+      shape_root = None;
+    }];
   }
 
 let request target =
@@ -104,7 +103,7 @@ let request target =
     schema = 1;
     target_root = Target.root target;
     entrypoint = "advance";
-    input_root = hex_root '4';
+    input_root = sha256 "";
     request_nonce = hex_root '5';
     max_output_bytes = 32;
     max_advance_effort = 16;
@@ -115,9 +114,23 @@ let pins model =
   | Ok pins -> pins
   | Error error -> failwith (Store.error_message error)
 
-let open_session target request model =
-  match Session.open_session ~target ~request ~pins:(pins model) with
-  | Ok session -> session
+let plan admitted target request model =
+  match
+    Plan.create
+      ~admitted
+      ~target
+      ~request
+      ~model
+      ~pins:(pins model)
+      ~input:""
+  with
+  | Ok plan -> plan
+  | Error error -> failwith (Plan.error_message error)
+
+let open_session admitted target request model =
+  let plan = plan admitted target request model in
+  match Session.open_session ~plan with
+  | Ok session -> plan, session
   | Error error -> failwith (Session.error_message error)
 
 let check_lifecycle () =
@@ -125,25 +138,22 @@ let check_lifecycle () =
   let target = target admitted in
   let request = request target in
   let model = model target in
-  let session = open_session target request model in
-  check "initial sequence" (session.sequence = 0);
-  match
-    Session.advance
-      ~admitted
-      ~target
-      ~request
-      ~expected_sequence:0
-      session
-  with
+  let plan, session = open_session admitted target request model in
+  check "initial sequence" (Session.sequence session = 0);
+  match Session.advance ~plan ~expected_sequence:0 session with
   | Error error -> failwith (Session.error_message error)
   | Ok (advanced, receipt) ->
-    check "advanced sequence" (advanced.sequence = 1);
-    check "effort committed" (advanced.committed_effort > 0);
+    check "advanced sequence" (Session.sequence advanced = 1);
+    check "effort committed" (Session.committed_effort advanced > 0);
     check "receipt root" (String.length (Receipt.root receipt) = 64);
+    check "candidate root" (String.length (Session.candidate_root advanced) = 64);
+    (match Session.advance ~plan ~expected_sequence:1 advanced with
+     | Error (Session.Invalid_phase _) -> ()
+     | _ -> failwith "expected stateful continuation rejection");
     match Session.finalize ~expected_sequence:1 advanced with
     | Error error -> failwith (Session.error_message error)
     | Ok (finalized, receipt) ->
-      check "finalized sequence" (finalized.sequence = 2);
+      check "finalized sequence" (Session.sequence finalized = 2);
       check "final receipt root" (String.length (Receipt.root receipt) = 64)
 
 let check_sequence_mismatch () =
@@ -151,25 +161,28 @@ let check_sequence_mismatch () =
   let target = target admitted in
   let request = request target in
   let model = model target in
-  let session = open_session target request model in
-  match
-    Session.advance
-      ~admitted
-      ~target
-      ~request
-      ~expected_sequence:1
-      session
-  with
+  let plan, session = open_session admitted target request model in
+  match Session.advance ~plan ~expected_sequence:1 session with
   | Error (Session.Bad_sequence (1, 0)) ->
-    check "session unchanged" (session.sequence = 0)
+    check "session unchanged" (Session.sequence session = 0)
   | _ -> failwith "expected sequence mismatch"
+
+let check_finalize_phase () =
+  let admitted = admitted () in
+  let target = target admitted in
+  let request = request target in
+  let model = model target in
+  let _, session = open_session admitted target request model in
+  match Session.finalize ~expected_sequence:0 session with
+  | Error (Session.Invalid_phase _) -> ()
+  | _ -> failwith "expected finalize phase rejection"
 
 let check_cancel_terminal () =
   let admitted = admitted () in
   let target = target admitted in
   let request = request target in
   let model = model target in
-  let session = open_session target request model in
+  let _, session = open_session admitted target request model in
   match Session.cancel ~expected_sequence:0 session with
   | Error error -> failwith (Session.error_message error)
   | Ok canceled ->
@@ -180,4 +193,5 @@ let check_cancel_terminal () =
 let () =
   check_lifecycle ();
   check_sequence_mismatch ();
+  check_finalize_phase ();
   check_cancel_terminal ()

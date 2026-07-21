@@ -415,6 +415,43 @@ let step facts pc env = function
   | Contract_vm.ELEMWISE_MUL_Q16 (dest, source, count)
   | Contract_vm.RESIDUAL_ADD_Q16 (dest, source, count) ->
     expect_nums pc env [dest; source; count]
+  | Contract_vm.FSTORE (dest, source) ->
+    (match expect_text pc env source with
+     | Error error -> Error error
+     | Ok _ -> write pc env dest String)
+  | Contract_vm.FLOAD (dest, source) ->
+    (match expect_text pc env source with
+     | Error error -> Error error
+     | Ok _ -> write pc env dest String)
+  | Contract_vm.MATMUL_FP (dest, left, right, rows, inner, cols) ->
+    expect_nums pc env [dest; left; right; rows; inner; cols]
+  | Contract_vm.RMSNORM_FP (addr, count, gamma) ->
+    expect_nums pc env [addr; count; gamma]
+  | Contract_vm.SILU_FP (addr, count) ->
+    expect_nums pc env [addr; count]
+  | Contract_vm.ELEMWISE_MUL_FP (dest, source, count)
+  | Contract_vm.RESIDUAL_ADD_FP (dest, source, count) ->
+    expect_nums pc env [dest; source; count]
+  | Contract_vm.ROPE_APPLY_FP (addr, count, position, base) ->
+    expect_nums pc env [addr; count; position; base]
+  | Contract_vm.LOAD_INT8_FP (dest, source, offset, count, scale) ->
+    (match expect_text pc env source with
+     | Error error -> Error error
+     | Ok _ -> expect_nums pc env [dest; offset; count; scale])
+  | Contract_vm.VECDOT_FP (dest, left, right, count) ->
+    (match expect_nums pc env [left; right; count] with
+     | Error error -> Error error
+     | Ok _ -> write pc env dest Int)
+  | Contract_vm.ARGMAX_FP (dest, addr, count) ->
+    (match expect_nums pc env [addr; count] with
+     | Error error -> Error error
+     | Ok _ -> write pc env dest Int)
+  | Contract_vm.ATTENTION_KV_FP
+      (query, key, value, context, total, query_heads, key_heads, head_dim) ->
+    expect_nums pc env
+      [query; key; value; context; total; query_heads; key_heads; head_dim]
+  | Contract_vm.APPEND_VEC_FP (dest, position, source, count) ->
+    expect_nums pc env [dest; position; source; count]
   | Contract_vm.CALLER dest
   | Contract_vm.ORIGIN dest
   | Contract_vm.SELF dest -> write pc env dest Addr

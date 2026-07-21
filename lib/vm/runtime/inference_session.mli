@@ -19,23 +19,18 @@ type phase =
   | Finalized
   | Canceled
 
-type t = {
-  target_root : string;
-  request_root : string;
-  sequence : int;
-  phase : phase;
-  output_root : string;
-  committed_effort : int;
-}
+type t
 
 type error =
   | Bad_sequence of int * int
   | Terminal_session
+  | Invalid_phase of string
   | Target_root_mismatch of string * string
   | Request_root_mismatch of string * string
-  | Pin_root_mismatch of string * string
+  | Model_ranges_root_mismatch of string * string
   | Entrypoint_unsupported of string
   | Entrypoint_missing of int
+  | Execution_error of string
   | Execution_failed
   | Effort_exceeded of int * int
   | Effort_overflow of int * int
@@ -43,15 +38,11 @@ type error =
 val root : t -> string
 
 val open_session :
-  target:Inference_target.t ->
-  request:Inference_request.t ->
-  pins:Inference_store.pin_set ->
+  plan:Inference_plan.t ->
   (t, error) result
 
 val advance :
-  admitted:Admission.t ->
-  target:Inference_target.t ->
-  request:Inference_request.t ->
+  plan:Inference_plan.t ->
   expected_sequence:int ->
   t ->
   (t * Inference_receipt.t, error) result
@@ -62,5 +53,10 @@ val finalize :
   (t * Inference_receipt.t, error) result
 
 val cancel : expected_sequence:int -> t -> (t, error) result
+val sequence : t -> int
+val phase : t -> phase
+val output_root : t -> string
+val candidate_root : t -> string
+val committed_effort : t -> int
 val phase_name : phase -> string
 val error_message : error -> string

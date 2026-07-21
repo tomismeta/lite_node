@@ -34,5 +34,15 @@
  (libraries octra_vm digestif digestif.c))
 
 (test
+ (name inference_execution_test)
+ (modules inference_execution_test)
+ (libraries octra_vm digestif digestif.c base64))
+
+(test
+ (name inference_plan_test)
+ (modules inference_plan_test)
+ (libraries octra_vm digestif digestif.c))
+
+(test
  (name runtime_ontology_test)
  (modules runtime_ontology_test))

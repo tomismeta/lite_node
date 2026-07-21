@@ -21,6 +21,7 @@ type t = {
   prior_sequence : int;
   next_sequence : int;
   output_root : string;
+  candidate_root : string;
   committed_effort : int;
   completion_status : string;
   consensus_accepted : bool;
@@ -35,6 +36,7 @@ let to_json receipt =
     "prior_sequence", `Int receipt.prior_sequence;
     "next_sequence", `Int receipt.next_sequence;
     "output_root", `String receipt.output_root;
+    "candidate_root", `String receipt.candidate_root;
     "committed_effort", `Int receipt.committed_effort;
     "completion_status", `String receipt.completion_status;
     "consensus_accepted", `Bool receipt.consensus_accepted;

@@ -259,6 +259,7 @@ type s = {
   mutable is_view : bool;
   strict_values : bool;
   storage_kinds : (string, storage_kind) Hashtbl.t;
+  strict_blobs : bool;
   decoded_chunk_cache : (int, string) Hashtbl.t;
 }
 
@@ -357,8 +358,8 @@ let is_valid_addr s =
     in check 3
 
 let create_state ?(limit=1_000_000) ?(ctx=default_ctx) ?(depth=0) ?(is_view=false)
-    ?(strict_values=false) ?(storage_kinds=[]) ~caller ~origin ~address ~value
-    ~storage () =
+    ?(strict_values=false) ?(strict_blobs=false) ?(storage_kinds=[])
+    ~caller ~origin ~address ~value ~storage () =
   {
     regs = Array.make 64 (VInt Z.zero);
     memory = { data = Hashtbl.create 1024; size = 0 };
@@ -378,6 +379,7 @@ let create_state ?(limit=1_000_000) ?(ctx=default_ctx) ?(depth=0) ?(is_view=fals
     is_view;
     strict_values;
     storage_kinds = Hashtbl.of_seq (List.to_seq storage_kinds);
+    strict_blobs;
     decoded_chunk_cache = Hashtbl.create 512;
   }
 
@@ -1446,6 +1448,7 @@ let exec_one st op =
      | Some data ->
        if not (add_dyn_effort st (String.length data / 1024)) then revert st
        else (setr st rd_data (VString data); true)
+     | None when st.strict_blobs -> revert st
      | None -> setr st rd_data (VString ""); true)
   | MATMUL (rd_addr, rs_lhs, rs_rhs, rs_m, rs_k, rs_n) ->
     let dst_addr = Z.to_int (to_z (getr st rd_addr)) in

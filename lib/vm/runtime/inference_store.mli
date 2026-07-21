@@ -23,12 +23,7 @@ type pinned_range = {
   bytes : string;
 }
 
-type pin_set = {
-  model_root : string;
-  store_root : string;
-  model_ranges_root : string;
-  ranges : pinned_range list;
-}
+type pin_set
 
 type error =
   | Missing_owner of string
@@ -42,5 +37,10 @@ val pin :
   read:(string -> string option) ->
   Inference_model.t ->
   (pin_set, error) result
+
+val model_root : pin_set -> string
+val store_root : pin_set -> string
+val model_ranges_root : pin_set -> string
+val ranges : pin_set -> pinned_range list
 
 val error_message : error -> string

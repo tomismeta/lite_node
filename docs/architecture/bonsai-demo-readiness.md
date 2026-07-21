@@ -36,11 +36,11 @@ network admission, or publisher endorsement.
 | Requirement admission | Exact root and limit matching | `octra-inference` emits matching roots |
 | Target admission | Root binding module added | Wire target descriptor into a harness |
 | Request admission | Target and limit checks added | Feed runtime proof from admitted roots |
-| Immutable ranges | Local authenticated pinning added | Back with resident reader |
+| Immutable ranges | Local authenticated pinning and plan binding added | Back with resident reader |
 | Ontology guard | Runtime source scan added | No model-family names enter VM code |
 | Tensor substrate | Not started | Add only generic accepted primitives |
-| Sessions | Minimal local runner added | Add node residency and scheduler |
-| Receipts | Local semantic roots added | Add full diagnostics object |
+| Sessions | Plan-bound local candidate runner added | Add node residency and scheduler |
+| Receipts | Output and candidate roots added locally | Add full diagnostics object |
 
 ## Handoff Shape
 
@@ -71,11 +71,13 @@ evidence remain outside LiteNode.
    `execution_descriptor_root`, `store_root`, `session_abi_root`, and
    `entrypoints`.
 3. Add immutable range reads over authenticated model data with a scalar
-   synthetic fixture before using Bonsai data.
+   synthetic fixture before using Bonsai data. **Complete locally:** slices are
+   pinned and addressed by their canonical range roots.
 4. Add bounded tensor ingress and explicit-epsilon normalization as the first
    Phase 3 primitives.
 5. Add the minimum local session runner: open, one advance, status, finalize,
-   and cancel with candidate rollback.
+   and cancel with candidate rollback. **Complete locally:** the runner now
+   consumes one validated execution plan and emits output and candidate roots.
 6. Point the existing Bonsai runtime-proof command at the new VM harness and
    require exact token, hidden, norm, logits, requirement, target, request, and
    output roots.
@@ -109,11 +111,15 @@ to concrete immutable owner ranges before any runtime execution proof is
 claimed.
 `--range-source` supplies local owner bytes for the harness. The harness hashes
 those bytes, checks them against `owner_root`, slices the admitted immutable
-range, and pins it for the optional local session run. The path itself is never
-part of model identity.
+range, and pins it for the optional local session run. Target-owned programs
+address pinned slices by their canonical `range_root`; the owner root remains
+the provenance check for the source bytes. The path itself is never part of
+model identity.
 `--run-session` turns the same tool into a local proof harness: after
 admission it opens a session, executes one target-owned `advance`, finalizes,
 and reports session and receipt roots with `consensus_accepted=false`.
+`--run-session` also requires `--input FILE`; the input bytes must hash to the
+request's `input_root` and fit the requirement's `max_view_bytes` limit.
 
 The requirement JSON contains:
 
@@ -176,11 +182,20 @@ When `--run-session` is present, successful output also includes:
 - `advance_receipt_root`;
 - `final_receipt_root`;
 - `output_root`;
+- `candidate_root`;
 - `committed_effort`; and
 - `consensus_accepted`, always `false` for this local proof path.
 
-The current local session fixture proves the lifecycle and receipt boundary
-with a tiny target-owned program. It does not claim Bonsai numerical execution.
+The current local session fixture proves plan validation, authenticated input
+and range binding, candidate isolation, lifecycle transitions, and output and
+candidate roots with a tiny target-owned program. It does not claim Bonsai
+numerical execution or resident model state.
+
+The local output contract is deliberately small: the target places an output
+base in `r0`, an output cell count in `r1`, and writes the canonical span before
+returning. The harness rejects uninitialized cells and output encodings larger
+than `max_output_bytes`. Host floating-point operations remain disabled until a
+machine-enforced numerical profile is implemented and qualified.
 
 ## Demo Gate
 
