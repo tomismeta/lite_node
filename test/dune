@@ -1,0 +1,3 @@
+(test
+ (name vm_opcode_policy_test)
+ (libraries octra_vm))
