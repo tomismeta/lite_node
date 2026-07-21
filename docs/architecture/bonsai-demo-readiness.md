@@ -7,6 +7,8 @@ to a credible Bonsai 27B demo. It is intentionally a demo-readiness plan, not a
 new architecture authority. The authoritative runtime contracts remain
 [`inference-runtime.md`](inference-runtime.md) and
 [`inference-runtime-contracts.md`](inference-runtime-contracts.md).
+The `octra-inference` interop ask is tracked in
+[`octra-inference-agent-brief.md`](octra-inference-agent-brief.md).
 
 ## Demo Definition
 
