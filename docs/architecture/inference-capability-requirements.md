@@ -242,8 +242,18 @@ not a Qwen or Bonsai layer. Its grouping, gating, normalization, update order,
 state ownership, in-place behavior, and rollback are completely specified.
 
 The final opcode name should describe the delta-rule transition rather than a
-network product. A synthetic recurrent fixture must exercise it before its
-semantic root is stabilized.
+network product. If the order-4 evidence validates the expected recurrence, the
+preferred opcode name is `GATED_DELTA_RULE_FP`, not `GATED_DELTA_NET_FP`. A
+synthetic recurrent fixture must exercise it before its semantic root is
+stabilized.
+
+Order-4 frontier status: `octra-inference` selected `gated_delta_net_fp` as the
+next Bonsai frontier after order `3`, but only a sentinel packet exists today.
+Implementation waits on a scalar contract with exact q/k/v/decay/update-rate
+shapes, state layout, update order, output and next-state roots, and
+malformed-input vectors. Q/K normalization, head replication, projections, and
+model gate preparation stay outside the primitive unless evidence proves they
+are intrinsic to the reusable recurrence.
 
 ## Position And Attention
 

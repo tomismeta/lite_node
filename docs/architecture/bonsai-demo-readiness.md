@@ -38,7 +38,7 @@ network admission, or publisher endorsement.
 | Request admission | Target and limit checks added | Feed runtime proof from admitted roots |
 | Immutable ranges | Local authenticated pinning and plan binding added | Back with resident reader |
 | Ontology guard | Runtime source scan added | No model-family names enter VM code |
-| Tensor substrate | Direct Q1-G128 and order-3 frontier canaries accepted | Derive the next schedule frontier |
+| Tensor substrate | Direct Q1-G128 and order-3 frontier canaries accepted | Contract the order-4 delta-rule frontier |
 | Sessions | Plan-bound local candidate runner added | Add node residency and scheduler |
 | Receipts | Output and candidate roots added locally | Add full diagnostics object |
 
@@ -76,6 +76,8 @@ evidence remain outside LiteNode.
 4. Add bounded tensor ingress and the first failure-driven primitives.
    **Complete locally for order-3:** f32 ingress, sigmoid, softplus, SiLU, and
    stateless causal depthwise convolution all admit and run through canaries.
+   **Next evidence gate:** order-4 `gated_delta_net_fp` needs a scalar contract
+   and golden fixture before LiteNode implementation.
 5. Add the minimum local session runner: open, one advance, status, finalize,
    and cancel with candidate rollback. **Complete locally:** the runner now
    consumes one validated execution plan and emits output and candidate roots.

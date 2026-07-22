@@ -217,6 +217,20 @@ comparison. The SSM scalar fixture root matched
 session output root was
 `b0a0dab87ae96b29d34b36ee9a07732bb272fddb5b78c311f4c19b77519beabd`.
 
+The next derived frontier after order `3` is order `4`:
+`gated_delta_net_fp`.
+
+```text
+/home/exedev/evidence/octra-inference/schedule-frontier-after-order3-d9aa419-20260722-205053
+```
+
+That bundle is a range-bound sentinel only. It proves the packet boundary and
+target neutrality, but it does not define or execute the delta-rule recurrence.
+The sidecar names `q`, `k`, `v`, `prepared_gate`, `prepared_beta`, and
+`recurrent_state` inputs, and `recurrent_output` plus `next_recurrent_state`
+outputs. LiteNode should not add a delta-rule opcode until `octra-inference`
+emits a deterministic scalar contract and golden fixture for that transition.
+
 The source-built LiteNode harness was run from this branch with the explicit
 inference harness profile:
 
@@ -383,11 +397,13 @@ The next useful packet from the `octra-inference` side is not another range
 smoke proof, reference-output canary, generic-`MATMUL_FP` primitive canary, or
 standalone Q1 fixture package. Those now exist.
 
-The next useful artifact is a derived next-frontier bundle from the generated
-Bonsai schedule after order `3`. Use the same discipline: independent tiny
-canaries per generic operation family, `--scan-policy` before `--run-session`,
-real opcodes when LiteNode has them, and sentinel canaries only for operations
-that have no VM opcode yet.
+The next useful artifact is a deterministic scalar contract and tiny golden
+fixture for order-4 `gated_delta_net_fp`. It should replace
+`model_binding_pending`, specify the exact recurrent state layout, q/k/v shapes,
+decay/update-rate inputs, normalization assumptions, update order, aliasing,
+non-finite behavior, output bytes, next-state bytes, effort formula, and fixture
+roots. After that, LiteNode can decide whether a single model-neutral
+`GATED_DELTA_RULE_FP` primitive is the smallest clean VM boundary.
 
 Preserve the same model-neutral packet boundary, keep Bonsai/Qwen/tokenizer
 details in sidecars, and classify every failure as a packet, admission-policy,
