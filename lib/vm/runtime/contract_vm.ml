@@ -143,6 +143,8 @@ type instr =
   | SIGMOID_FP of reg * reg
   | SOFTPLUS_FP of reg * reg
   | CAUSAL_DEPTHWISE_CONV1D_FP of reg * reg * reg * reg * reg * reg
+  | GATED_DELTA_RULE_FP of
+      reg * reg * reg * reg * reg * reg * reg * reg * reg * reg * reg * reg * reg * reg
   | SHIFT_ROUND_INPLACE of reg * reg * reg
   | MATMUL_FP of reg * reg * reg * reg * reg * reg
   | RMSNORM_FP of reg * reg * reg
@@ -341,6 +343,7 @@ let effort_cost = function
   | SIGMOID_FP _ -> 20
   | SOFTPLUS_FP _ -> 20
   | CAUSAL_DEPTHWISE_CONV1D_FP _ -> 100
+  | GATED_DELTA_RULE_FP _ -> 200
   | SHIFT_ROUND_INPLACE _ -> 5
   | MATMUL_FP _ -> 200
   | RMSNORM_FP _ -> 50
@@ -911,6 +914,13 @@ let strict_operands st = function
   | CAUSAL_DEPTHWISE_CONV1D_FP (dst, input, kernel, timesteps, channels, width) ->
     List.for_all (fun reg -> is_numeric (getr st reg))
       [dst; input; kernel; timesteps; channels; width]
+  | GATED_DELTA_RULE_FP
+      (output, state_dst, q, k, v, log_decay, beta, state, timesteps,
+       q_heads, k_heads, v_heads, key_dim, value_dim) ->
+    List.for_all
+      (fun reg -> is_numeric (getr st reg))
+      [output; state_dst; q; k; v; log_decay; beta; state; timesteps;
+       q_heads; k_heads; v_heads; key_dim; value_dim]
   | APPEND_VEC_Q16 (dst, pos, source, length) ->
     List.for_all (fun reg -> is_numeric (getr st reg)) [dst; pos; source; length]
   | ARGMAX_Q16 (dest, addr, length) ->
@@ -923,14 +933,58 @@ let read_int st reg =
   let value = to_z (getr st reg) in
   if Z.fits_int value then Some (Z.to_int value) else None
 
-let valid_mem_span addr n =
-  addr >= 0 && n > 0 && n <= 131072 && addr <= max_int - n
-
 let checked_product left right =
   if left < 0 || right < 0 then None
   else if left = 0 || right = 0 then Some 0
   else if left > max_int / right then None
   else Some (left * right)
+
+let checked_product_many factors =
+  let rec loop acc = function
+    | [] -> Some acc
+    | factor :: rest ->
+      (match checked_product acc factor with
+       | None -> None
+       | Some acc -> loop acc rest)
+  in
+  loop 1 factors
+
+let valid_mem_span_with_limit max_cells addr n =
+  addr >= 0 && n > 0 && n <= max_cells && addr <= max_int - n
+
+let valid_mem_span addr n =
+  valid_mem_span_with_limit 131072 addr n
+
+let valid_large_mem_span addr n =
+  valid_mem_span_with_limit 1_048_576 addr n
+
+let ranges_overlap left left_n right right_n =
+  left < right + right_n && right < left + left_n
+
+let same_range left left_n right right_n =
+  left = right && left_n = right_n
+
+let read_fp64_array mem addr n =
+  let values = Array.init n (fun i -> mem_read_fp64 mem (addr + i)) in
+  if Array.for_all Option.is_some values then Some (Array.map Option.get values)
+  else None
+
+let gated_delta_rule_effort timesteps v_heads value_dim key_dim =
+  let scale_product factors scale =
+    match Cost.product factors with
+    | None -> None
+    | Some cost -> Cost.product [cost; scale]
+  in
+  match
+    scale_product [timesteps; v_heads; value_dim; key_dim] 4,
+    scale_product [timesteps; v_heads; value_dim] 2,
+    Cost.product [timesteps; v_heads]
+  with
+  | Some inner, Some rows, Some heads ->
+    (match Cost.add inner rows with
+     | None -> None
+     | Some subtotal -> Cost.add subtotal heads)
+  | _ -> None
 
 let read_q16 st addr n =
   if not (valid_mem_span addr n) then None
@@ -2273,6 +2327,139 @@ let exec_one st op =
               end
         | _ -> revert st)
      | _ -> revert st)
+  | GATED_DELTA_RULE_FP
+      (rs_output, rs_state_dst, rs_q, rs_k, rs_v, rs_log_decay, rs_beta,
+       rs_state, rs_t, rs_qh, rs_kh, rs_vh, rs_kd, rs_vd) ->
+    (match read_int st rs_output, read_int st rs_state_dst, read_int st rs_q,
+           read_int st rs_k, read_int st rs_v, read_int st rs_log_decay,
+           read_int st rs_beta, read_int st rs_state, read_int st rs_t,
+           read_int st rs_qh, read_int st rs_kh, read_int st rs_vh,
+           read_int st rs_kd, read_int st rs_vd with
+     | Some output, Some state_dst, Some q, Some k, Some v, Some log_decay,
+       Some beta, Some state_src, Some timesteps, Some q_heads, Some k_heads,
+       Some v_heads, Some key_dim, Some value_dim
+       when timesteps > 0 && q_heads > 0 && k_heads > 0 && v_heads > 0
+            && key_dim > 0 && value_dim > 0 ->
+       (match checked_product_many [timesteps; q_heads; key_dim],
+              checked_product_many [timesteps; k_heads; key_dim],
+              checked_product_many [timesteps; v_heads; value_dim],
+              checked_product timesteps v_heads,
+              checked_product_many [v_heads; value_dim; key_dim] with
+        | Some q_n, Some k_n, Some v_n, Some gate_n, Some state_n ->
+          let output_n = v_n in
+          let input_spans =
+            [q, q_n; k, k_n; v, v_n; log_decay, gate_n; beta, gate_n]
+          in
+          let spans =
+            input_spans @ [state_src, state_n; output, output_n; state_dst, state_n]
+          in
+          if not (List.for_all (fun (addr, n) -> valid_large_mem_span addr n) spans) then
+            revert st
+          else
+            let input_aliases_writable (addr, n) =
+              ranges_overlap addr n output output_n
+              || ranges_overlap addr n state_dst state_n
+            in
+            let state_alias_invalid =
+              ranges_overlap state_src state_n output output_n
+              || (ranges_overlap state_src state_n state_dst state_n
+                  && not (same_range state_src state_n state_dst state_n))
+            in
+            if ranges_overlap output output_n state_dst state_n
+               || List.exists input_aliases_writable input_spans
+               || state_alias_invalid then
+              revert st
+            else
+              (match gated_delta_rule_effort timesteps v_heads value_dim key_dim with
+              | None -> revert st
+              | Some effort when not (add_dyn_effort st effort) -> revert st
+              | Some _ ->
+                (match read_fp64_array st.memory.data q q_n,
+                       read_fp64_array st.memory.data k k_n,
+                       read_fp64_array st.memory.data v v_n,
+                       read_fp64_array st.memory.data log_decay gate_n,
+                       read_fp64_array st.memory.data beta gate_n,
+                       read_fp64_array st.memory.data state_src state_n with
+                 | Some q_values, Some k_values, Some v_values,
+                   Some log_decay_values, Some beta_values, Some state_values ->
+                   let state_values = Array.copy state_values in
+                   let output_values = Array.make output_n 0.0 in
+                   let state_per_head = value_dim * key_dim in
+                   let scale = 1.0 /. sqrt (float_of_int key_dim) in
+                   let ok = ref true in
+                   for timestep = 0 to timesteps - 1 do
+                     let q_t = timestep * q_heads * key_dim in
+                     let k_t = timestep * k_heads * key_dim in
+                     let v_t = timestep * v_heads * value_dim in
+                     let gate_t = timestep * v_heads in
+                     let out_t = timestep * v_heads * value_dim in
+                     for head = 0 to v_heads - 1 do
+                       let q_head = head mod q_heads in
+                       let k_head = head mod k_heads in
+                       let q_base = q_t + (q_head * key_dim) in
+                       let k_base = k_t + (k_head * key_dim) in
+                       let v_base = v_t + (head * value_dim) in
+                       let state_base = head * state_per_head in
+                       let decay = exp log_decay_values.(gate_t + head) in
+                       if not (finite_fp64 decay) then ok := false;
+                       for i = 0 to state_per_head - 1 do
+                         state_values.(state_base + i) <-
+                           state_values.(state_base + i) *. decay
+                       done;
+                       let delta = Array.make value_dim 0.0 in
+                       for row = 0 to value_dim - 1 do
+                         let row_base = state_base + (row * key_dim) in
+                         let memory = ref 0.0 in
+                         for col = 0 to key_dim - 1 do
+                           memory :=
+                             !memory +. (state_values.(row_base + col)
+                                         *. k_values.(k_base + col))
+                         done;
+                         let value =
+                           (v_values.(v_base + row) -. !memory)
+                           *. beta_values.(gate_t + head)
+                         in
+                         if not (finite_fp64 !memory && finite_fp64 value) then
+                           ok := false;
+                         delta.(row) <- value
+                       done;
+                       for row = 0 to value_dim - 1 do
+                         let row_base = state_base + (row * key_dim) in
+                         for col = 0 to key_dim - 1 do
+                           state_values.(row_base + col) <-
+                             state_values.(row_base + col)
+                             +. (k_values.(k_base + col) *. delta.(row))
+                         done
+                       done;
+                       let out_base = out_t + (head * value_dim) in
+                       for row = 0 to value_dim - 1 do
+                         let row_base = state_base + (row * key_dim) in
+                         let value = ref 0.0 in
+                         for col = 0 to key_dim - 1 do
+                           value :=
+                             !value +. (state_values.(row_base + col)
+                                        *. q_values.(q_base + col))
+                         done;
+                         output_values.(out_base + row) <- !value *. scale
+                       done
+                     done
+                   done;
+                   if not !ok
+                      || not (Array.for_all finite_fp64 state_values)
+                      || not (Array.for_all finite_fp64 output_values) then
+                     revert st
+                   else begin
+                     for i = 0 to output_n - 1 do
+                       mem_set_fp64 st.memory.data (output + i) output_values.(i)
+                     done;
+                     for i = 0 to state_n - 1 do
+                       mem_set_fp64 st.memory.data (state_dst + i) state_values.(i)
+                     done;
+                     true
+                   end
+                 | _ -> revert st))
+        | _ -> revert st)
+     | _ -> revert st)
   | MATMUL_FP (rd_addr, rs_lhs, rs_rhs, rs_m, rs_k, rs_n) ->
     let dst = Z.to_int (to_z (getr st rd_addr)) in
     let lhs = Z.to_int (to_z (getr st rs_lhs)) in
@@ -3215,6 +3402,9 @@ module Verifier = struct
             | SIGMOID_FP (a,n) -> check_regs pc [a;n]
             | SOFTPLUS_FP (a,n) -> check_regs pc [a;n]
             | CAUSAL_DEPTHWISE_CONV1D_FP (d,i,k,t,c,w) -> check_regs pc [d;i;k;t;c;w]
+            | GATED_DELTA_RULE_FP
+                (o,sd,q,k,v,ld,b,s,t,qh,kh,vh,kd,vd) ->
+              check_regs pc [o;sd;q;k;v;ld;b;s;t;qh;kh;vh;kd;vd]
             | SHIFT_ROUND_INPLACE (a,n,b) -> check_regs pc [a;n;b]
             | MATMUL_FP (d,l,r,m,k,n) -> check_regs pc [d;l;r;m;k;n]
             | RMSNORM_FP (a,n,g) -> check_regs pc [a;n;g]

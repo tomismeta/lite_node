@@ -889,7 +889,7 @@ let rec typ_of_expr env = function
      | "load_int8" | "load_int8_b64" | "residual_add" | "rope_apply" | "rope_apply_q16"
      | "matmul_q16" | "linear_q1_0_g128_fp" | "load_f32_le_fp" | "shift_round"
      | "matmul_fp" | "rmsnorm_fp" | "sigmoid_fp" | "softplus_fp" | "silu_fp"
-     | "causal_depthwise_conv1d_fp" | "elemwise_mul_fp"
+     | "causal_depthwise_conv1d_fp" | "gated_delta_rule_fp" | "elemwise_mul_fp"
      | "residual_add_fp" | "rope_apply_fp" | "load_int8_fp"
      | "attention_kv_fp" | "attention_kv_q16" | "append_vec_fp"
      | "load_int8_q16" | "append_vec_q16" -> TBool
@@ -1612,6 +1612,15 @@ and gen_builtin env name args =
      else begin
        emit env (Contract_vm.CAUSAL_DEPTHWISE_CONV1D_FP
                    (nth 0, nth 1, nth 2, nth 3, nth 4, nth 5));
+       emit env (Contract_vm.LDI (rd, VBool true))
+     end
+   | "gated_delta_rule_fp" ->
+     if env.declaration <> ProgramDecl then
+       gerr env.line "gated_delta_rule_fp is available only in Program"
+     else begin
+       emit env (Contract_vm.GATED_DELTA_RULE_FP
+                   (nth 0, nth 1, nth 2, nth 3, nth 4, nth 5, nth 6,
+                    nth 7, nth 8, nth 9, nth 10, nth 11, nth 12, nth 13));
        emit env (Contract_vm.LDI (rd, VBool true))
      end
    | "elemwise_mul_fp" ->

@@ -174,6 +174,7 @@ let op_tag = function
   | Contract_vm.SIGMOID_FP _ -> 0x8B
   | Contract_vm.SOFTPLUS_FP _ -> 0x8C
   | Contract_vm.CAUSAL_DEPTHWISE_CONV1D_FP _ -> 0x8D
+  | Contract_vm.GATED_DELTA_RULE_FP _ -> 0x8E
   | Contract_vm.SILU_INPLACE _ -> 0x67
   | Contract_vm.ELEMWISE_MUL_INPLACE _ -> 0x68
   | Contract_vm.LOAD_INT8_BYTES_TO_MEM _ -> 0x69
@@ -352,6 +353,12 @@ let encode_instr buf pool instr =
   | Contract_vm.CAUSAL_DEPTHWISE_CONV1D_FP (d,i,k,t,c,w) ->
     put_u8 buf d; put_u8 buf i; put_u8 buf k;
     put_u8 buf t; put_u8 buf c; put_u8 buf w
+  | Contract_vm.GATED_DELTA_RULE_FP
+      (o,sd,q,k,v,ld,b,s,t,qh,kh,vh,kd,vd) ->
+    put_u8 buf o; put_u8 buf sd; put_u8 buf q; put_u8 buf k;
+    put_u8 buf v; put_u8 buf ld; put_u8 buf b; put_u8 buf s;
+    put_u8 buf t; put_u8 buf qh; put_u8 buf kh; put_u8 buf vh;
+    put_u8 buf kd; put_u8 buf vd
   | Contract_vm.SILU_INPLACE (a,n) ->
     put_u8 buf a; put_u8 buf n
   | Contract_vm.ELEMWISE_MUL_INPLACE (d,s,n) ->
@@ -595,6 +602,13 @@ let decode_instr s pos consts =
   | 0x8B -> (Contract_vm.SIGMOID_FP (get_u8 s p, get_u8 s (p+1)), p+2)
   | 0x8C -> (Contract_vm.SOFTPLUS_FP (get_u8 s p, get_u8 s (p+1)), p+2)
   | 0x8D -> (Contract_vm.CAUSAL_DEPTHWISE_CONV1D_FP (get_u8 s p, get_u8 s (p+1), get_u8 s (p+2), get_u8 s (p+3), get_u8 s (p+4), get_u8 s (p+5)), p+6)
+  | 0x8E ->
+    (Contract_vm.GATED_DELTA_RULE_FP
+       (get_u8 s p, get_u8 s (p+1), get_u8 s (p+2), get_u8 s (p+3),
+        get_u8 s (p+4), get_u8 s (p+5), get_u8 s (p+6), get_u8 s (p+7),
+        get_u8 s (p+8), get_u8 s (p+9), get_u8 s (p+10), get_u8 s (p+11),
+        get_u8 s (p+12), get_u8 s (p+13)),
+     p+14)
   | 0x67 -> (Contract_vm.SILU_INPLACE (get_u8 s p, get_u8 s (p+1)), p+2)
   | 0x68 -> (Contract_vm.ELEMWISE_MUL_INPLACE (get_u8 s p, get_u8 s (p+1), get_u8 s (p+2)), p+3)
   | 0x69 -> (Contract_vm.LOAD_INT8_BYTES_TO_MEM (get_u8 s p, get_u8 s (p+1), get_u8 s (p+2), get_u8 s (p+3), get_u8 s (p+4)), p+5)

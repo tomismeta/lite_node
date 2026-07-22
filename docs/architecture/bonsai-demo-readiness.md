@@ -1,6 +1,6 @@
 # Bonsai Demo Readiness
 
-Status: working plan, 2026-07-21.
+Status: working plan, 2026-07-22.
 
 This note defines the shortest clean path from the current runtime foundation
 to a credible Bonsai 27B demo. It is intentionally a demo-readiness plan, not a
@@ -38,7 +38,7 @@ network admission, or publisher endorsement.
 | Request admission | Target and limit checks added | Feed runtime proof from admitted roots |
 | Immutable ranges | Local authenticated pinning and plan binding added | Back with resident reader |
 | Ontology guard | Runtime source scan added | No model-family names enter VM code |
-| Tensor substrate | Direct Q1-G128 and order-3 frontier canaries accepted | Contract the order-4 delta-rule frontier |
+| Tensor substrate | Direct Q1-G128, order-3 frontier, and local order-4 delta-rule primitive accepted in LiteNode tests | Re-emit the order-4 canary from `octra-inference` and run it end-to-end |
 | Sessions | Plan-bound local candidate runner added | Add node residency and scheduler |
 | Receipts | Output and candidate roots added locally | Add full diagnostics object |
 
@@ -76,8 +76,12 @@ evidence remain outside LiteNode.
 4. Add bounded tensor ingress and the first failure-driven primitives.
    **Complete locally for order-3:** f32 ingress, sigmoid, softplus, SiLU, and
    stateless causal depthwise convolution all admit and run through canaries.
-   **Next evidence gate:** order-4 `gated_delta_net_fp` needs a scalar contract
-   and golden fixture before LiteNode implementation.
+   **Complete locally for order-4 implementation:** `GATED_DELTA_RULE_FP`
+   consumes prepared q/k/v/log-decay/beta/state tensors, requires
+   `sequence.delta-rule`, matches five scalar golden fixtures, and matches the
+   Bonsai layer-0 recurrent output and next-state hashes against the VPS
+   evidence bundle. **Next evidence gate:** `octra-inference` must re-emit the
+   order-4 canary with the real opcode and run the same scan/session loop.
 5. Add the minimum local session runner: open, one advance, status, finalize,
    and cancel with candidate rollback. **Complete locally:** the runner now
    consumes one validated execution plan and emits output and candidate roots.
@@ -198,9 +202,9 @@ When `--run-session` is present, successful output also includes:
 
 The current local session fixtures prove plan validation, authenticated input
 and range binding, candidate isolation, lifecycle transitions, output roots, and
-diagnostic candidate roots. They now include VM-native Q1-G128 and order-3
-Bonsai frontier canaries. They do not yet claim full Bonsai graph execution or
-resident model state.
+diagnostic candidate roots. They now include VM-native Q1-G128, order-3 Bonsai
+frontier canaries, and LiteNode-side order-4 delta-rule evidence. They do not
+yet claim full Bonsai graph execution or resident model state.
 
 The root fixture test locks the current canonical encodings for the
 requirement, admitted program, target, request, session, and receipt objects.
@@ -211,7 +215,8 @@ The local output contract is deliberately small: the target places an output
 base in `r0`, an output cell count in `r1`, and writes the canonical span before
 returning. The harness rejects uninitialized cells and output encodings larger
 than `max_output_bytes`. Host floating-point operations remain disabled until a
-machine-enforced numerical profile is implemented and qualified.
+machine-enforced numerical profile is implemented and qualified, except for the
+explicit inference-profile primitives admitted by capability-gated canaries.
 
 ## Demo Gate
 

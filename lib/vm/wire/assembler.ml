@@ -158,6 +158,10 @@ let parse_line line =
     | "SILU_FP", [_;_] -> Contract_vm.SILU_FP (r 0, r 1)
     | "CAUSAL_DEPTHWISE_CONV1D_FP", [_;_;_;_;_;_] ->
       Contract_vm.CAUSAL_DEPTHWISE_CONV1D_FP (r 0, r 1, r 2, r 3, r 4, r 5)
+    | "GATED_DELTA_RULE_FP", [_;_;_;_;_;_;_;_;_;_;_;_;_;_] ->
+      Contract_vm.GATED_DELTA_RULE_FP
+        (r 0, r 1, r 2, r 3, r 4, r 5, r 6, r 7, r 8, r 9, r 10, r 11,
+         r 12, r 13)
     | "FHE_LOAD_PK", [_;_] -> Contract_vm.FHE_LOAD_PK (r 0, r 1)
     | "FHE_ADD", [_;_;_;_] -> Contract_vm.FHE_ADD (r 0, r 1, r 2, r 3)
     | "FHE_SUB", [_;_;_;_] -> Contract_vm.FHE_SUB (r 0, r 1, r 2, r 3)
@@ -377,6 +381,12 @@ let emit_instr = function
   | Contract_vm.SIGMOID_FP (a,n) -> Printf.sprintf "SIGMOID_FP %s, %s" (emit_reg a) (emit_reg n)
   | Contract_vm.SOFTPLUS_FP (a,n) -> Printf.sprintf "SOFTPLUS_FP %s, %s" (emit_reg a) (emit_reg n)
   | Contract_vm.CAUSAL_DEPTHWISE_CONV1D_FP (d,i,k,t,c,w) -> Printf.sprintf "CAUSAL_DEPTHWISE_CONV1D_FP %s, %s, %s, %s, %s, %s" (emit_reg d) (emit_reg i) (emit_reg k) (emit_reg t) (emit_reg c) (emit_reg w)
+  | Contract_vm.GATED_DELTA_RULE_FP (o,sd,q,k,v,ld,b,s,t,qh,kh,vh,kd,vd) ->
+    Printf.sprintf
+      "GATED_DELTA_RULE_FP %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s"
+      (emit_reg o) (emit_reg sd) (emit_reg q) (emit_reg k) (emit_reg v)
+      (emit_reg ld) (emit_reg b) (emit_reg s) (emit_reg t) (emit_reg qh)
+      (emit_reg kh) (emit_reg vh) (emit_reg kd) (emit_reg vd)
   | Contract_vm.APPEND_VEC_FP (d,p,s,n) -> Printf.sprintf "APPEND_VEC_FP %s, %s, %s, %s" (emit_reg d) (emit_reg p) (emit_reg s) (emit_reg n)
 
 let emit instrs =

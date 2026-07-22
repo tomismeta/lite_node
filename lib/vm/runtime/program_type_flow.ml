@@ -442,6 +442,12 @@ let step facts pc env = function
   | Contract_vm.CAUSAL_DEPTHWISE_CONV1D_FP
       (dest, input, kernel, timesteps, channels, width) ->
     expect_nums pc env [dest; input; kernel; timesteps; channels; width]
+  | Contract_vm.GATED_DELTA_RULE_FP
+      (output, state_dest, q, k, v, log_decay, beta, state, timesteps,
+       q_heads, k_heads, v_heads, key_dim, value_dim) ->
+    expect_nums pc env
+      [output; state_dest; q; k; v; log_decay; beta; state; timesteps;
+       q_heads; k_heads; v_heads; key_dim; value_dim]
   | Contract_vm.ELEMWISE_MUL_FP (dest, source, count)
   | Contract_vm.RESIDUAL_ADD_FP (dest, source, count) ->
     expect_nums pc env [dest; source; count]

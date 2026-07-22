@@ -234,26 +234,25 @@ generated schedule convenience.
 
 Legacy label: `gated_delta_net_step_fp`.
 
-Disposition: **candidate primitive**.
+Disposition: **profiled primitive**.
 
 A named published algorithm is not automatically model-specific. The accepted
 boundary must nevertheless be a parameterized mathematical state transition,
 not a Qwen or Bonsai layer. Its grouping, gating, normalization, update order,
 state ownership, in-place behavior, and rollback are completely specified.
 
-The final opcode name should describe the delta-rule transition rather than a
-network product. If the order-4 evidence validates the expected recurrence, the
-preferred opcode name is `GATED_DELTA_RULE_FP`, not `GATED_DELTA_NET_FP`. A
-synthetic recurrent fixture must exercise it before its semantic root is
-stabilized.
+The opcode name describes the reusable delta-rule transition rather than a
+network product: `GATED_DELTA_RULE_FP`. It consumes prepared q/k/v,
+log-decay, beta, and recurrent-state tensors, writes recurrent output and next
+state, and requires `sequence.delta-rule`.
 
-Order-4 frontier status: `octra-inference` selected `gated_delta_net_fp` as the
-next Bonsai frontier after order `3`, but only a sentinel packet exists today.
-Implementation waits on a scalar contract with exact q/k/v/decay/update-rate
-shapes, state layout, update order, output and next-state roots, and
-malformed-input vectors. Q/K normalization, head replication, projections, and
-model gate preparation stay outside the primitive unless evidence proves they
-are intrinsic to the reusable recurrence.
+Order-4 frontier status: `octra-inference` produced a scalar contract, five
+tiny golden fixtures, negative cases, and an actual Bonsai/Qwen35 layer-0
+binding. LiteNode implements the primitive behind inference admission only.
+The local OCaml VM matches all five golden fixtures and, when run against the
+VPS evidence bundle, matches the Bonsai recurrent output and next-state
+SHA-256 values. Q/K normalization, head preparation, projections, and model
+gate preparation stay outside the primitive.
 
 ## Position And Attention
 

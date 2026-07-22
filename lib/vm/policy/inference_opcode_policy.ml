@@ -96,6 +96,7 @@ let opcode_class = function
   | Contract_vm.SILU_FP _ -> Requires "tensor.strict-fp"
   | Contract_vm.CAUSAL_DEPTHWISE_CONV1D_FP _ ->
     Requires "sequence.causal-convolution"
+  | Contract_vm.GATED_DELTA_RULE_FP _ -> Requires "sequence.delta-rule"
   | Contract_vm.MATMUL_Q16 _ -> Forbidden
   | op when Opcode_policy.uses_host_float op -> Forbidden
   | _ -> Allowed

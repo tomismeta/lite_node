@@ -85,6 +85,9 @@ let host_float_cases = [
   ("softplus-fp", "SOFTPLUS_FP", VM.SOFTPLUS_FP (0, 1));
   ("causal-depthwise-conv1d-fp", "CAUSAL_DEPTHWISE_CONV1D_FP",
    VM.CAUSAL_DEPTHWISE_CONV1D_FP (0, 1, 2, 3, 4, 5));
+  ("gated-delta-rule-fp", "GATED_DELTA_RULE_FP",
+   VM.GATED_DELTA_RULE_FP
+     (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13));
 ]
 
 let profiled_cases = [

@@ -394,22 +394,23 @@ The lean branch should not automatically port these proof-branch surfaces:
 ## Next Ask For `octra-inference`
 
 The next useful packet from the `octra-inference` side is not another range
-smoke proof, reference-output canary, generic-`MATMUL_FP` primitive canary, or
-standalone Q1 fixture package. Those now exist.
+smoke proof, reference-output canary, generic-`MATMUL_FP` primitive canary,
+standalone Q1 fixture package, direct Q1 canary, order-3 frontier canary, or
+order-4 scalar evidence package. Those now exist.
 
-The next useful artifact is a deterministic scalar contract and tiny golden
-fixture for order-4 `gated_delta_net_fp`. It should replace
-`model_binding_pending`, specify the exact recurrent state layout, q/k/v shapes,
-decay/update-rate inputs, normalization assumptions, update order, aliasing,
-non-finite behavior, output bytes, next-state bytes, effort formula, and fixture
-roots. After that, LiteNode can decide whether a single model-neutral
-`GATED_DELTA_RULE_FP` primitive is the smallest clean VM boundary.
+The next useful artifact is an executable order-4 canary that emits
+`GATED_DELTA_RULE_FP` directly, requests `sequence.delta-rule`, runs
+`--scan-policy`, then runs `--run-session` when admitted. It should compare the
+VM recurrent output and next-state bytes to the existing order-4 evidence roots
+and keep all Bonsai/Qwen/tokenizer details in sidecars. It should also clean up
+the stale `model_binding_pending` frontier metadata noted in the first evidence
+package.
 
 Preserve the same model-neutral packet boundary, keep Bonsai/Qwen/tokenizer
 details in sidecars, and classify every failure as a packet, admission-policy,
 missing-primitive, data-binding, effort/limit, determinism, or harness-only gap.
-Only after a deterministic canary fails for a classified LiteNode reason should
-the VM add or revise math capability.
+Only after the executable order-4 canary fails for a classified LiteNode reason
+should the VM add or revise the primitive.
 
 ## Rebuild Acceptance Bar
 

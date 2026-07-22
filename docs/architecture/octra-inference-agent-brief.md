@@ -252,16 +252,14 @@ derive the next generated Bonsai schedule frontier after order `3`, emit
 independent canaries per generic operation family, and keep using
 `--scan-policy` before `--run-session`.
 
-The first frontier after order `3` is order-4 `gated_delta_net_fp`. Its sentinel
-bundle proved the packet boundary only; the next `octra-inference` artifact
-should be a deterministic scalar contract and tiny golden fixture for the
-delta-rule transition. Include actual Bonsai/Qwen binding, q/k/v/recurrent-state
-shapes, state orientation, the meanings of decay and update-rate inputs,
-normalization and query-scaling placement, update order, output bytes,
-next-state bytes, non-finite rules, aliasing rules, effort formula, and roots.
-Do not ask LiteNode to add a real opcode until that contract exists. If the
-contract validates the expected recurrence, the LiteNode opcode should be named
-`GATED_DELTA_RULE_FP`, not `GATED_DELTA_NET_FP`.
+The first frontier after order `3` is order-4 `gated_delta_net_fp`. Its scalar
+evidence package now defines the reusable delta-rule transition and the LiteNode
+side implements `GATED_DELTA_RULE_FP` behind the `sequence.delta-rule`
+capability. The next `octra-inference` artifact should emit a real order-4
+canary using that opcode, run `--scan-policy`, run `--run-session` when
+admitted, and compare recurrent output plus next-state roots against the
+existing evidence package. Keep Q/K normalization, projection outputs,
+tokenizer, and Bonsai/Qwen metadata in sidecars, not `target.json`.
 
 ## Current Interop Check
 
