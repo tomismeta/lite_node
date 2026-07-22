@@ -29,4 +29,9 @@ val first_violation :
   Contract_vm.instr array ->
   violation option
 
+val violations :
+  requirement:Execution_requirement.t ->
+  Contract_vm.instr array ->
+  violation list
+
 val error_message : violation -> string

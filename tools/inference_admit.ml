@@ -17,6 +17,8 @@ module Admission = Octra_vm.Admission
 module Program_envelope = Octra_vm.Program_envelope
 module Program_type_flow = Octra_vm.Program_type_flow
 module Model = Octra_vm.Inference_model
+module Bytecode = Octra_vm.Bytecode
+module Inference_opcode_policy = Octra_vm.Inference_opcode_policy
 module Plan = Octra_vm.Inference_plan
 module Receipt = Octra_vm.Inference_receipt
 module Req = Octra_vm.Execution_requirement
@@ -35,6 +37,7 @@ type paths = {
   mutable model_ranges : string option;
   mutable range_sources : (string * string) list;
   mutable run_session : bool;
+  mutable scan_policy : bool;
 }
 
 type target_packet = {
@@ -536,8 +539,91 @@ let admit_program ~support ~requirement raw =
     Error (Admission.Verify_error
              "inference program must be a certified program envelope")
 
+let decode_program_code raw =
+  if not (Program_envelope.is_program raw) then
+    Error "inference program must be a certified program envelope"
+  else
+    match Program_envelope.decode raw with
+    | Error error -> Error (Program_envelope.error_message error)
+    | Ok envelope ->
+      (match Bytecode.decode envelope.Program_envelope.code with
+       | Error error -> Error error
+       | Ok code -> Ok code)
+
 let list_json values =
   `List (List.map (fun value -> `String value) values)
+
+let violation_json = function
+  | Inference_opcode_policy.Missing_capability { detail; capability } ->
+    `Assoc [
+      "kind", `String "missing_capability";
+      "pc", `Int detail.pc;
+      "opcode", `String detail.opcode;
+      "capability", `String capability;
+    ]
+  | Inference_opcode_policy.Forbidden_opcode detail ->
+    `Assoc [
+      "kind", `String "forbidden_opcode";
+      "pc", `Int detail.pc;
+      "opcode", `String detail.opcode;
+    ]
+
+let unique_strings values =
+  List.sort_uniq String.compare values
+
+let unsupported_opcode_names violations =
+  violations
+  |> List.filter_map (function
+    | Inference_opcode_policy.Forbidden_opcode detail -> Some detail.opcode
+    | _ -> None)
+  |> unique_strings
+
+let missing_capability_names violations =
+  violations
+  |> List.filter_map (function
+    | Inference_opcode_policy.Missing_capability { capability; _ } ->
+      Some capability
+    | _ -> None)
+  |> unique_strings
+
+let print_policy_scan ~support ~requirement raw =
+  match decode_program_code raw with
+  | Error error ->
+    print_endline
+      (Yojson.Safe.pretty_to_string
+         (`Assoc [
+           "status", `String "decode_error";
+           "decode_error", `String error;
+         ]));
+    1
+  | Ok code ->
+    let violations =
+      Inference_opcode_policy.violations ~requirement code
+    in
+    let admission_status, admission_error =
+      match admit_program ~support ~requirement raw with
+      | Ok _ -> "accepted", []
+      | Error error ->
+        "rejected",
+        ["admission_error", `String (Admission.error_message error)]
+    in
+    let report =
+      `Assoc (
+        [
+          "status", `String admission_status;
+          "program_instructions", `Int (Array.length code);
+          "policy_violation_count", `Int (List.length violations);
+          "unsupported_opcodes",
+          list_json (unsupported_opcode_names violations);
+          "missing_capabilities",
+          list_json (missing_capability_names violations);
+          "policy_violations",
+          `List (List.map violation_json violations);
+        ]
+        @ admission_error)
+    in
+    print_endline (Yojson.Safe.pretty_to_string report);
+    0
 
 let entrypoints_json target =
   `List
@@ -562,7 +648,7 @@ let read_range_source sources owner_root =
 let usage =
   "usage: inference_admit --program FILE --requirement FILE --target FILE \
    --support FILE [--model-ranges FILE] [--range-source ROOT=FILE] \
-   [--request FILE] [--input FILE] [--run-session]"
+   [--request FILE] [--input FILE] [--run-session] [--scan-policy]"
 
 let () =
   let paths =
@@ -576,6 +662,7 @@ let () =
       model_ranges = None;
       range_sources = [];
       run_session = false;
+      scan_policy = false;
     }
   in
   let set_program value = paths.program <- Some value in
@@ -592,6 +679,7 @@ let () =
     paths.range_sources <- (owner_root, path) :: paths.range_sources
   in
   let set_run_session () = paths.run_session <- true in
+  let set_scan_policy () = paths.scan_policy <- true in
   Arg.parse
     [
       "--program", Arg.String set_program, "certified program envelope";
@@ -611,9 +699,14 @@ let () =
       "--run-session",
       Arg.Unit set_run_session,
       "run a local open/advance/finalize session after admission";
+      "--scan-policy",
+      Arg.Unit set_scan_policy,
+      "report all visible inference opcode policy violations";
     ]
     (fun value -> fail ("unexpected argument: " ^ value))
     usage;
+  if paths.scan_policy && paths.run_session then
+    fail "--scan-policy cannot be combined with --run-session";
   let program_path = require_path "--program" paths.program in
   let requirement_path = require_path "--requirement" paths.requirement in
   let target_path = require_path "--target" paths.target in
@@ -645,6 +738,9 @@ let () =
   let raw_program =
     try read_file program_path with Sys_error error -> fail error
   in
+  if paths.scan_policy then (
+    let status = print_policy_scan ~support ~requirement raw_program in
+    exit status);
   match admit_program ~support ~requirement raw_program with
   | Error error -> fail (Admission.error_message error)
   | Ok admitted ->

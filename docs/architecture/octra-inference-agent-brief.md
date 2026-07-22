@@ -61,6 +61,21 @@ Bonsai demo packet.
 `--range-source` and `--run-session` are local proof options. They are required
 only when the agent wants LiteNode to authenticate owner bytes and emit local
 session and receipt roots.
+Use `--scan-policy` when the goal is frontier discovery rather than execution.
+It returns every visible inference opcode-policy violation in one JSON report:
+
+```sh
+PATH=/home/exedev/.cargo/bin:$PATH opam exec -- \
+  dune exec tools/inference_admit.exe -- \
+    --program program.ocpg \
+    --requirement requirement.json \
+    --target target.json \
+    --support support.json \
+    --scan-policy
+```
+
+This scan is advisory only. It does not admit new opcodes and it does not prove
+runtime correctness. It cannot be combined with `--run-session`.
 
 ## Required Output Packet
 
@@ -206,18 +221,28 @@ program implements that path with accepted generic VM primitives.
   `program_attested`; the current local checked-envelope path should report
   `program_attested=false`.
 
-## Next Ask
+## Frontier Ask
 
-Produce a command such as:
+Produce commands such as:
 
 ```sh
 octra-inference emit-vm-packet <packed-model> \
   --out /home/exedev/evidence/<run>/vm-packet
+
+octra-inference emit-vm-frontier <packed-model> \
+  --out /home/exedev/evidence/<run>/vm-frontier
 ```
 
-The command should produce the five demo files above and then invoke the
-LiteNode admission harness as a readiness gate. Once that passes, the Bonsai
-runtime proof flow can consume the same packet before local execution.
+The frontier command should derive the next Bonsai/Qwen operation frontier from
+the generated schedule and emit independent tiny canaries for each generic
+operation family in that frontier. Do not emit one large packet when separate
+packets would reveal clearer failures. Each canary should invoke LiteNode with
+`--scan-policy` first, then `--run-session` only if admission passes.
+
+Every frontier canary should preserve the five demo files above, keep
+`target.json` model-neutral, put model-family details in sidecars, and classify
+failures as packet, admission-policy, missing-primitive, data-binding,
+effort/limit, determinism, or harness-only.
 
 ## Current Interop Check
 

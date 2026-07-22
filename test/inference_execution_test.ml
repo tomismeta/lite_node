@@ -19,6 +19,7 @@ module Plan = Octra_vm.Inference_plan
 module Req = Octra_vm.Execution_requirement
 module Request = Octra_vm.Inference_request
 module Abi = Octra_vm.Inference_session_abi
+module Policy = Octra_vm.Inference_opcode_policy
 module Session = Octra_vm.Inference_session
 module Store = Octra_vm.Inference_store
 module Target = Octra_vm.Inference_target
@@ -245,6 +246,31 @@ let check_opcode_capability_gate () =
       (starts_with "inference opcode FLOAD" message)
   | _ -> failwith "expected authenticated-range capability rejection"
 
+let check_policy_frontier_lists_all_violations () =
+  let requirement = Req.{ requirement with capabilities = [] } in
+  let code = [|
+    VM.JDEST Abi.advance_label;
+    VM.FLOAD (1, 0);
+    VM.LINEAR_Q1_G128_FP (0, 1, 2, 3, 4, 5, 6);
+    VM.RMSNORM_FP (0, 1, 2);
+    VM.FHE_ADD (0, 1, 2, 3);
+    VM.STOP;
+  |] in
+  match Policy.violations ~requirement code with
+  | [
+    Policy.Missing_capability {
+      detail = { opcode = "FLOAD"; pc = 1 };
+      capability = "storage.authenticated-range";
+    };
+    Policy.Missing_capability {
+      detail = { opcode = "LINEAR_Q1_G128_FP"; pc = 2 };
+      capability = "tensor.q1-g128";
+    };
+    Policy.Forbidden_opcode { opcode = "RMSNORM_FP"; pc = 3 };
+    Policy.Forbidden_opcode { opcode = "FHE_ADD"; pc = 4 };
+  ] -> ()
+  | _ -> failwith "expected complete inference policy frontier"
+
 let check_fhe_forbidden () =
   let cases = [
     "FHE_LOAD_PK", VM.FHE_LOAD_PK (0, 1);
@@ -396,6 +422,7 @@ let check_output_contract () =
 let () =
   check_host_float_forbidden ();
   check_opcode_capability_gate ();
+  check_policy_frontier_lists_all_violations ();
   check_fhe_forbidden ();
   check_state_surfaces_forbidden ();
   check_matmul_q16_forbidden ();

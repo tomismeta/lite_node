@@ -121,6 +121,10 @@ admission it opens a session, executes one target-owned `advance`, finalizes,
 and reports session and receipt roots with `consensus_accepted=false`.
 `--run-session` also requires `--input FILE`; the input bytes must hash to the
 request's `input_root` and fit the requirement's `max_view_bytes` limit.
+`--scan-policy` is the faster frontier-discovery mode. It decodes the program
+envelope and reports every visible inference opcode-policy violation as JSON,
+without admitting new opcodes or running a session. It cannot be combined with
+`--run-session`.
 
 The requirement JSON contains:
 

@@ -311,23 +311,17 @@ The next useful packet from the `octra-inference` side is not another range
 smoke proof, reference-output canary, generic-`MATMUL_FP` primitive canary, or
 standalone Q1 fixture package. Those now exist.
 
-The next useful artifact is a direct VM canary using `LINEAR_Q1_G128_FP`:
+The next useful artifact is a schedule-derived frontier bundle. It should emit
+independent tiny canaries that each use `LINEAR_Q1_G128_FP` plus one generic
+operation family reached by the actual Bonsai path. Run `--scan-policy` on each
+canary before trying `--run-session`. This lets LiteNode see several blockers in
+parallel without turning the VM into a speculative math-porting project.
 
-1. Re-emit the primitive canary using `LINEAR_Q1_G128_FP` rather than
-   `MATMUL_FP`.
-2. Keep Q1 owner bytes bound through `model-ranges.json` and `FLOAD`.
-3. Request capability `tensor.q1-g128`; do not request `tensor.strict-fp`.
-4. Preserve the same model-neutral packet boundary: roots and capabilities in
-   LiteNode-facing files; Bonsai/Qwen/tokenizer details in sidecars.
-5. Compare VM output cells, decoded as little-endian binary64 bit patterns,
-   against the Q1-G128 golden fixture SHA-256 and root; report the LiteNode
-   session output root separately.
-6. Run the LiteNode admission/session harness and classify any failure as a
-   packet, admission-policy, missing-primitive, data-binding, effort/limit,
-   determinism, or harness-only gap.
-
-Only after that deterministic primitive canary fails for a classified LiteNode
-reason should the VM add or revise additional math capabilities.
+Preserve the same model-neutral packet boundary, keep Bonsai/Qwen/tokenizer
+details in sidecars, and classify every failure as a packet, admission-policy,
+missing-primitive, data-binding, effort/limit, determinism, or harness-only gap.
+Only after a deterministic canary fails for a classified LiteNode reason should
+the VM add or revise math capability.
 
 ## Rebuild Acceptance Bar
 

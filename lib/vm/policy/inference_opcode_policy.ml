@@ -94,6 +94,31 @@ let opcode_class = function
   | op when Opcode_policy.uses_host_float op -> Forbidden
   | _ -> Allowed
 
+let violations ~requirement code =
+  let violations = ref [] in
+  Array.iteri
+    (fun pc op ->
+      match opcode_class op with
+      | Forbidden ->
+        violations := Forbidden_opcode {
+          pc;
+          opcode = Opcode_policy.opcode_name op;
+        }
+          :: !violations
+      | Requires capability
+        when not (has_capability capability requirement) ->
+        violations := Missing_capability {
+          detail = {
+            pc;
+            opcode = Opcode_policy.opcode_name op;
+          };
+          capability;
+        }
+          :: !violations
+      | _ -> ())
+    code;
+  List.rev !violations
+
 let first_violation ~requirement code =
   let violation = ref None in
   Array.iteri
