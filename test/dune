@@ -9,6 +9,11 @@
  (libraries octra_vm inference_test_support digestif digestif.c))
 
 (test
+ (name f32_load_primitive_test)
+ (modules f32_load_primitive_test)
+ (libraries octra_vm inference_test_support digestif digestif.c))
+
+(test
  (name execution_requirement_test)
  (modules execution_requirement_test)
  (libraries octra_vm))

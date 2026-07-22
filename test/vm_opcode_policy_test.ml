@@ -42,6 +42,15 @@ let check_program_only label expected_name op =
   check (label ^ ": uses host float")
     (not (Policy.uses_host_float op))
 
+let check_profiled label expected_name op =
+  check_info label Policy.Consensus_unsafe expected_name op;
+  check (label ^ ": host")
+    (Policy.host_float_opcode op = Some expected_name);
+  check (label ^ ": program-only")
+    (Policy.program_only_opcode op = None);
+  check (label ^ ": unsafe")
+    (Policy.uses_host_float op)
+
 let check_legacy_and_program label expected_name op =
   check_info label Policy.Legacy_and_program expected_name op;
   check (label ^ ": host")
@@ -72,6 +81,10 @@ let host_float_cases = [
   ("append-fp", "APPEND_VEC_FP", VM.APPEND_VEC_FP (0, 1, 2, 3));
   ("linear-q1-g128", "LINEAR_Q1_G128_FP",
    VM.LINEAR_Q1_G128_FP (0, 1, 2, 3, 4, 5, 6));
+]
+
+let profiled_cases = [
+  ("load-f32-le", "LOAD_F32_LE_FP", VM.LOAD_F32_LE_FP (0, 1, 2, 3));
 ]
 
 let program_only_cases = [
@@ -134,6 +147,10 @@ let () =
     (fun (label, expected_name, op) ->
       check_host_float label expected_name op)
     host_float_cases;
+  List.iter
+    (fun (label, expected_name, op) ->
+      check_profiled label expected_name op)
+    profiled_cases;
   List.iter
     (fun (label, expected_name, op) ->
       check_program_only label expected_name op)

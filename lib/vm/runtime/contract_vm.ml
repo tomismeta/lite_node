@@ -139,6 +139,7 @@ type instr =
   | ARGMAX_Q16 of reg * reg * reg
   | MATMUL_Q16 of reg * reg * reg * reg * reg * reg
   | LINEAR_Q1_G128_FP of reg * reg * reg * reg * reg * reg * reg
+  | LOAD_F32_LE_FP of reg * reg * reg * reg
   | SHIFT_ROUND_INPLACE of reg * reg * reg
   | MATMUL_FP of reg * reg * reg * reg * reg * reg
   | RMSNORM_FP of reg * reg * reg
@@ -333,6 +334,7 @@ let effort_cost = function
   | ARGMAX_Q16 _ -> 5
   | MATMUL_Q16 _ -> 100
   | LINEAR_Q1_G128_FP _ -> 200
+  | LOAD_F32_LE_FP _ -> 30
   | SHIFT_ROUND_INPLACE _ -> 5
   | MATMUL_FP _ -> 200
   | RMSNORM_FP _ -> 50
@@ -530,6 +532,30 @@ let mem_read_fp64 mem a =
 
 let mem_set_fp64 mem a f =
   Hashtbl.replace mem a (VInt (fp64_to_z f))
+
+let f32_le_to_fp64 data offset =
+  let bits =
+    Char.code data.[offset]
+    lor (Char.code data.[offset + 1] lsl 8)
+    lor (Char.code data.[offset + 2] lsl 16)
+    lor (Char.code data.[offset + 3] lsl 24)
+  in
+  let sign = if bits land 0x80000000 = 0 then 1.0 else -1.0 in
+  let exponent = (bits lsr 23) land 0xff in
+  let fraction = bits land 0x7fffff in
+  if exponent = 0xff then None
+  else
+    let value =
+      if exponent = 0 then
+        if fraction = 0 then sign *. 0.0
+        else sign *. ldexp (float_of_int fraction) (-149)
+      else
+        let significand =
+          1.0 +. (float_of_int fraction /. 8388608.0)
+        in
+        sign *. ldexp significand (exponent - 127)
+    in
+    Some value
 
 let fp16_le_to_fp64 data offset =
   let bits =
@@ -869,6 +895,9 @@ let strict_operands st = function
     && is_text (getr st q1) && is_numeric (getr st offset)
     && is_numeric (getr st rows) && is_numeric (getr st inner)
     && is_numeric (getr st cols)
+  | LOAD_F32_LE_FP (dst, source, offset, length) ->
+    is_numeric (getr st dst) && is_text (getr st source)
+    && is_numeric (getr st offset) && is_numeric (getr st length)
   | APPEND_VEC_Q16 (dst, pos, source, length) ->
     List.for_all (fun reg -> is_numeric (getr st reg)) [dst; pos; source; length]
   | ARGMAX_Q16 (dest, addr, length) ->
@@ -2127,6 +2156,30 @@ let exec_one st op =
            | _ -> revert st)
         | _ -> revert st)
      | _ -> revert st)
+  | LOAD_F32_LE_FP (rs_dst, rs_src, rs_off, rs_n) ->
+    (match read_int st rs_dst, to_bytes (getr st rs_src),
+           read_int st rs_off, read_int st rs_n with
+     | Some dst, Some src, Some off, Some n
+       when off >= 0 && valid_mem_span dst n
+            && off <= String.length src
+            && n <= (String.length src - off) / 4 ->
+       if not (add_dyn_effort st n) then revert st
+       else
+         let decoded = Array.make n 0.0 in
+         let ok = ref true in
+         for i = 0 to n - 1 do
+           match f32_le_to_fp64 src (off + (i * 4)) with
+           | None -> ok := false
+           | Some value -> decoded.(i) <- value
+         done;
+         if not !ok then revert st
+         else begin
+           for i = 0 to n - 1 do
+             mem_set_fp64 st.memory.data (dst + i) decoded.(i)
+           done;
+           true
+         end
+     | _ -> revert st)
   | MATMUL_FP (rd_addr, rs_lhs, rs_rhs, rs_m, rs_k, rs_n) ->
     let dst = Z.to_int (to_z (getr st rd_addr)) in
     let lhs = Z.to_int (to_z (getr st rs_lhs)) in
@@ -3074,6 +3127,7 @@ module Verifier = struct
             | ARGMAX_Q16 (d,a,n) -> check_regs pc [d;a;n]
             | MATMUL_Q16 (d,l,r,m,k,n) -> check_regs pc [d;l;r;m;k;n]
             | LINEAR_Q1_G128_FP (d,l,q,o,m,k,n) -> check_regs pc [d;l;q;o;m;k;n]
+            | LOAD_F32_LE_FP (d,s,o,n) -> check_regs pc [d;s;o;n]
             | SHIFT_ROUND_INPLACE (a,n,b) -> check_regs pc [a;n;b]
             | MATMUL_FP (d,l,r,m,k,n) -> check_regs pc [d;l;r;m;k;n]
             | RMSNORM_FP (a,n,g) -> check_regs pc [a;n;g]

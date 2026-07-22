@@ -125,6 +125,11 @@ before writing.
 Filesystem paths, model tensor names, and store transport never cross this
 boundary.
 
+Proof-branch status: `LOAD_F32_LE_FP` decodes bounded little-endian f32 owner
+bytes into VM f64 cells, rejects malformed spans and non-finite values before
+writing, and remains gated by `storage.authenticated-range` in plain inference.
+Generic Program admission still rejects it as inference-only.
+
 ## Normalization And Activation
 
 ### RMS normalization with explicit epsilon

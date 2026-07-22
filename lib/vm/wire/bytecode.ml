@@ -170,6 +170,7 @@ let op_tag = function
   | Contract_vm.APPEND_VEC_Q16 _ -> 0x87
   | Contract_vm.ARGMAX_Q16 _ -> 0x88
   | Contract_vm.LINEAR_Q1_G128_FP _ -> 0x89
+  | Contract_vm.LOAD_F32_LE_FP _ -> 0x8A
   | Contract_vm.SILU_INPLACE _ -> 0x67
   | Contract_vm.ELEMWISE_MUL_INPLACE _ -> 0x68
   | Contract_vm.LOAD_INT8_BYTES_TO_MEM _ -> 0x69
@@ -340,6 +341,8 @@ let encode_instr buf pool instr =
   | Contract_vm.LINEAR_Q1_G128_FP (d,l,q,o,m,k,n) ->
     put_u8 buf d; put_u8 buf l; put_u8 buf q; put_u8 buf o;
     put_u8 buf m; put_u8 buf k; put_u8 buf n
+  | Contract_vm.LOAD_F32_LE_FP (d,s,o,n) ->
+    put_u8 buf d; put_u8 buf s; put_u8 buf o; put_u8 buf n
   | Contract_vm.SILU_INPLACE (a,n) ->
     put_u8 buf a; put_u8 buf n
   | Contract_vm.ELEMWISE_MUL_INPLACE (d,s,n) ->
@@ -579,6 +582,7 @@ let decode_instr s pos consts =
   | 0x87 -> (Contract_vm.APPEND_VEC_Q16 (get_u8 s p, get_u8 s (p+1), get_u8 s (p+2), get_u8 s (p+3)), p+4)
   | 0x88 -> (Contract_vm.ARGMAX_Q16 (get_u8 s p, get_u8 s (p+1), get_u8 s (p+2)), p+3)
   | 0x89 -> (Contract_vm.LINEAR_Q1_G128_FP (get_u8 s p, get_u8 s (p+1), get_u8 s (p+2), get_u8 s (p+3), get_u8 s (p+4), get_u8 s (p+5), get_u8 s (p+6)), p+7)
+  | 0x8A -> (Contract_vm.LOAD_F32_LE_FP (get_u8 s p, get_u8 s (p+1), get_u8 s (p+2), get_u8 s (p+3)), p+4)
   | 0x67 -> (Contract_vm.SILU_INPLACE (get_u8 s p, get_u8 s (p+1)), p+2)
   | 0x68 -> (Contract_vm.ELEMWISE_MUL_INPLACE (get_u8 s p, get_u8 s (p+1), get_u8 s (p+2)), p+3)
   | 0x69 -> (Contract_vm.LOAD_INT8_BYTES_TO_MEM (get_u8 s p, get_u8 s (p+1), get_u8 s (p+2), get_u8 s (p+3), get_u8 s (p+4)), p+5)

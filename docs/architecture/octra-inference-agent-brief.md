@@ -244,6 +244,12 @@ Every frontier canary should preserve the five demo files above, keep
 failures as packet, admission-policy, missing-primitive, data-binding,
 effort/limit, determinism, or harness-only.
 
+Current LiteNode proof branch includes `LOAD_F32_LE_FP`. The next frontier bundle
+should use that real opcode for `load_f32_le_fp` and keep sentinel canaries only
+for the remaining missing order-3 operations. Before LiteNode adds those
+operations, provide scalar contracts and tiny golden fixtures for
+`ssm_conv_silu_fp`, `softplus_fp`, and `sigmoid_fp`.
+
 ## Current Interop Check
 
 The latest local interop smoke produced a five-file packet with a

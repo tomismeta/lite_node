@@ -75,7 +75,8 @@ let opcode_class = function
   | Contract_vm.FHE_DESER _
   | Contract_vm.FHE_SER_PK _
   | Contract_vm.FHE_DESER_PK _ -> Forbidden
-  | Contract_vm.FLOAD _ -> Requires "storage.authenticated-range"
+  | Contract_vm.FLOAD _
+  | Contract_vm.LOAD_F32_LE_FP _ -> Requires "storage.authenticated-range"
   | Contract_vm.EXP_Q16 _
   | Contract_vm.SOFTMAX_Q16_INPLACE _
   | Contract_vm.LAYERNORM_Q16_INPLACE _

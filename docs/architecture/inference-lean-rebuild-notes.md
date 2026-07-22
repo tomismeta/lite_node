@@ -169,12 +169,63 @@ direct canary should therefore compare the output cells decoded as little-endian
 binary64 bit patterns against `expected-output.f64le.bin`, while reporting the
 LiteNode session output root separately.
 
-Caveat: this evidence used the existing built VPS harness at LiteNode source
-commit `2a5803b`, with executable hash
-`98ac8bed595e180adb252f9e6247b4db6087db1b3d35b03e6544ab963d4cefcc`.
-The VPS source was not rebuilt for this rerun because `dune exec` was blocked
-by a missing `digestif.c`. Treat the result as valid gate evidence from that
-built harness, not as a fresh source-build reproducibility proof.
+The direct Q1-G128 canary now exists:
+
+```text
+/home/exedev/evidence/octra-inference/q1-g128-direct-canary-20260722-154147
+```
+
+It uses `LINEAR_Q1_G128_FP`, requests `tensor.q1-g128`, does not request
+`tensor.strict-fp`, binds the Q1 owner bytes through `model-ranges.json` and
+`FLOAD`, and keeps `target.json` model-neutral.
+The accepted LiteNode rerun is recorded beside the original artifact as
+`lite-node-admission-session-report.litenode-rerun.json`.
+
+## Schedule Frontier Bundle
+
+`octra-inference` emitted the first schedule-derived frontier bundle:
+
+```text
+/home/exedev/evidence/octra-inference/schedule-frontier-bundle-20260722-172350
+```
+
+The next Bonsai frontier is order `3`:
+`load_f32_le_fp + ssm_conv_silu_fp + softplus_fp + sigmoid_fp`. This branch now
+adds the generic `LOAD_F32_LE_FP` typed-ingress opcode under
+`storage.authenticated-range`. The remaining order-3 operations still require
+scalar contracts and golden fixtures before LiteNode should add opcodes or admit
+existing host-floating-point instructions.
+
+The source-built LiteNode harness was run from this branch with the explicit
+inference harness profile:
+
+```sh
+PATH="$HOME/.cargo/bin:$PATH" dune build --profile inference-harness tools/inference_admit.exe
+```
+
+The inference path remains independent of PVAC operations. On the latest
+upstream-based branch, the harness builds against the accepted PVAC backend
+rather than an unavailable replacement. The direct canary returned:
+
+| Field | Value |
+| --- | --- |
+| Status | `accepted` |
+| Program root | `56e62d99541f63047bf764284bd08eacf66adf193934e63e2f6e49aaf5f5d2cf` |
+| Requirement root | `86dd8f5c256316a284a25fdc8a8283276b1ad63b00e1a916e426dba8b526d2fd` |
+| Target root | `12f39161a78f6059002d6cd4478ff94baa30289a282cdcbba74165393db88cbd` |
+| Model ranges root | `6e424f390369268cfd1b04474d98811f1fa58741b2218c6b6ed5db9086e73bb5` |
+| Request root | `c71daa34cb9d5fa86d8d614d02d63feb8aa61e8a1e38a64e3d24438914e32f48` |
+| Program instructions | `1037` |
+| Program effects | `memory_read`, `memory_write` |
+| Output root | `c247a85d33a9f54701d786a08515ca57cce6da2ed18b49547720bfd6d816f215` |
+| Candidate root | `d963aa41b0250732baa50fb1c9089519a2eb129cef8a9214afc982174370ffd9` |
+| Effort delta | `2364` |
+| Consensus accepted | `false` |
+
+The raw tensor fixture remains separately rooted by `octra-inference`: output
+SHA-256 `43411283d083bd6e959bca6aa7edbebc55d8ad251510d992bd52046ac71d9d22`
+and raw tensor fixture root
+`ff5f8319d1e207f368c50ed98b8a361639db527f486c8acdbb62a2c56037cea1`.
 
 These proofs show:
 
@@ -311,9 +362,9 @@ The next useful packet from the `octra-inference` side is not another range
 smoke proof, reference-output canary, generic-`MATMUL_FP` primitive canary, or
 standalone Q1 fixture package. Those now exist.
 
-The next useful artifact is a schedule-derived frontier bundle. It should emit
-independent tiny canaries that each use `LINEAR_Q1_G128_FP` plus one generic
-operation family reached by the actual Bonsai path. Run `--scan-policy` on each
+The next useful artifact is a refreshed order-3 frontier bundle that uses the
+real `LOAD_F32_LE_FP` opcode and keeps sentinel canaries only for
+`ssm_conv_silu_fp`, `softplus_fp`, and `sigmoid_fp`. Run `--scan-policy` on each
 canary before trying `--run-session`. This lets LiteNode see several blockers in
 parallel without turning the VM into a speculative math-porting project.
 
