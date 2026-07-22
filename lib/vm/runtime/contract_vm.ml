@@ -140,6 +140,8 @@ type instr =
   | MATMUL_Q16 of reg * reg * reg * reg * reg * reg
   | LINEAR_Q1_G128_FP of reg * reg * reg * reg * reg * reg * reg
   | LOAD_F32_LE_FP of reg * reg * reg * reg
+  | SIGMOID_FP of reg * reg
+  | SOFTPLUS_FP of reg * reg
   | SHIFT_ROUND_INPLACE of reg * reg * reg
   | MATMUL_FP of reg * reg * reg * reg * reg * reg
   | RMSNORM_FP of reg * reg * reg
@@ -335,6 +337,8 @@ let effort_cost = function
   | MATMUL_Q16 _ -> 100
   | LINEAR_Q1_G128_FP _ -> 200
   | LOAD_F32_LE_FP _ -> 30
+  | SIGMOID_FP _ -> 20
+  | SOFTPLUS_FP _ -> 20
   | SHIFT_ROUND_INPLACE _ -> 5
   | MATMUL_FP _ -> 200
   | RMSNORM_FP _ -> 50
@@ -898,6 +902,9 @@ let strict_operands st = function
   | LOAD_F32_LE_FP (dst, source, offset, length) ->
     is_numeric (getr st dst) && is_text (getr st source)
     && is_numeric (getr st offset) && is_numeric (getr st length)
+  | SIGMOID_FP (addr, count)
+  | SOFTPLUS_FP (addr, count) ->
+    is_numeric (getr st addr) && is_numeric (getr st count)
   | APPEND_VEC_Q16 (dst, pos, source, length) ->
     List.for_all (fun reg -> is_numeric (getr st reg)) [dst; pos; source; length]
   | ARGMAX_Q16 (dest, addr, length) ->
@@ -951,6 +958,22 @@ let add_dyn_product st factors divisor =
   match Cost.scaled_product factors ~divisor with
   | None -> false
   | Some cost -> add_dyn_effort st cost
+
+let map_fp64_inplace st addr n f =
+  if n <= 0 || n > 131072 || not (valid_mem_span addr n) then revert st
+  else if not (add_dyn_product st [n; 3] 1) then revert st
+  else
+    let input = Array.init n (fun i -> mem_read_fp64 st.memory.data (addr + i)) in
+    if not (Array.for_all Option.is_some input) then revert st
+    else
+      let output = Array.map (fun value -> f (Option.get value)) input in
+      if not (Array.for_all finite_fp64 output) then revert st
+      else begin
+        for i = 0 to n - 1 do
+          mem_set_fp64 st.memory.data (addr + i) output.(i)
+        done;
+        true
+      end
 
 let object_apply_dyn_cost writes =
   List.fold_left
@@ -2178,7 +2201,18 @@ let exec_one st op =
              mem_set_fp64 st.memory.data (dst + i) decoded.(i)
            done;
            true
-         end
+       end
+     | _ -> revert st)
+  | SIGMOID_FP (rs_addr, rs_n) ->
+    (match read_int st rs_addr, read_int st rs_n with
+     | Some addr, Some n ->
+       map_fp64_inplace st addr n (fun x -> 1.0 /. (1.0 +. exp (-. x)))
+     | _ -> revert st)
+  | SOFTPLUS_FP (rs_addr, rs_n) ->
+    (match read_int st rs_addr, read_int st rs_n with
+     | Some addr, Some n ->
+       map_fp64_inplace st addr n (fun x ->
+         if x > 0.0 then x +. log1p (exp (-. x)) else log1p (exp x))
      | _ -> revert st)
   | MATMUL_FP (rd_addr, rs_lhs, rs_rhs, rs_m, rs_k, rs_n) ->
     let dst = Z.to_int (to_z (getr st rd_addr)) in
@@ -3128,6 +3162,8 @@ module Verifier = struct
             | MATMUL_Q16 (d,l,r,m,k,n) -> check_regs pc [d;l;r;m;k;n]
             | LINEAR_Q1_G128_FP (d,l,q,o,m,k,n) -> check_regs pc [d;l;q;o;m;k;n]
             | LOAD_F32_LE_FP (d,s,o,n) -> check_regs pc [d;s;o;n]
+            | SIGMOID_FP (a,n) -> check_regs pc [a;n]
+            | SOFTPLUS_FP (a,n) -> check_regs pc [a;n]
             | SHIFT_ROUND_INPLACE (a,n,b) -> check_regs pc [a;n;b]
             | MATMUL_FP (d,l,r,m,k,n) -> check_regs pc [d;l;r;m;k;n]
             | RMSNORM_FP (a,n,g) -> check_regs pc [a;n;g]

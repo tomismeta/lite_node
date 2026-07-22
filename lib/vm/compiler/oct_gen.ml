@@ -888,7 +888,7 @@ let rec typ_of_expr env = function
      | "relu" | "rmsnorm" | "rmsnorm_q16" | "silu" | "silu_q16" | "elemwise_mul"
      | "load_int8" | "load_int8_b64" | "residual_add" | "rope_apply" | "rope_apply_q16"
      | "matmul_q16" | "linear_q1_0_g128_fp" | "load_f32_le_fp" | "shift_round"
-     | "matmul_fp" | "rmsnorm_fp" | "silu_fp" | "elemwise_mul_fp"
+     | "matmul_fp" | "rmsnorm_fp" | "sigmoid_fp" | "softplus_fp" | "silu_fp" | "elemwise_mul_fp"
      | "residual_add_fp" | "rope_apply_fp" | "load_int8_fp"
      | "attention_kv_fp" | "attention_kv_q16" | "append_vec_fp"
      | "load_int8_q16" | "append_vec_q16" -> TBool
@@ -1584,6 +1584,20 @@ and gen_builtin env name args =
    | "rmsnorm_fp" ->
      emit env (Contract_vm.RMSNORM_FP (nth 0, nth 1, nth 2));
      emit env (Contract_vm.LDI (rd, VBool true))
+   | "sigmoid_fp" ->
+     if env.declaration <> ProgramDecl then
+       gerr env.line "sigmoid_fp is available only in Program"
+     else begin
+       emit env (Contract_vm.SIGMOID_FP (nth 0, nth 1));
+       emit env (Contract_vm.LDI (rd, VBool true))
+     end
+   | "softplus_fp" ->
+     if env.declaration <> ProgramDecl then
+       gerr env.line "softplus_fp is available only in Program"
+     else begin
+       emit env (Contract_vm.SOFTPLUS_FP (nth 0, nth 1));
+       emit env (Contract_vm.LDI (rd, VBool true))
+     end
    | "silu_fp" ->
      emit env (Contract_vm.SILU_FP (nth 0, nth 1));
      emit env (Contract_vm.LDI (rd, VBool true))

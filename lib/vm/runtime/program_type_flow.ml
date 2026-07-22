@@ -435,6 +435,8 @@ let step facts pc env = function
     expect_nums pc env [dest; left; right; rows; inner; cols]
   | Contract_vm.RMSNORM_FP (addr, count, gamma) ->
     expect_nums pc env [addr; count; gamma]
+  | Contract_vm.SIGMOID_FP (addr, count)
+  | Contract_vm.SOFTPLUS_FP (addr, count)
   | Contract_vm.SILU_FP (addr, count) ->
     expect_nums pc env [addr; count]
   | Contract_vm.ELEMWISE_MUL_FP (dest, source, count)

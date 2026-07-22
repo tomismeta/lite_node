@@ -244,11 +244,12 @@ Every frontier canary should preserve the five demo files above, keep
 failures as packet, admission-policy, missing-primitive, data-binding,
 effort/limit, determinism, or harness-only.
 
-Current LiteNode proof branch includes `LOAD_F32_LE_FP`. The next frontier bundle
-should use that real opcode for `load_f32_le_fp` and keep sentinel canaries only
-for the remaining missing order-3 operations. Before LiteNode adds those
-operations, provide scalar contracts and tiny golden fixtures for
-`ssm_conv_silu_fp`, `softplus_fp`, and `sigmoid_fp`.
+Current LiteNode proof branch includes `LOAD_F32_LE_FP`, `SIGMOID_FP`, and
+`SOFTPLUS_FP`. The next frontier bundle should use those real opcodes for
+`load_f32_le_fp`, `sigmoid_fp`, and `softplus_fp`, and keep a sentinel canary
+only for the remaining order-3 operation, `ssm_conv_silu_fp`. Before LiteNode
+adds that operation, decide whether the clean VM boundary is causal convolution
+plus activation composition or a separately justified fused primitive.
 
 ## Current Interop Check
 

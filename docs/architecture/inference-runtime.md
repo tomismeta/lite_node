@@ -344,9 +344,11 @@ and cross-build matrix live in Git and are identified by content roots. They
 do not require a manually named profile generation.
 
 Host floating-point tensor operations remain admission-disabled until that
-profile passes cross-build and cross-machine replay. A capability label alone
-does not authorize host floating point. First-class local or attested inference
-does not require premature consensus activation.
+profile passes cross-build and cross-machine replay, except for explicitly
+enumerated proof-harness opcodes admitted under a matching capability and
+numerical root. A capability label alone does not authorize host floating
+point. First-class local or attested inference does not require premature
+consensus activation.
 
 ### Sampling and selection
 

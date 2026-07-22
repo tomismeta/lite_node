@@ -153,6 +153,8 @@ let parse_line line =
       Contract_vm.LINEAR_Q1_G128_FP (r 0, r 1, r 2, r 3, r 4, r 5, r 6)
     | "LOAD_F32_LE_FP", [_;_;_;_] ->
       Contract_vm.LOAD_F32_LE_FP (r 0, r 1, r 2, r 3)
+    | "SIGMOID_FP", [_;_] -> Contract_vm.SIGMOID_FP (r 0, r 1)
+    | "SOFTPLUS_FP", [_;_] -> Contract_vm.SOFTPLUS_FP (r 0, r 1)
     | "FHE_LOAD_PK", [_;_] -> Contract_vm.FHE_LOAD_PK (r 0, r 1)
     | "FHE_ADD", [_;_;_;_] -> Contract_vm.FHE_ADD (r 0, r 1, r 2, r 3)
     | "FHE_SUB", [_;_;_;_] -> Contract_vm.FHE_SUB (r 0, r 1, r 2, r 3)
@@ -369,6 +371,8 @@ let emit_instr = function
   | Contract_vm.ARGMAX_Q16 (d,a,n) -> Printf.sprintf "ARGMAX_Q16 %s, %s, %s" (emit_reg d) (emit_reg a) (emit_reg n)
   | Contract_vm.LINEAR_Q1_G128_FP (d,l,q,o,m,k,n) -> Printf.sprintf "LINEAR_Q1_G128_FP %s, %s, %s, %s, %s, %s, %s" (emit_reg d) (emit_reg l) (emit_reg q) (emit_reg o) (emit_reg m) (emit_reg k) (emit_reg n)
   | Contract_vm.LOAD_F32_LE_FP (d,s,o,n) -> Printf.sprintf "LOAD_F32_LE_FP %s, %s, %s, %s" (emit_reg d) (emit_reg s) (emit_reg o) (emit_reg n)
+  | Contract_vm.SIGMOID_FP (a,n) -> Printf.sprintf "SIGMOID_FP %s, %s" (emit_reg a) (emit_reg n)
+  | Contract_vm.SOFTPLUS_FP (a,n) -> Printf.sprintf "SOFTPLUS_FP %s, %s" (emit_reg a) (emit_reg n)
   | Contract_vm.APPEND_VEC_FP (d,p,s,n) -> Printf.sprintf "APPEND_VEC_FP %s, %s, %s, %s" (emit_reg d) (emit_reg p) (emit_reg s) (emit_reg n)
 
 let emit instrs =

@@ -81,6 +81,8 @@ let host_float_cases = [
   ("append-fp", "APPEND_VEC_FP", VM.APPEND_VEC_FP (0, 1, 2, 3));
   ("linear-q1-g128", "LINEAR_Q1_G128_FP",
    VM.LINEAR_Q1_G128_FP (0, 1, 2, 3, 4, 5, 6));
+  ("sigmoid-fp", "SIGMOID_FP", VM.SIGMOID_FP (0, 1));
+  ("softplus-fp", "SOFTPLUS_FP", VM.SOFTPLUS_FP (0, 1));
 ]
 
 let profiled_cases = [

@@ -142,6 +142,8 @@ let opcode_name = function
   | VM.MATMUL_Q16 _ -> "MATMUL_Q16"
   | VM.LINEAR_Q1_G128_FP _ -> "LINEAR_Q1_G128_FP"
   | VM.LOAD_F32_LE_FP _ -> "LOAD_F32_LE_FP"
+  | VM.SIGMOID_FP _ -> "SIGMOID_FP"
+  | VM.SOFTPLUS_FP _ -> "SOFTPLUS_FP"
   | VM.SHIFT_ROUND_INPLACE _ -> "SHIFT_ROUND_INPLACE"
   | VM.MATMUL_FP _ -> "MATMUL_FP"
   | VM.RMSNORM_FP _ -> "RMSNORM_FP"
@@ -175,7 +177,9 @@ let admission_class = function
   | VM.ATTENTION_KV_FP _
   | VM.APPEND_VEC_FP _
   | VM.LINEAR_Q1_G128_FP _
-  | VM.LOAD_F32_LE_FP _ -> Consensus_unsafe
+  | VM.LOAD_F32_LE_FP _
+  | VM.SIGMOID_FP _
+  | VM.SOFTPLUS_FP _ -> Consensus_unsafe
   | VM.EXP_Q16 _
   | VM.SOFTMAX_Q16_INPLACE _
   | VM.LAYERNORM_Q16_INPLACE _

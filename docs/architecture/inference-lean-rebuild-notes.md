@@ -118,9 +118,10 @@ The direct rerun on 2026-07-22 returned:
 The primitive canary proves that range binding and packet neutrality are good
 enough to hit a real primitive admission decision. It does not justify
 admitting `MATMUL_FP`. In this branch, `tensor.strict-fp` remains a roadmap
-capability family, not an accepted consensus profile. Broad host floating-point
-execution should stay rejected until LiteNode has deterministic numerical
-semantics, fixtures, and cross-platform conformance tests.
+capability family and proof-harness gate for enumerated activation opcodes, not
+an accepted consensus profile. Broad host floating-point execution should stay
+rejected until LiteNode has deterministic numerical semantics, fixtures, and
+cross-platform conformance tests.
 
 The lean path should instead add the smallest deterministic, model-neutral
 primitive needed by Bonsai/Qwen projection, most likely a Q1-G128 projection
@@ -181,6 +182,12 @@ It uses `LINEAR_Q1_G128_FP`, requests `tensor.q1-g128`, does not request
 The accepted LiteNode rerun is recorded beside the original artifact as
 `lite-node-admission-session-report.litenode-rerun.json`.
 
+The same proof branch now exposes the standalone activation frontier as
+`SIGMOID_FP` and `SOFTPLUS_FP`, gated in plain inference by explicit
+`tensor.strict-fp`. The gate is enumerated opcode-by-opcode; it does not
+authorize `RMSNORM_FP`, `SILU_FP`, or the rest of the older host-floating-point
+family.
+
 ## Schedule Frontier Bundle
 
 `octra-inference` emitted the first schedule-derived frontier bundle:
@@ -192,9 +199,11 @@ The accepted LiteNode rerun is recorded beside the original artifact as
 The next Bonsai frontier is order `3`:
 `load_f32_le_fp + ssm_conv_silu_fp + softplus_fp + sigmoid_fp`. This branch now
 adds the generic `LOAD_F32_LE_FP` typed-ingress opcode under
-`storage.authenticated-range`. The remaining order-3 operations still require
-scalar contracts and golden fixtures before LiteNode should add opcodes or admit
-existing host-floating-point instructions.
+`storage.authenticated-range` and the standalone activation opcodes
+`SIGMOID_FP` and `SOFTPLUS_FP` under explicit `tensor.strict-fp` proof
+admission. The remaining order-3 operation still requires a separate design
+decision before LiteNode should add a fused opcode or admit existing
+host-floating-point instructions.
 
 The source-built LiteNode harness was run from this branch with the explicit
 inference harness profile:
@@ -363,10 +372,10 @@ smoke proof, reference-output canary, generic-`MATMUL_FP` primitive canary, or
 standalone Q1 fixture package. Those now exist.
 
 The next useful artifact is a refreshed order-3 frontier bundle that uses the
-real `LOAD_F32_LE_FP` opcode and keeps sentinel canaries only for
-`ssm_conv_silu_fp`, `softplus_fp`, and `sigmoid_fp`. Run `--scan-policy` on each
-canary before trying `--run-session`. This lets LiteNode see several blockers in
-parallel without turning the VM into a speculative math-porting project.
+real `LOAD_F32_LE_FP`, `SIGMOID_FP`, and `SOFTPLUS_FP` opcodes, and keeps a
+sentinel canary only for `ssm_conv_silu_fp`. Run `--scan-policy` on each canary
+before trying `--run-session`. This lets LiteNode see the remaining blocker
+without turning the VM into a speculative math-porting project.
 
 Preserve the same model-neutral packet boundary, keep Bonsai/Qwen/tokenizer
 details in sidecars, and classify every failure as a packet, admission-policy,

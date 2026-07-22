@@ -53,15 +53,17 @@ earliest roadmap phase in which the semantic disposition can be accepted.
 | little-endian F32 load | primitive | `storage.authenticated-range` | 3 |
 | RMS normalization with epsilon | primitive | `tensor.strict-fp` | 3 |
 | L2 normalization | conditional primitive | `tensor.strict-fp` | 4 |
-| sigmoid | conditional primitive | `tensor.strict-fp` | 4 |
-| softplus | conditional primitive | `tensor.strict-fp` | 4 |
+| sigmoid | primitive | `tensor.strict-fp` | 3 |
+| softplus | primitive | `tensor.strict-fp` | 3 |
 | causal convolution with state | primitive | `sequence.causal-convolution` | 4 |
 | gated delta-rule update | candidate primitive | `sequence.delta-rule` | 4 |
 | interleaved multi-axis RoPE | composition | `tensor.attention` | 3 |
 
-`tensor.strict-fp` rows are future semantic commitments. The current plain
-inference admission path still rejects host-floating-point VM opcodes until an
-exact numerical profile and replay gate exist.
+`tensor.strict-fp` remains a proof-harness capability. Plain inference admission
+only accepts explicitly enumerated proof opcodes under that capability; it does
+not open the existing host-floating-point family. Default node support should
+not advertise `tensor.strict-fp` until the numerical root and replay gate are
+ready for production use.
 
 `tensor.q1-g128` now has a proof-branch scalar fixture and VM opcode for the
 linear case. That is sufficient for the next direct Bonsai primitive canary.
@@ -158,22 +160,35 @@ explicit.
 
 Legacy label: `sigmoid_fp`.
 
-Disposition: **conditional primitive**.
+Disposition: **primitive** when the generated schedule consumes the standalone
+activation result.
 
 The fact that SiLU computes a sigmoid internally does not expose the sigmoid
 result. A standalone operation is justified only when generated code consumes
 that result independently. Algebraic recovery from SiLU is rejected because it
 changes zero handling and numerical semantics.
 
+Proof-branch status: `SIGMOID_FP` implements the schedule frontier scalar
+contract as an in-place bounded f64 vector operation. It is admitted only by
+the inference policy when `tensor.strict-fp` is present; generic Program
+admission still rejects it as consensus unsafe.
+
 ### Softplus
 
 Legacy label: `softplus_fp`.
 
-Disposition: **conditional primitive**.
+Disposition: **primitive** when the generated schedule consumes the standalone
+activation result.
 
 Softplus becomes a standalone operation only when target composition needs its
 output outside a larger accepted transition. Its stable piecewise evaluation
 and overflow behavior belong to the numerical profile.
+
+Proof-branch status: `SOFTPLUS_FP` implements the schedule frontier scalar
+contract using the stable branch `x + ln1p(exp(-x))` for positive inputs and
+`ln1p(exp(x))` otherwise. It is admitted only by the inference policy when
+`tensor.strict-fp` is present; generic Program admission still rejects it as
+consensus unsafe.
 
 If sigmoid or softplus is used only inside an accepted delta-rule transition,
 its semantics may remain part of that transition instead of adding another
@@ -283,8 +298,8 @@ The likely requirement surface is intentionally coarser than the legacy list:
 - `sequence.delta-rule`; and
 - `storage.authenticated-range`.
 
-`tensor.strict-fp` remains listed here as a roadmap family, not an admitted
-plain-runtime capability.
+`tensor.strict-fp` remains a roadmap family and proof-harness capability, not
+a default plain-runtime capability.
 
 These names are descriptive handles. The semantic root, not a number appended
 to the name, identifies the exact accepted definition.
