@@ -9,11 +9,25 @@ fresh `upstream/main`.
 
 ## Current Evidence
 
-The strongest completed VM-side proof is the Bonsai slim range/session run on
-the inference VPS:
+There are two completed VM-side proofs on the inference VPS.
+
+The first is the Bonsai slim range/session run:
 
 ```text
 /home/exedev/evidence/octra-inference/bonsai-slim-range-session-20260722-031944
+```
+
+It admits and executes an eight-instruction range-read smoke program with one
+authenticated model range. The direct rerun on 2026-07-22 returned
+`status=accepted`, output root
+`c4b6e2bd7fc99932610633bdcfe9a0083b1658d5eb345ec652a5584a3174f238`,
+candidate root `e1e4660ac0eb18d914f8bf654f9b2585cbfba339536f595abe7438d75b2efe46`,
+and `consensus_accepted=false`.
+
+The second, stronger proof is the Bonsai/Qwen reference-output canary:
+
+```text
+/home/exedev/evidence/octra-inference/bonsai-qwen-canary-20260722-115933
 ```
 
 The packet was emitted by `octra-inference` and admitted by the LiteNode
@@ -28,21 +42,45 @@ The direct rerun on 2026-07-22 returned:
 | Field | Value |
 | --- | --- |
 | Status | `accepted` |
-| Program root | `b745dca633e034f702f98c1e44c2acb55b656d1edd853dd6e4f1d4a864c69509` |
-| Requirement root | `71c0e07327526c04cd9cae8a3b730b0c8014f8aee8b0de9a37fd33e4d2fb12a6` |
-| Target root | `5a76493a52e4705b417051c841a8d6e6294e41e901f7a546cbfafbbc7a1de36c` |
-| Request root | `5448511b2a531609fc7ca7c9002d45c51da3df1118e6f777432ddacc9168a521` |
-| Model ranges root | `c9f94eb82cfdfedd14b0b1c2ea038be7ea56dfe5e8ceea8dc6206538c0712b71` |
-| Program instructions | `8` |
-| Program effects | `memory_write` |
+| Program root | `a8974fd88f84f7c7b1d60018524c563a8b65633e5e81a7ed371b841761d9cca1` |
+| Requirement root | `4addd0966ae40f9987da47619a9a133a84935a23d8d1b3a6936c0a457b183051` |
+| Target root | `ac5b0da3ed1b2ad2bbe89020016af8f41e563df39d5f0936b33783e6df32fbd1` |
+| Request root | `0c0a5bda0f4e4733d630bb3687e8277f3b600b38f9db61576c8036659902945f` |
+| Model ranges root | `7c62e4d070b9275920adf543d8d0b663715bb92b4d7a6a1c5db3162292f4b117` |
+| Program bytes | `920` |
+| Program instructions | `9` |
+| Program effects | `memory_write`, `memory_read` |
 | Model range count | `1` |
 | Entrypoint | `advance` at label `100` |
-| Output root | `c4b6e2bd7fc99932610633bdcfe9a0083b1658d5eb345ec652a5584a3174f238` |
-| Candidate root | `e1e4660ac0eb18d914f8bf654f9b2585cbfba339536f595abe7438d75b2efe46` |
-| Effort delta | `111` |
+| Output root | `17f407f6b6575913f1e9614d16569be4c7646d22fb5f505289af3f35496c2966` |
+| Candidate root | `de9b5af76925c08216f7cbb45deb4c8bea5cd092fad6fe0641842ce2f98831fc` |
+| Effort delta | `15` |
 | Consensus accepted | `false` |
 
-This proves:
+The accepted canary includes:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `program.ocpg` | `b0d615a47f65456d783fbc8de5d3f8ce74fe977c2f7e96edf2b78fdb63f9f2e5` |
+| `requirement.json` | `056eb61e7179b59a0cadcd4ccc2bd2264211565ed8a48e8cdfb538cb8f3c3996` |
+| `target.json` | `b5b58b097b9dd6c0bf9d691154e88df1aef60450057fc8136f5f2b8b368c0701` |
+| `request.json` | `b854e6b1627fe2ae2b31b36da882f1f07740e8e1f47af51e004485baf1799364` |
+| `model-ranges.json` | `17af531afbb08f23acc507723606d8079a07bca09d81f1d817568140626d2d51` |
+| `request-input.json` | `1735d767ed73ef9078c082bdef8edf17ff293f14b5bde56f72562b423a221fd4` |
+| `reference-output.cjson` | `b552ac18f2cf4d69c0bf6bfeee7c9607b6dd36dc460a15d3e362e455a3c7bcef` |
+| `opcode-manifest.json` | `d8ec170017b4f7334d4884c9f8a9292d0dc70ec09b8cea1b390077293464282b` |
+| `unsupported-capability-assumptions.json` | `71a5b819037cc86d25505838531799f47caa1a97ba834b045ac8774562d9d24e` |
+| `admission-report.json` | `95c063e200ba8760e5aa50998b7c5a06e2a8983c893288f3a74cdc24dbd852db` |
+
+The canary reference execution used Bonsai 27B GGUF source hash
+`17ef842e47450caeb8eaa3ebfbbab5d2f2278b62b79be107985fb69a2f819aa0`,
+prompt `In a hidden network, the model whispered`, generated token id `310`,
+generated text ` to`, expected output SHA-256
+`6ebe62fa9087afa9a69b0b0baf0533ac07b8711db7ff11771e953d9540bf4a1f`,
+and expected output root
+`f3f1c38b855446011b4706015bee9a16406b3d0af4484172e76e586bba13367c`.
+
+These proofs show:
 
 - OCPG program-envelope admission works through the LiteNode harness.
 - Requirement, target, request, and model-range roots bind coherently.
@@ -52,6 +90,8 @@ This proves:
   model range.
 - The local session path can open, advance, finalize, and emit output,
   candidate, session, and receipt roots.
+- A Bonsai/Qwen reference-output sidecar can stay outside the VM while the VM
+  admits and executes the small model-neutral output ABI program.
 
 This does not prove:
 
@@ -61,54 +101,19 @@ This does not prove:
 - The current session and receipt protocol should survive into the lean branch.
 - Consensus or encrypted inference is ready.
 
-## Bonsai Canary Status
+## Gap Classification
 
-A stronger one-token reference-output canary was attempted on the VPS:
+The accepted reference-output canary is intentionally an ABI and boundary proof.
+Its unsupported-assumptions sidecar states that it does not claim LiteNode
+executes the full Qwen/Bonsai graph. Full Bonsai execution still requires
+VM-native support for the Qwen35/Bonsai kernel set, including Q1 grouped binary
+projections, deterministic RMSNorm with model epsilon, RoPE, attention,
+SSM/recurrent state, softmax/argmax, tokenizer-compatible session state, and
+bounded output receipts.
 
-```text
-/home/exedev/evidence/octra-inference/bonsai-canary-packet-20260722-114633
-```
-
-It uses:
-
-```text
-/home/exedev/models/bonsai/Bonsai-27B-Q1_0.gguf
-/home/exedev/models/bonsai-27b-octra-q1-bundled
-/home/exedev/codex-edit/octra-inference-lite-node-admission-adapter/target/release/octra-inference
-```
-
-The reference side completed and wrote:
-
-| Artifact | SHA-256 |
-| --- | --- |
-| `packet/reference-output.cjson` | `67df6c6a9c9ab07acb592bc1d85e2ba9687ea73d46e1676692a8fe4dc2511c3d` |
-| `packet/opcode-manifest.json` | `d8ec170017b4f7334d4884c9f8a9292d0dc70ec09b8cea1b390077293464282b` |
-| `packet/unsupported-capability-assumptions.json` | `71a5b819037cc86d25505838531799f47caa1a97ba834b045ac8774562d9d24e` |
-
-The expected reference output is:
-
-| Field | Value |
-| --- | --- |
-| Generated text | `One` |
-| Generated token id | `3833` |
-| Expected output root | `4374f65fc875ba67eb98770874794a1d75cf71537db3439b63ee235a25191cc9` |
-| Expected output SHA-256 | `5d3c7b1f6cedbfade29a6c9e5b2a01df796207e3c748619d6bc1db3a56f9d4ea` |
-| Final hidden SHA-256 | `666ba09199554f24ea04e17b24999391f6fd22d3ead502d3429ac62d30384308` |
-| Final norm SHA-256 | `49fe2f2a3d5aad5f959927f8201ff46a097f51180830a5005827a52e309366dd` |
-| Logits SHA-256 | `4fc46f7f8728b92d13c7d2fe74a70ba854a13de63a9e0cf411ecd25dcf6e541b` |
-
-Packet completion failed before `program.ocpg`, `requirement.json`,
-`target.json`, `request.json`, `model-ranges.json`, and the LiteNode admission
-report were written:
-
-```text
-error: OCTB bytecode is not in canonical LiteNode encoding
-```
-
-This is classified as a packet/encoding producer gap on the `octra-inference`
-side. It does not establish a new LiteNode primitive requirement. The next
-`octra-inference` action is to make the reference-output canary emit canonical
-OCPG/OCTB bytes accepted by the existing LiteNode decoder.
+This accepted canary therefore does not establish a new primitive requirement
+by itself. It establishes that the packet boundary, target neutrality,
+reference-output sidecars, immutable range pinning, and output ABI are coherent.
 
 Future failures should be classified into one of these buckets before changing
 LiteNode:
@@ -199,41 +204,23 @@ The lean branch should not automatically port these proof-branch surfaces:
 ## Next Ask For `octra-inference`
 
 The next useful packet from the `octra-inference` side is not another range
-smoke proof. It is the smallest completed reference-output canary:
+smoke proof or reference-output canary. Those now exist.
 
-```text
-octra-inference demo bonsai-canary-packet \
-  --gguf /home/exedev/models/bonsai/Bonsai-27B-Q1_0.gguf \
-  --release /home/exedev/models/bonsai-27b-octra-q1-bundled \
-  --rehearsal \
-  --out <evidence-dir>/packet \
-  --prompt <short prompt> \
-  --max-new-tokens 1 \
-  --qwen35-chat \
-  --disable-thinking \
-  --session-abi-root 5f4adf0f9083297e5d89e82b504ce113e532264ec9ebc5403a8c7cdba19de26e \
-  --entrypoint advance=100 \
-  --request-entrypoint advance \
-  --admission-harness /home/exedev/codex-edit/octra-lite-node-inference/_build/default/tools/inference_admit.exe \
-  --admission-report <evidence-dir>/admission-report.json \
-  --run-session
-```
+The next useful artifact is the first VM-native Bonsai primitive canary:
 
-That packet must include:
+1. Emit the smallest program that uses one real generic inference primitive
+   required by Bonsai, starting with immutable-range-backed Q1 grouped linear
+   projection unless the `octra-inference` agent has a smaller blocker.
+2. Include a reference-output sidecar with expected root and tensor/output
+   hashes from `octra-inference`.
+3. Include an opcode manifest ordered by first use.
+4. Keep `target.json` model-neutral.
+5. Run the LiteNode admission/session harness and classify any failure as a
+   packet, admission-policy, missing-primitive, data-binding, effort/limit,
+   determinism, or harness-only gap.
 
-- `program.ocpg`;
-- `requirement.json`;
-- `target.json`;
-- `request.json`;
-- `model-ranges.json`;
-- `request-input.json`;
-- `reference-output.cjson`;
-- `opcode-manifest.json`;
-- `unsupported-capability-assumptions.json`; and
-- the LiteNode admission/session report.
-
-Only after that packet is available should the VM add or revise generic math
-capabilities.
+Only after that primitive canary fails for a classified LiteNode reason should
+the VM add or revise generic math capabilities.
 
 ## Rebuild Acceptance Bar
 
@@ -244,6 +231,6 @@ The fresh branch is ready to replace this proof branch when:
 - inference code is isolated behind the inference wrapper/runtime modules;
 - the slim range/session packet still admits and executes its eight-instruction
   smoke program;
-- the reference-output canary either admits or fails with a classified generic
-  primitive gap; and
+- the Bonsai/Qwen reference-output canary still admits and executes its
+  nine-instruction output ABI program; and
 - all design notes can be reduced to one short architecture note plus tests.
