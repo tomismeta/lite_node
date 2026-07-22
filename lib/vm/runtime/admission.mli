@@ -14,13 +14,7 @@ type error =
 
 val of_code : Contract_vm.instr array -> (t, error) result
 val of_program : ?facts:Program_type_flow.facts -> Contract_vm.instr array -> (t, error) result
-val of_program_with_requirement :
-  ?facts:Program_type_flow.facts ->
-  support:Execution_requirement.support ->
-  requirement:Execution_requirement.t ->
-  Contract_vm.instr array ->
-  (t, error) result
-val of_inference_program_with_requirement :
+val of_inference_code_with_requirement :
   ?facts:Program_type_flow.facts ->
   support:Execution_requirement.support ->
   requirement:Execution_requirement.t ->
@@ -39,4 +33,5 @@ val code : t -> Contract_vm.instr array
 val effects : t -> Program_effects.t
 val profile : t -> profile
 val requirement : t -> Execution_requirement.t option
+val certified_source : t -> bool
 val error_message : error -> string

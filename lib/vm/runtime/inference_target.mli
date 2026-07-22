@@ -32,6 +32,8 @@ type error =
   | Bad_root of string
   | Bad_name of string
   | Bad_entrypoint of string * int
+  | Uncertified_entrypoint of string * int
+  | Uncertified_program
   | Duplicate_entrypoint of string
   | Program_root_mismatch of string * string
   | Missing_requirement

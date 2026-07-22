@@ -71,9 +71,7 @@ let support =
 let code = [| VM.JDEST 100; VM.STOP |]
 
 let admitted () =
-  match Admission.of_program_with_requirement ~support ~requirement code with
-  | Ok admitted -> admitted
-  | Error error -> failwith (Admission.error_message error)
+  Inference_cert.admit ~support ~requirement code
 
 let target admitted =
   Target.{
@@ -137,6 +135,15 @@ let check_missing_requirement () =
      | Error Target.Missing_requirement -> ()
      | _ -> failwith "expected missing requirement")
 
+let check_uncertified_program () =
+  let expected = target (admitted ()) in
+  match Admission.of_inference_code_with_requirement ~support ~requirement code with
+  | Error error -> failwith (Admission.error_message error)
+  | Ok admitted ->
+    (match Target.check ~admitted expected with
+     | Error Target.Uncertified_program -> ()
+     | _ -> failwith "expected uncertified inference program")
+
 let check_missing_entrypoint_label () =
   let admitted = admitted () in
   let target = target admitted in
@@ -147,8 +154,8 @@ let check_missing_entrypoint_label () =
     }
   in
   match Target.check ~admitted target with
-  | Error (Target.Bad_entrypoint ("advance", 101)) -> ()
-  | _ -> failwith "expected bad entrypoint label"
+  | Error (Target.Uncertified_entrypoint ("advance", 101)) -> ()
+  | _ -> failwith "expected uncertified entrypoint label"
 
 let check_duplicate_entrypoint () =
   let admitted = admitted () in
@@ -186,6 +193,7 @@ let () =
   check_program_root_mismatch ();
   check_requirement_root_mismatch ();
   check_missing_requirement ();
+  check_uncertified_program ();
   check_missing_entrypoint_label ();
   check_duplicate_entrypoint ();
   check_bad_entrypoint_name ()

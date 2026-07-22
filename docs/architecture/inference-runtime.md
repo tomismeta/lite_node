@@ -179,10 +179,11 @@ The exact names are protocol decisions made with the first implementation.
 They must remain algorithmic and model neutral.
 
 The node advertises supported requirements. Admission performs exact matching
-of capability roots, numerical profile roots, and effort schedule roots
-together. It does not negotiate a fallback or silently downgrade a target.
-Kernel names and CPU features belong in runtime evidence, not in the semantic
-requirement root.
+of declared capability roots, numerical profile roots, and effort schedule
+roots together. It does not negotiate a fallback or silently downgrade a
+target. Kernel names and CPU features belong in runtime evidence, not in the
+semantic requirement root. Runtime-derived support roots require the VM
+semantic inventory to be executable and are not claimed by the local harness.
 
 ### Target
 
@@ -433,7 +434,7 @@ authenticate and pin immutable owner bytes, bind them with a request and
 authenticated input into one execution plan, execute one target-owned
 `advance`, finalize, and emit output and diagnostic candidate roots. The
 plan-bound runner is still local candidate evidence: it does not provide
-resident model state,
+runtime-derived support roots, resident model state,
 node scheduling, or qualified Bonsai numerical semantics. The Bonsai canary is
 not complete until accepted tensor primitives execute the target-owned
 numerical path inside LiteNode.

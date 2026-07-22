@@ -26,6 +26,7 @@ type error =
   | Invalid_output of string
   | Missing_output_cell of int
   | Output_limit_exceeded of int * int
+  | Scratch_limit_exceeded of int * int
   | Execution_failed
 
 let sha256 raw =
@@ -199,11 +200,26 @@ let add_pins state pins =
       Hashtbl.replace state.Contract_vm.blobs range.range_root range.bytes)
     (Inference_store.ranges pins)
 
+let check_scratch_limit state ~max_bytes =
+  match memory_payload state with
+  | Error error -> Error error
+  | Ok payload ->
+    let length = String.length payload in
+    if length > max_bytes then Error (Scratch_limit_exceeded (length, max_bytes))
+    else Ok ()
+
+let plain_ctx =
+  {
+    Contract_vm.default_ctx with
+    allow_fhe_capability = (fun _ -> false);
+  }
+
 let run ~plan () =
   let admitted = Inference_plan.admitted plan in
   let target = Inference_plan.target plan in
   let request = Inference_plan.request plan in
   let pins = Inference_plan.pins plan in
+  let requirement = Inference_plan.requirement plan in
   match Inference_target.entry_label target request.entrypoint with
   | None -> Error (Entrypoint_unsupported request.entrypoint)
   | Some label ->
@@ -213,6 +229,7 @@ let run ~plan () =
        let state =
          Contract_vm.create_state
            ~limit:request.Inference_request.max_advance_effort
+           ~ctx:plain_ctx
            ~strict_values:true
            ~strict_blobs:true
            ~caller:"oct11111111111111111111111111111111111111111111"
@@ -232,27 +249,34 @@ let run ~plan () =
        if not (Contract_vm.run state fixed) || state.Contract_vm.reverted then
          Error Execution_failed
        else
-        (match
-           output_payload
-             state
-             ~max_bytes:request.Inference_request.max_output_bytes,
-           candidate_payload state
-         with
-         | Ok output, Ok candidate ->
-            Ok {
-              effort_used = state.Contract_vm.effort_used;
-              output_root =
-                output_root
-                  ~target_root:(Inference_target.root target)
-                  ~session_abi_root:target.Inference_target.session_abi_root
-                  output;
-              candidate_root =
-                candidate_root
-                  ~target_root:(Inference_target.root target)
-                  candidate;
-            }
-          | Error error, _
-          | _, Error error -> Error error))
+         (match
+            check_scratch_limit
+              state
+              ~max_bytes:requirement.Execution_requirement.limits.max_scratch_bytes
+          with
+          | Error error -> Error error
+          | Ok () ->
+            (match
+               output_payload
+                 state
+                 ~max_bytes:request.Inference_request.max_output_bytes,
+               candidate_payload state
+             with
+             | Ok output, Ok candidate ->
+               Ok {
+                 effort_used = state.Contract_vm.effort_used;
+                 output_root =
+                   output_root
+                     ~target_root:(Inference_target.root target)
+                     ~session_abi_root:target.Inference_target.session_abi_root
+                     output;
+                 candidate_root =
+                   candidate_root
+                     ~target_root:(Inference_target.root target)
+                     candidate;
+               }
+             | Error error, _
+             | _, Error error -> Error error)))
 
 let error_message = function
   | Entrypoint_unsupported name ->
@@ -267,5 +291,9 @@ let error_message = function
   | Output_limit_exceeded (required, available) ->
     Printf.sprintf
       "inference output exceeds limit: required %d available %d"
+      required available
+  | Scratch_limit_exceeded (required, available) ->
+    Printf.sprintf
+      "inference scratch exceeds limit: required %d available %d"
       required available
   | Execution_failed -> "inference execution failed"

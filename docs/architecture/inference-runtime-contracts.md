@@ -30,13 +30,13 @@ the encoded object, not in capability names or module names.
 
 ## Root Domains
 
-Every root uses canonical encoding and a distinct domain separator. The local
-implementation uses LiteNode's canonical JSON encoders for descriptor objects
-and the existing bytecode encoder for programs; golden fixtures preserve those
-decisions.
+Every root uses a schema-specific encoding and a distinct domain separator. The
+local implementation uses fixed field order for records, explicit sorting for
+semantic sets, and the existing bytecode encoder for programs; golden fixtures
+preserve those decisions.
 
-`H` reuses LiteNode's existing hash implementation and canonical encoding
-infrastructure. Inference adds domain tags, not a second hashing stack.
+`H` reuses LiteNode's existing hash implementation plus schema-owned
+deterministic encoders. Inference adds domain tags, not a second hashing stack.
 
 ```text
 requirement_root = H("octra:inference:requirement\0" || requirement)
@@ -50,9 +50,11 @@ checkpoint_root  = H("octra:inference:checkpoint\0"  || checkpoint)
 receipt_root     = H("octra:inference:receipt\0"     || receipt)
 ```
 
-Canonical maps sort keys. Canonical sets sort by encoded value. Integer and
-floating-point encodings are explicit. Unknown fields fail closed unless a
-format explicitly declares them non-semantic.
+Incoming JSON object order is not semantic: packets are parsed into typed
+records and re-encoded before hashing. Unknown fields fail closed unless a
+format explicitly declares them non-semantic. A future binary descriptor
+encoding may replace JSON, but it must preserve the same field semantics and
+golden roots or land as an explicit incompatible encoding.
 
 ## Execution Requirement
 
@@ -87,6 +89,10 @@ capability names. Authenticated range loads require
 consensus-safe admission path until a numerical profile defines and enforces
 their semantics. A capability declaration never turns an otherwise unsafe
 instruction into a consensus-safe one.
+
+Plain inference forbids `FHE_*` opcodes. Encrypted inference must enter through
+a separately defined encrypted profile; the plain runner also disables FHE in
+its VM execution context.
 
 Multiple definitions may coexist during a rollout because their roots differ.
 Removing support is an operator and network activation decision recorded in
@@ -248,6 +254,9 @@ is a pure read and may race with a mutation; it returns one coherent snapshot.
 state quota, and creates sequence zero. Those reservations remain until
 `finalize` or `cancel`.
 
+The first local runner enforces `max_session_bytes` against the canonical
+session identity encoding at transition boundaries.
+
 Model residency, prepared views, and candidate workspace are acquired per
 advance. Insufficient transient capacity returns `Resource_unavailable` or
 leaves the advance queued under explicit scheduler policy. It never changes
@@ -396,6 +405,10 @@ Programs may read authenticated immutable ranges and allocate bounded
 session-local scratch. Scratch is not authenticated model state. It becomes
 externally meaningful only when committed through a canonical output, session,
 or optional checkpoint root.
+
+The first local runner enforces `max_scratch_bytes` against the canonical
+mutable-memory payload at the transition boundary. Peak host allocation
+reservation is deferred until VM memory writes share one bounded allocator.
 
 Prepared views are deterministic derivatives of authenticated ranges. They are
 read-only, bounded, pinned while in use, and evictable afterward. Preparation

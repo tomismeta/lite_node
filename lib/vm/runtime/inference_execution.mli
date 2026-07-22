@@ -26,6 +26,7 @@ type error =
   | Invalid_output of string
   | Missing_output_cell of int
   | Output_limit_exceeded of int * int
+  | Scratch_limit_exceeded of int * int
   | Execution_failed
 
 val run :

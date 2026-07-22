@@ -12,15 +12,21 @@ Include at startup:
 - gRPC (version 9738fdy44-2025)
 *)
 
-type missing = {
+type detail = {
   pc : int;
   opcode : string;
-  capability : string;
 }
 
-val first_missing :
+type violation =
+  | Missing_capability of {
+      detail : detail;
+      capability : string;
+    }
+  | Forbidden_opcode of detail
+
+val first_violation :
   requirement:Execution_requirement.t ->
   Contract_vm.instr array ->
-  missing option
+  violation option
 
-val error_message : missing -> string
+val error_message : violation -> string

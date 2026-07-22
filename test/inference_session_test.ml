@@ -13,7 +13,6 @@ Include at startup:
 *)
 
 
-module Admission = Octra_vm.Admission
 module Model = Octra_vm.Inference_model
 module Plan = Octra_vm.Inference_plan
 module Receipt = Octra_vm.Inference_receipt
@@ -40,7 +39,7 @@ let limits =
   Req.{
     max_model_bytes = 64;
     max_view_bytes = 64;
-    max_session_bytes = 64;
+    max_session_bytes = 512;
     max_scratch_bytes = 0;
     max_output_bytes = 32;
     max_advance_effort = 16;
@@ -67,9 +66,7 @@ let support =
 let code = [| VM.JDEST 100; VM.STOP |]
 
 let admitted () =
-  match Admission.of_program_with_requirement ~support ~requirement code with
-  | Ok admitted -> admitted
-  | Error error -> failwith (Admission.error_message error)
+  Inference_cert.admit ~support ~requirement code
 
 let target admitted =
   Target.{
@@ -192,8 +189,88 @@ let check_cancel_terminal () =
      | Error Session.Terminal_session -> ()
      | _ -> failwith "expected terminal session")
 
+let limited_plan max_session_bytes =
+  let limits = Req.{ limits with max_session_bytes } in
+  let requirement = Req.{ requirement with limits } in
+  let support = Req.{ support with support_limits = limits } in
+  let admitted =
+    Inference_cert.admit ~support ~requirement code
+  in
+  let target =
+    Target.{
+      program_root = Target.program_root admitted;
+      requirement_root = Req.root requirement;
+      model_root = hex_root 'e';
+      execution_descriptor_root = hex_root '1';
+      store_root = hex_root '2';
+      session_abi_root = hex_root '3';
+      entrypoints = [{ entry_name = "advance"; entry_label = 100 }];
+    }
+  in
+  let request = request target in
+  let model = model target in
+  match
+    Plan.create
+      ~admitted
+      ~target
+      ~request
+      ~model
+      ~pins:(pins model)
+      ~input:""
+  with
+  | Ok plan -> plan
+  | Error error -> failwith (Plan.error_message error)
+
+let check_session_open_limit () =
+  let plan = limited_plan 1 in
+  match Session.open_session ~plan with
+  | Error (Session.Session_limit_exceeded (_, 1)) -> ()
+  | _ -> failwith "expected open session limit rejection"
+
+let check_session_advance_limit () =
+  let plan = limited_plan 381 in
+  let session =
+    match Session.open_session ~plan with
+    | Ok session -> session
+    | Error error -> failwith (Session.error_message error)
+  in
+  match Session.advance ~plan ~expected_sequence:0 session with
+  | Error (Session.Session_limit_exceeded (_, 381)) -> ()
+  | _ -> failwith "expected advance session limit rejection"
+
+let check_session_finalize_limit () =
+  let plan = limited_plan 385 in
+  let session =
+    match Session.open_session ~plan with
+    | Ok session -> session
+    | Error error -> failwith (Session.error_message error)
+  in
+  let advanced =
+    match Session.advance ~plan ~expected_sequence:0 session with
+    | Ok (advanced, _) -> advanced
+    | Error error -> failwith (Session.error_message error)
+  in
+  match Session.finalize ~expected_sequence:1 advanced with
+  | Error (Session.Session_limit_exceeded (_, 385)) -> ()
+  | _ -> failwith "expected finalize session limit rejection"
+
+let check_session_cancel_limit () =
+  let plan = limited_plan 381 in
+  let session =
+    match Session.open_session ~plan with
+    | Ok session -> session
+    | Error error -> failwith (Session.error_message error)
+  in
+  match Session.cancel ~expected_sequence:0 session with
+  | Error (Session.Session_limit_exceeded (_, 381)) -> ()
+  | _ -> failwith "expected cancel session limit rejection"
+
 let () =
   check_lifecycle ();
   check_sequence_mismatch ();
   check_finalize_phase ();
-  check_cancel_terminal ()
+  check_cancel_terminal ();
+  check_session_open_limit ();
+  check_session_advance_limit ();
+  check_session_finalize_limit ();
+  check_session_cancel_limit ()

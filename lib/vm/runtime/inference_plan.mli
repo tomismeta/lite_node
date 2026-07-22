@@ -42,4 +42,6 @@ val model : t -> Inference_model.t
 val pins : t -> Inference_store.pin_set
 val input : t -> string
 val model_ranges_root : t -> string
+val requirement : t -> Execution_requirement.t
+val limits : t -> Execution_requirement.limits
 val error_message : error -> string

@@ -86,6 +86,14 @@ let pins plan = plan.pins
 let input plan = plan.input
 let model_ranges_root plan = Inference_store.model_ranges_root plan.pins
 
+let requirement plan =
+  match Admission.requirement plan.admitted with
+  | Some requirement -> requirement
+  | None -> invalid_arg "inference plan missing requirement"
+
+let limits plan =
+  (requirement plan).Execution_requirement.limits
+
 let error_message = function
   | Target_invalid error -> "invalid inference target: " ^ error
   | Request_invalid error -> "invalid inference request: " ^ error

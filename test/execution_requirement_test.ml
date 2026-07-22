@@ -125,7 +125,7 @@ let check_bad_name () =
 
 let check_program_admission () =
   let code = [| VM.STOP |] in
-  match Admission.of_program_with_requirement ~support ~requirement code with
+  match Admission.of_inference_code_with_requirement ~support ~requirement code with
   | Ok admitted ->
     (match Admission.requirement admitted with
      | Some admitted_requirement ->

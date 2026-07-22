@@ -39,7 +39,7 @@ let limits =
   Req.{
     max_model_bytes = 64;
     max_view_bytes = 16;
-    max_session_bytes = 64;
+    max_session_bytes = 512;
     max_scratch_bytes = 0;
     max_output_bytes = 32;
     max_advance_effort = 16;
@@ -64,9 +64,7 @@ let support =
   }
 
 let admitted () =
-  match Admission.of_program_with_requirement ~support ~requirement [| VM.JDEST 100; VM.STOP |] with
-  | Ok admitted -> admitted
-  | Error error -> failwith (Admission.error_message error)
+  Inference_cert.admit ~support ~requirement [| VM.JDEST 100; VM.STOP |]
 
 let target admitted =
   Target.{
@@ -179,7 +177,27 @@ let check_session_plan_identity () =
     check "session remains open" (Session.sequence session = 0)
   | _ -> failwith "expected session plan identity rejection"
 
+let check_generic_admission_rejected () =
+  match Admission.of_program [| VM.JDEST 100; VM.STOP |] with
+  | Error error -> failwith (Admission.error_message error)
+  | Ok generic ->
+    let target = target (admitted ()) in
+    let request = request target in
+    let model = model target "octets" in
+    match
+      Plan.create
+        ~admitted:generic
+        ~target
+        ~request
+        ~model
+        ~pins:(pins model)
+        ~input:""
+    with
+    | Error Plan.Missing_requirement -> ()
+    | _ -> failwith "expected generic admission rejection"
+
 let () =
   check_input_root ();
   check_pin_root ();
-  check_session_plan_identity ()
+  check_session_plan_identity ();
+  check_generic_admission_rejected ()

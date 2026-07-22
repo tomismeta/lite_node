@@ -100,12 +100,12 @@ dune exec tools/inference_admit.exe -- \
 `dune exec tools/inference_admit.exe -- ...`, or invoke
 `_build/default/tools/inference_admit.exe` directly after building.
 
-`--program` accepts a program envelope or raw bytecode. A real demo should use
-the program envelope path so the existing bytecode certificate is checked.
-`--support` points at explicit node support JSON. It is required for
-`--run-session`. Without `--run-session`, the harness may derive support from
-the supplied requirement for packet-shape smoke testing; that is not a
-substitute for node capability advertisement.
+`--program` requires a program envelope so the existing bytecode certificate and
+type-flow path are checked before target admission.
+`--support` points at explicit node support JSON and is required for every
+admission. The harness treats it as declared support and reports
+`runtime_support_verified=false`; executable support-root derivation is a later
+semantic-inventory milestone.
 `--model-ranges` is optional during smoke testing. For the Bonsai demo it
 should be present and should bind the target's `model_root` and `store_root`
 to concrete immutable owner ranges before any runtime execution proof is
@@ -143,8 +143,8 @@ The target JSON contains:
 - optional `target_root`, which is checked when present.
 
 Successful output is a JSON report containing accepted program, requirement,
-target, optional request roots, admitted instruction count, effects, support
-mode, and entrypoints.
+target, optional request roots, admitted instruction count, effects, declared
+support mode, `runtime_support_verified=false`, and entrypoints.
 
 When present, the request JSON contains:
 

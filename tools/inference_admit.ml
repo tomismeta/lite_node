@@ -14,7 +14,6 @@ Include at startup:
 
 
 module Admission = Octra_vm.Admission
-module Bytecode = Octra_vm.Bytecode
 module Program_envelope = Octra_vm.Program_envelope
 module Program_type_flow = Octra_vm.Program_type_flow
 module Model = Octra_vm.Inference_model
@@ -164,33 +163,47 @@ let rec parse_capabilities acc = function
 
 let parse_limits fields =
   match
-    int_field "max_model_bytes" fields,
-    int_field "max_view_bytes" fields,
-    int_field "max_session_bytes" fields,
-    int_field "max_scratch_bytes" fields,
-    int_field "max_output_bytes" fields,
-    int_field "max_advance_effort" fields
+    check_known
+      fields
+      [
+        "max_model_bytes";
+        "max_view_bytes";
+        "max_session_bytes";
+        "max_scratch_bytes";
+        "max_output_bytes";
+        "max_advance_effort";
+      ]
   with
-  | Ok max_model_bytes,
-    Ok max_view_bytes,
-    Ok max_session_bytes,
-    Ok max_scratch_bytes,
-    Ok max_output_bytes,
-    Ok max_advance_effort ->
-    Ok Req.{
-      max_model_bytes;
-      max_view_bytes;
-      max_session_bytes;
-      max_scratch_bytes;
-      max_output_bytes;
-      max_advance_effort;
-    }
-  | Error error, _, _, _, _, _
-  | _, Error error, _, _, _, _
-  | _, _, Error error, _, _, _
-  | _, _, _, Error error, _, _
-  | _, _, _, _, Error error, _
-  | _, _, _, _, _, Error error -> Error error
+  | Error error -> Error error
+  | Ok () ->
+    (match
+       int_field "max_model_bytes" fields,
+       int_field "max_view_bytes" fields,
+       int_field "max_session_bytes" fields,
+       int_field "max_scratch_bytes" fields,
+       int_field "max_output_bytes" fields,
+       int_field "max_advance_effort" fields
+     with
+     | Ok max_model_bytes,
+       Ok max_view_bytes,
+       Ok max_session_bytes,
+       Ok max_scratch_bytes,
+       Ok max_output_bytes,
+       Ok max_advance_effort ->
+       Ok Req.{
+         max_model_bytes;
+         max_view_bytes;
+         max_session_bytes;
+         max_scratch_bytes;
+         max_output_bytes;
+         max_advance_effort;
+       }
+     | Error error, _, _, _, _, _
+     | _, Error error, _, _, _, _
+     | _, _, Error error, _, _, _
+     | _, _, _, Error error, _, _
+     | _, _, _, _, Error error, _
+     | _, _, _, _, _, Error error -> Error error)
 
 let parse_requirement_json json =
   match json with
@@ -242,15 +255,6 @@ let parse_requirement_json json =
         | _, _, _, _, Error error, _
         | _, _, _, _, _, Error error -> Error error))
   | _ -> Error "requirement must be an object"
-
-let support_from_requirement requirement =
-  Req.{
-    support_vm_semantics_root = requirement.vm_semantics_root;
-    support_numerical_roots = [requirement.numerical_root];
-    support_effort_roots = [requirement.effort_root];
-    support_capabilities = requirement.capabilities;
-    support_limits = requirement.limits;
-  }
 
 let string_list_field name fields =
   match list_field name fields with
@@ -529,13 +533,8 @@ let admit_program ~support ~requirement raw =
   if Program_envelope.is_program raw then
     Admission.decode_inference_program_source ~support ~requirement raw
   else
-    match Bytecode.decode raw with
-    | Error error -> Error (Admission.Decode_error error)
-    | Ok code ->
-      Admission.of_inference_program_with_requirement
-        ~support
-        ~requirement
-        code
+    Error (Admission.Verify_error
+             "inference program must be a certified program envelope")
 
 let list_json values =
   `List (List.map (fun value -> `String value) values)
@@ -562,7 +561,7 @@ let read_range_source sources owner_root =
 
 let usage =
   "usage: inference_admit --program FILE --requirement FILE --target FILE \
-   [--support FILE] [--model-ranges FILE] [--range-source ROOT=FILE] \
+   --support FILE [--model-ranges FILE] [--range-source ROOT=FILE] \
    [--request FILE] [--input FILE] [--run-session]"
 
 let () =
@@ -595,12 +594,12 @@ let () =
   let set_run_session () = paths.run_session <- true in
   Arg.parse
     [
-      "--program", Arg.String set_program, "program envelope or raw bytecode";
+      "--program", Arg.String set_program, "certified program envelope";
       "--requirement", Arg.String set_requirement, "execution requirement JSON";
       "--target", Arg.String set_target, "inference target JSON";
       "--support",
       Arg.String set_support,
-      "node support JSON (required for --run-session)";
+      "declared node support JSON";
       "--model-ranges",
       Arg.String set_model_ranges,
       "optional immutable model ranges JSON";
@@ -622,12 +621,10 @@ let () =
     json_file requirement_path parse_requirement_json
   in
   let requirement = requirement_packet.requirement in
-  let support, support_mode =
-    match paths.support, paths.run_session with
-    | None, true ->
-      fail "--run-session requires --support NODE_SUPPORT.json"
-    | Some path, _ -> json_file path parse_support_json, "file"
-    | None, false -> support_from_requirement requirement, "derived"
+  let support =
+    json_file
+      (require_path "--support" paths.support)
+      parse_support_json
   in
   let target_packet = json_file target_path parse_target_json in
   let model_packet =
@@ -809,7 +806,9 @@ let () =
                   (Admission.effects admitted
                    |> Octra_vm.Program_effects.names);
                 "support_mode",
-                `String support_mode;
+                `String "declared";
+                "runtime_support_verified",
+                `Bool false;
                 "entrypoints", entrypoints_json target_packet.target;
               ]
               @ model_fields

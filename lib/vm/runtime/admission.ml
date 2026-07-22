@@ -6,6 +6,7 @@ type t = {
   admitted_effects : Program_effects.t;
   profile : profile;
   requirement : Execution_requirement.t option;
+  certified_source : bool;
 }
 
 and profile =
@@ -59,6 +60,7 @@ let admit ~program code =
         admitted_effects = Program_effects.scan code;
         profile = if program then Program Program_type_flow.empty_facts else Legacy;
         requirement = None;
+        certified_source = false;
       }
 
 let of_code code = admit ~program:false code
@@ -76,22 +78,7 @@ let of_program ?(facts = Program_type_flow.empty_facts) code =
      | Ok () -> Ok { admitted with profile = Program facts }
      | Error error -> Error (Verify_error ("Program type flow: " ^ Program_type_flow.error_message error)))
 
-let of_program_with_requirement
-    ?(facts = Program_type_flow.empty_facts)
-    ~support
-    ~requirement
-    code =
-  match Execution_requirement.check support requirement with
-  | Error error ->
-    Error (Unsafe_error
-             ("execution requirement: "
-              ^ Execution_requirement.error_message error))
-  | Ok () ->
-     (match of_program ~facts code with
-     | Error error -> Error error
-     | Ok admitted -> Ok { admitted with requirement = Some requirement })
-
-let of_inference_program_with_requirement
+let of_inference_code_with_requirement
     ?(facts = Program_type_flow.empty_facts)
     ~support
     ~requirement
@@ -106,14 +93,13 @@ let of_inference_program_with_requirement
              ("execution requirement: "
               ^ Execution_requirement.error_message error))
   | Ok () ->
-    (match of_program ~facts code with
-     | Error error -> Error error
-     | Ok admitted ->
-       (match Inference_opcode_policy.first_missing ~requirement code with
-        | Some missing ->
-          Error
-            (Unsafe_error (Inference_opcode_policy.error_message missing))
-        | None -> Ok { admitted with requirement = Some requirement }))
+    (match Inference_opcode_policy.first_violation ~requirement code with
+     | Some violation ->
+       Error (Unsafe_error (Inference_opcode_policy.error_message violation))
+     | None ->
+       (match of_program ~facts code with
+        | Error error -> Error error
+        | Ok admitted -> Ok { admitted with requirement = Some requirement }))
 
 let cert_field name fields =
   match List.filter (fun (key, _) -> String.equal key name) fields with
@@ -379,7 +365,10 @@ let decode_program ?(trusted = []) raw =
     | Ok code ->
       (match verify_program_cert ~attested:true ~trusted envelope.code code envelope.cert with
        | Error error -> Error (Verify_error error)
-       | Ok facts -> of_program ~facts code)
+       | Ok facts ->
+         (match of_program ~facts code with
+          | Error error -> Error error
+          | Ok admitted -> Ok { admitted with certified_source = true }))
 
 let decode_deploy ?(trusted = []) raw =
   if Program_envelope.is_program raw then decode_program ~trusted raw
@@ -394,7 +383,10 @@ let decode_program_source raw =
     | Ok code ->
       (match verify_program_cert ~attested:false ~trusted:[] envelope.code code envelope.cert with
        | Error error -> Error (Verify_error error)
-       | Ok facts -> of_program ~facts code)
+       | Ok facts ->
+         (match of_program ~facts code with
+          | Error error -> Error error
+          | Ok admitted -> Ok { admitted with certified_source = true }))
 
 let decode_inference_program_source ~support ~requirement raw =
   match Program_envelope.decode raw with
@@ -413,11 +405,15 @@ let decode_inference_program_source ~support ~requirement raw =
         with
         | Error error -> Error (Verify_error error)
         | Ok facts ->
-          of_inference_program_with_requirement
-            ~facts
-            ~support
-            ~requirement
-            code))
+          (match
+             of_inference_code_with_requirement
+               ~facts
+               ~support
+               ~requirement
+               code
+           with
+           | Error error -> Error error
+           | Ok admitted -> Ok { admitted with certified_source = true })))
 
 let code admitted =
   Array.copy admitted.admitted_code
@@ -430,6 +426,9 @@ let profile admitted =
 
 let requirement admitted =
   admitted.requirement
+
+let certified_source admitted =
+  admitted.certified_source
 
 let error_message = function
   | Decode_error message

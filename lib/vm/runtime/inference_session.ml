@@ -23,6 +23,7 @@ type t = {
   target_root : string;
   request_root : string;
   model_ranges_root : string;
+  session_limit : int;
   sequence : int;
   phase : phase;
   output_root : string;
@@ -43,6 +44,7 @@ type error =
   | Execution_failed
   | Effort_exceeded of int * int
   | Effort_overflow of int * int
+  | Session_limit_exceeded of int * int
 
 let phase_name = function
   | Open -> "open"
@@ -65,6 +67,16 @@ let root session =
   let payload = Yojson.Safe.to_string (identity_json session) in
   Digestif.SHA256.(
     digest_string ("octra:inference:session\000" ^ payload) |> to_hex)
+
+let session_size session =
+  String.length (Yojson.Safe.to_string (identity_json session))
+
+let check_session_size session =
+  let length = session_size session in
+  if length > session.session_limit then
+    Error (Session_limit_exceeded (length, session.session_limit))
+  else
+    Ok session
 
 let initial_output_root request_root =
   Digestif.SHA256.(
@@ -122,10 +134,12 @@ let open_session ~plan =
   let target_root = Inference_target.root (Inference_plan.target plan) in
   let request_root = Inference_request.root (Inference_plan.request plan) in
   let model_ranges_root = Inference_plan.model_ranges_root plan in
-  Ok {
+  let limits = Inference_plan.limits plan in
+  check_session_size {
     target_root;
     request_root;
     model_ranges_root;
+    session_limit = limits.Execution_requirement.max_session_bytes;
     sequence = 0;
     phase = Open;
     output_root = initial_output_root request_root;
@@ -168,7 +182,9 @@ let advance ~plan ~expected_sequence session =
                candidate_root = execution.candidate_root;
                committed_effort;
              } in
-             Ok (next, receipt ~status:"advanced" session next))
+             (match check_session_size next with
+              | Error error -> Error error
+              | Ok next -> Ok (next, receipt ~status:"advanced" session next)))
 
 let finalize ~expected_sequence session =
   match check_sequence expected_sequence session with
@@ -183,7 +199,9 @@ let finalize ~expected_sequence session =
         sequence = session.sequence + 1;
         phase = Finalized;
       } in
-      Ok (next, receipt ~status:"finalized" session next)
+      (match check_session_size next with
+       | Error error -> Error error
+       | Ok next -> Ok (next, receipt ~status:"finalized" session next))
 
 let cancel ~expected_sequence session =
   match check_sequence expected_sequence session with
@@ -191,7 +209,7 @@ let cancel ~expected_sequence session =
   | Ok () ->
     if terminal session.phase then Error Terminal_session
     else
-      Ok {
+      check_session_size {
         session with
         sequence = session.sequence + 1;
         phase = Canceled;
@@ -236,3 +254,7 @@ let error_message = function
     Printf.sprintf
       "session effort overflow: current %d next %d"
       current next
+  | Session_limit_exceeded (required, available) ->
+    Printf.sprintf
+      "session bytes exceeded: required %d available %d"
+      required available

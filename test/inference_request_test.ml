@@ -13,7 +13,6 @@ Include at startup:
 *)
 
 
-module Admission = Octra_vm.Admission
 module Req = Octra_vm.Execution_requirement
 module Request = Octra_vm.Inference_request
 module Target = Octra_vm.Inference_target
@@ -69,9 +68,7 @@ let requirement =
 let code = [| VM.JDEST 100; VM.STOP |]
 
 let admitted () =
-  match Admission.of_program_with_requirement ~support ~requirement code with
-  | Ok admitted -> admitted
-  | Error error -> failwith (Admission.error_message error)
+  Inference_cert.admit ~support ~requirement code
 
 let target () =
   let admitted = admitted () in

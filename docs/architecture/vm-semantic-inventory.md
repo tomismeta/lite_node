@@ -200,6 +200,11 @@ they do not need a central dynamic registry.
 The `vm_semantics_root` must bind the protocol-visible rows. Compiler spellings,
 prepared layouts, native kernels, and local diagnostics are not VM semantics.
 
+The current local harness consumes declared support roots. Runtime-derived
+support roots should wait until the discrepancy register below is closed and
+the executable inventories cover opcode semantics, numerical profiles,
+capability semantics, and effort schedules.
+
 ## Discrepancy Register
 
 ### Must close before semantic roots

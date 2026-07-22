@@ -34,6 +34,7 @@ type error =
   | Execution_failed
   | Effort_exceeded of int * int
   | Effort_overflow of int * int
+  | Session_limit_exceeded of int * int
 
 val root : t -> string
 

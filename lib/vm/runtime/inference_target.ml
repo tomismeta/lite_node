@@ -32,6 +32,8 @@ type error =
   | Bad_root of string
   | Bad_name of string
   | Bad_entrypoint of string * int
+  | Uncertified_entrypoint of string * int
+  | Uncertified_program
   | Duplicate_entrypoint of string
   | Program_root_mismatch of string * string
   | Missing_requirement
@@ -148,7 +150,10 @@ let check_entrypoint_labels code entrypoints =
   let rec loop = function
     | [] -> Ok ()
     | entrypoint :: rest ->
-      if List.mem entrypoint.entry_label labels then loop rest
+      if entrypoint.entry_label <> 100 then
+        Error (Uncertified_entrypoint
+                 (entrypoint.entry_name, entrypoint.entry_label))
+      else if List.mem entrypoint.entry_label labels then loop rest
       else Error (Bad_entrypoint (entrypoint.entry_name, entrypoint.entry_label))
   in
   loop entrypoints
@@ -177,6 +182,8 @@ let check ~admitted target =
         if not (String.equal target.requirement_root actual_requirement_root) then
           Error (Requirement_root_mismatch
                    (target.requirement_root, actual_requirement_root))
+        else if not (Admission.certified_source admitted) then
+          Error Uncertified_program
         else
           check_entrypoint_labels
             (Admission.code admitted)
@@ -187,6 +194,9 @@ let error_message = function
   | Bad_name name -> Printf.sprintf "invalid entrypoint name: %s" name
   | Bad_entrypoint (name, label) ->
     Printf.sprintf "invalid entrypoint %s: %d" name label
+  | Uncertified_entrypoint (name, label) ->
+    Printf.sprintf "uncertified entrypoint %s: %d" name label
+  | Uncertified_program -> "uncertified inference program"
   | Duplicate_entrypoint name ->
     Printf.sprintf "duplicate entrypoint: %s" name
   | Program_root_mismatch (expected, actual) ->

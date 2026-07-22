@@ -39,8 +39,8 @@ let limits =
   Req.{
     max_model_bytes = 64;
     max_view_bytes = 64;
-    max_session_bytes = 64;
-    max_scratch_bytes = 64;
+    max_session_bytes = 512;
+    max_scratch_bytes = 4096;
     max_output_bytes = 64;
     max_advance_effort = 10000;
   }
@@ -86,7 +86,11 @@ let code ?(write_output = true) range_root =
     ]
 
 let run_result ?(write_output = true) ?(max_output_bytes = 64)
+    ?(max_scratch_bytes = 4096)
     ?code_range_root bytes =
+  let limits = Req.{ limits with max_scratch_bytes } in
+  let requirement = Req.{ requirement with limits } in
+  let support = Req.{ support with support_limits = limits } in
   let owner = encoded bytes in
   let owner_root = sha256 owner in
   let range =
@@ -105,14 +109,7 @@ let run_result ?(write_output = true) ?(max_output_bytes = 64)
   in
   let code = code ~write_output code_root in
   let admitted =
-    match
-      Admission.of_inference_program_with_requirement
-        ~support
-        ~requirement
-        code
-    with
-    | Ok admitted -> admitted
-    | Error error -> failwith (Admission.error_message error)
+    Inference_cert.admit ~support ~requirement code
   in
   let target =
     Target.{
@@ -192,7 +189,7 @@ let check_capability_gate () =
   in
   let support = Req.{ support with support_capabilities = requirement.capabilities } in
   match
-    Admission.of_inference_program_with_requirement ~support ~requirement host_float_code
+    Admission.of_inference_code_with_requirement ~support ~requirement host_float_code
   with
   | Error (Admission.Unsafe_error _) -> ()
   | _ -> failwith "expected consensus-safe host-float rejection"
@@ -212,13 +209,48 @@ let check_opcode_capability_gate () =
   in
   let support = Req.{ support with support_capabilities = requirement.capabilities } in
   match
-    Admission.of_inference_program_with_requirement ~support ~requirement code
+    Admission.of_inference_code_with_requirement ~support ~requirement code
   with
   | Error (Admission.Unsafe_error message) ->
     check
       "missing opcode capability is named"
       (starts_with "inference opcode FLOAD" message)
   | _ -> failwith "expected authenticated-range capability rejection"
+
+let check_fhe_forbidden () =
+  let cases = [
+    "FHE_LOAD_PK", VM.FHE_LOAD_PK (0, 1);
+    "FHE_ADD", VM.FHE_ADD (0, 1, 2, 3);
+    "FHE_SUB", VM.FHE_SUB (0, 1, 2, 3);
+    "FHE_MUL", VM.FHE_MUL (0, 1, 2, 3);
+    "FHE_SCALE", VM.FHE_SCALE (0, 1, 2, 3);
+    "FHE_DIV_CONST", VM.FHE_DIV_CONST (0, 1, 2, 3);
+    "FHE_ADD_CONST", VM.FHE_ADD_CONST (0, 1, 2, 3);
+    "FHE_SUB_CONST", VM.FHE_SUB_CONST (0, 1, 2, 3);
+    "FHE_VERIFY_ZERO", VM.FHE_VERIFY_ZERO (0, 1, 2, 3);
+    "FHE_VERIFY_RANGE", VM.FHE_VERIFY_RANGE (0, 1, 2, 3);
+    "FHE_VERIFY_BOUND", VM.FHE_VERIFY_BOUND (0, 1, 2, 3, 4);
+    "FHE_COMMIT", VM.FHE_COMMIT (0, 1, 2);
+    "FHE_PEDERSEN", VM.FHE_PEDERSEN (0, 1, 2);
+    "FHE_SER", VM.FHE_SER (0, 1);
+    "FHE_DESER", VM.FHE_DESER (0, 1);
+    "FHE_SER_PK", VM.FHE_SER_PK (0, 1);
+    "FHE_DESER_PK", VM.FHE_DESER_PK (0, 1);
+  ] in
+  List.iter
+    (fun (name, op) ->
+      match
+        Admission.of_inference_code_with_requirement
+          ~support
+          ~requirement
+          [| VM.JDEST 100; op; VM.STOP |]
+      with
+      | Error (Admission.Unsafe_error message) ->
+        check
+          ("fhe opcode is forbidden: " ^ name)
+          (starts_with ("inference opcode " ^ name) message)
+      | _ -> failwith ("expected fhe opcode rejection: " ^ name))
+    cases
 
 let check_data_rooted_execution () =
   let left = run "\001\002\003\004" in
@@ -247,10 +279,19 @@ let check_output_contract () =
        (starts_with
           "inference execution error: inference output exceeds limit:"
           error)
-   | Ok _ -> failwith "expected output limit rejection")
+   | Ok _ -> failwith "expected output limit rejection");
+  (match run_result ~max_scratch_bytes:1 "\001\002\003\004" with
+   | Error error ->
+     check
+       "scratch limit is enforced"
+       (starts_with
+          "inference execution error: inference scratch exceeds limit:"
+          error)
+   | Ok _ -> failwith "expected scratch limit rejection")
 
 let () =
   check_capability_gate ();
   check_opcode_capability_gate ();
+  check_fhe_forbidden ();
   check_data_rooted_execution ();
   check_output_contract ()

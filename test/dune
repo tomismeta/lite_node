@@ -8,15 +8,21 @@
  (modules execution_requirement_test)
  (libraries octra_vm))
 
+(library
+ (name inference_test_support)
+ (modules inference_cert)
+ (wrapped false)
+ (libraries octra_vm digestif digestif.c yojson))
+
 (test
  (name inference_target_test)
  (modules inference_target_test)
- (libraries octra_vm))
+ (libraries octra_vm inference_test_support))
 
 (test
  (name inference_request_test)
  (modules inference_request_test)
- (libraries octra_vm))
+ (libraries octra_vm inference_test_support))
 
 (test
  (name inference_model_test)
@@ -31,22 +37,22 @@
 (test
  (name inference_session_test)
  (modules inference_session_test)
- (libraries octra_vm digestif digestif.c))
+ (libraries octra_vm inference_test_support digestif digestif.c))
 
 (test
  (name inference_execution_test)
  (modules inference_execution_test)
- (libraries octra_vm digestif digestif.c base64))
+ (libraries octra_vm inference_test_support digestif digestif.c base64))
 
 (test
  (name inference_root_vectors_test)
  (modules inference_root_vectors_test)
- (libraries octra_vm digestif digestif.c))
+ (libraries octra_vm inference_test_support digestif digestif.c))
 
 (test
  (name inference_plan_test)
  (modules inference_plan_test)
- (libraries octra_vm digestif digestif.c))
+ (libraries octra_vm inference_test_support digestif digestif.c))
 
 (test
  (name runtime_ontology_test)

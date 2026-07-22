@@ -50,13 +50,12 @@ built checkout may also invoke
 `_build/default/tools/inference_admit.exe` directly after `dune build`, but the
 portable command is `dune exec tools/inference_admit.exe -- ...`.
 
-For the demo, `--program` should be a program envelope, not raw bytecode, so
-the existing bytecode certificate path is exercised.
+`--program` must be a program envelope, not raw bytecode, so the existing
+bytecode certificate path is exercised before target admission.
 
-`--support` is required for `--run-session` and represents node capability
-advertisement. For packet-shape smoke testing without `--run-session`, the
-harness may derive support from the supplied requirement; that is not a node
-capability check.
+`--support` is required for every admission and represents declared node
+capability advertisement. The harness does not derive support from the supplied
+requirement and reports `runtime_support_verified=false`.
 `--model-ranges` is optional for smoke packets and should be present for the
 Bonsai demo packet.
 `--range-source` and `--run-session` are local proof options. They are required
@@ -73,10 +72,9 @@ session and receipt roots.
 - `model-ranges.json`; and
 - `request.json`.
 
-Smoke tests may omit `model-ranges.json` and may use raw bytecode to validate
-packet shape. The Bonsai demo packet must include all five files and must use
-an OCPG program envelope so LiteNode checks the existing program certificate
-and type-flow path.
+Smoke tests may omit `model-ranges.json`, but target-bearing admission still
+requires an OCPG program envelope. The Bonsai demo packet must include all five
+files so LiteNode checks the existing program certificate and type-flow path.
 The OCPG certificate must be a LiteNode-compatible
 `aml_bytecode_certificate_v2`; an envelope with placeholder certificate bytes
 will be rejected.
