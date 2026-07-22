@@ -9,7 +9,7 @@ fresh `upstream/main`.
 
 ## Current Evidence
 
-There are two completed VM-side proofs on the inference VPS.
+There are three completed VM-side proofs on the inference VPS.
 
 The first is the Bonsai slim range/session run:
 
@@ -80,6 +80,68 @@ generated text ` to`, expected output SHA-256
 and expected output root
 `f3f1c38b855446011b4706015bee9a16406b3d0af4484172e76e586bba13367c`.
 
+The third proof is the first VM-native Bonsai primitive canary:
+
+```text
+/home/exedev/evidence/octra-inference/bonsai-primitive-canary-20260722-131306
+```
+
+It binds immutable Q1 owner bytes through `model-ranges.json` and `FLOAD`,
+then attempts a projection using the existing generic `MATMUL_FP` opcode. The
+packet shape is clean: `target.json` remains model-neutral, Bonsai/Qwen/Q1
+details stay in sidecars, and admission reaches the real VM opcode policy
+decision.
+
+The LiteNode harness rejects the packet:
+
+```text
+consensus unsafe opcode MATMUL_FP at pc 2569
+```
+
+The direct rerun on 2026-07-22 returned:
+
+| Field | Value |
+| --- | --- |
+| Status | `rejected` |
+| Failure classification | `admission-policy` |
+| Attempted primitive | `linear_q1_0_g128_fp` |
+| Executed VM primitive | `matmul_fp` |
+| Program root | `1cd4cbf8b91569c58515922f98fdf396c2da7c98b58455324dac67897e4e41b0` |
+| Requirement root | `bc25891494f8ecc4c39bf3b7bde374d094b92280c9185407dd501937ba6711ac` |
+| Target root | `2630810c31ec05ac1d26d29f63a557a6ec38af73d19e684c952622d949bf27ac` |
+| Request root | `aca610446a5b1fbff216f3b0d136b356fd3a734cf076f0defb82b678804b0e25` |
+| Model ranges root | `2e75eba8c4c8503bc35cd92b45bd1d286d98a0d02ecc305d050ba2a64b25d148` |
+| Q1 owner root | `57f9dadd168580d1b39660f54e5a21b480a70bc3017a90e3892f7c74f2895785` |
+| Program bytes | `12013` |
+| Opcode counts | `JDEST=1`, `LDI=1290`, `FLOAD=1`, `MSTORE=1280`, `MATMUL_FP=1`, `STOP=1` |
+
+The primitive canary proves that range binding and packet neutrality are good
+enough to hit a real primitive admission decision. It does not justify
+admitting `MATMUL_FP`. In this branch, `tensor.strict-fp` remains a roadmap
+capability family, not an accepted consensus profile. Broad host floating-point
+execution should stay rejected until LiteNode has deterministic numerical
+semantics, fixtures, and cross-platform conformance tests.
+
+The lean path should instead add the smallest deterministic, model-neutral
+primitive needed by Bonsai/Qwen projection, most likely a Q1-G128 projection
+primitive under a capability such as `tensor.q1-g128`. Treat
+`linear_q1_0_g128_fp` as a descriptive legacy label until the final semantics
+are fixed. That keeps the VM generalized for inference without turning plain
+inference admission into a blanket host-float permission.
+
+That primitive must specify byte layout, group size, scale decoding,
+accumulation order, rounding, bounds, output representation, failure
+atomicity, and effort accounting. If it returns floating-point bytes, those
+bytes still need software-defined numerical semantics and cross-platform
+conformance vectors.
+
+Caveat: this evidence used the existing built VPS harness at LiteNode source
+commit `2a5803b`, with executable hash
+`98ac8bed595e180adb252f9e6247b4db6087db1b3d35b03e6544ab963d4cefcc`.
+The VPS source was not rebuilt for this rerun because `dune exec` was blocked
+by a missing `digestif.c`. Treat the result as valid gate evidence from that
+built harness, not as a fresh source-build reproducibility proof.
+
 These proofs show:
 
 - OCPG program-envelope admission works through the LiteNode harness.
@@ -92,12 +154,16 @@ These proofs show:
   candidate, session, and receipt roots.
 - A Bonsai/Qwen reference-output sidecar can stay outside the VM while the VM
   admits and executes the small model-neutral output ABI program.
+- A VM-native primitive canary can bind immutable Q1 bytes and reach the
+  inference opcode policy boundary.
 
 This does not prove:
 
 - LiteNode executes the full Bonsai/Qwen graph.
 - LiteNode has accepted implementations for the full required math primitive
   set.
+- LiteNode decodes Q1 bytes or projects directly from authenticated Q1 ranges.
+- `MATMUL_FP` is safe to admit for consensus inference.
 - The current session and receipt protocol should survive into the lean branch.
 - Consensus or encrypted inference is ready.
 
@@ -114,9 +180,13 @@ bounded output receipts.
 This accepted canary therefore does not establish a new primitive requirement
 by itself. It establishes that the packet boundary, target neutrality,
 reference-output sidecars, immutable range pinning, and output ABI are coherent.
+The rejected primitive canary establishes the next admission boundary, but not
+Q1 execution inside LiteNode, because `octra-inference` decoded Q1 and
+materialized operands before the VM reached `MATMUL_FP`.
 
 Future failures should be classified into one of these buckets before changing
-LiteNode:
+LiteNode. The primitive canary above is the first classified
+`admission-policy` failure:
 
 | Bucket | Meaning |
 | --- | --- |
@@ -204,23 +274,28 @@ The lean branch should not automatically port these proof-branch surfaces:
 ## Next Ask For `octra-inference`
 
 The next useful packet from the `octra-inference` side is not another range
-smoke proof or reference-output canary. Those now exist.
+smoke proof, reference-output canary, or generic-`MATMUL_FP` primitive canary.
+Those now exist.
 
-The next useful artifact is the first VM-native Bonsai primitive canary:
+Until LiteNode exposes a deterministic projection primitive, the useful
+`octra-inference` work is to supply the exact reference contract for that
+primitive:
 
-1. Emit the smallest program that uses one real generic inference primitive
-   required by Bonsai, starting with immutable-range-backed Q1 grouped linear
-   projection unless the `octra-inference` agent has a smaller blocker.
-2. Include a reference-output sidecar with expected root and tensor/output
-   hashes from `octra-inference`.
-3. Include an opcode manifest ordered by first use.
-4. Keep `target.json` model-neutral.
+1. Provide scalar reference semantics for Q1-G128 grouped linear projection,
+   including byte layout, scale decode, accumulation, rounding, and output
+   bytes.
+2. Provide tiny golden fixtures with input bytes, Q1 owner bytes, dimensions,
+   expected output bytes, output SHA-256, and output root.
+3. Preserve the same model-neutral packet boundary: roots and capabilities in
+   LiteNode-facing files; Bonsai/Qwen/tokenizer details in sidecars.
+4. Once LiteNode has the primitive, re-emit the primitive canary using that
+   opcode rather than `MATMUL_FP`.
 5. Run the LiteNode admission/session harness and classify any failure as a
    packet, admission-policy, missing-primitive, data-binding, effort/limit,
    determinism, or harness-only gap.
 
-Only after that primitive canary fails for a classified LiteNode reason should
-the VM add or revise generic math capabilities.
+Only after that deterministic primitive canary fails for a classified LiteNode
+reason should the VM add or revise additional math capabilities.
 
 ## Rebuild Acceptance Bar
 
