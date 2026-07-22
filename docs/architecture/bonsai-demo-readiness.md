@@ -38,7 +38,7 @@ network admission, or publisher endorsement.
 | Request admission | Target and limit checks added | Feed runtime proof from admitted roots |
 | Immutable ranges | Local authenticated pinning and plan binding added | Back with resident reader |
 | Ontology guard | Runtime source scan added | No model-family names enter VM code |
-| Tensor substrate | Q1-G128 linear proof primitive added | Re-emit direct primitive canary |
+| Tensor substrate | Direct Q1-G128 and order-3 frontier canaries accepted | Derive the next schedule frontier |
 | Sessions | Plan-bound local candidate runner added | Add node residency and scheduler |
 | Receipts | Output and candidate roots added locally | Add full diagnostics object |
 
@@ -73,8 +73,9 @@ evidence remain outside LiteNode.
 3. Add immutable range reads over authenticated model data with a scalar
    synthetic fixture before using Bonsai data. **Complete locally:** slices are
    pinned and addressed by their canonical range roots.
-4. Add bounded tensor ingress and explicit-epsilon normalization as the first
-   Phase 3 primitives.
+4. Add bounded tensor ingress and the first failure-driven primitives.
+   **Complete locally for order-3:** f32 ingress, sigmoid, softplus, SiLU, and
+   stateless causal depthwise convolution all admit and run through canaries.
 5. Add the minimum local session runner: open, one advance, status, finalize,
    and cancel with candidate rollback. **Complete locally:** the runner now
    consumes one validated execution plan and emits output and candidate roots.
@@ -193,10 +194,11 @@ When `--run-session` is present, successful output also includes:
 - `effort_delta` for the executed advance transition; and
 - `consensus_accepted`, always `false` for this local proof path.
 
-The current local session fixture proves plan validation, authenticated input
-and range binding, candidate isolation, lifecycle transitions, and output and
-diagnostic candidate roots with a tiny target-owned program. It does not claim
-Bonsai numerical execution or resident model state.
+The current local session fixtures prove plan validation, authenticated input
+and range binding, candidate isolation, lifecycle transitions, output roots, and
+diagnostic candidate roots. They now include VM-native Q1-G128 and order-3
+Bonsai frontier canaries. They do not yet claim full Bonsai graph execution or
+resident model state.
 
 The root fixture test locks the current canonical encodings for the
 requirement, admitted program, target, request, session, and receipt objects.

@@ -224,10 +224,11 @@ well-defined. Kernel width, channel count, bounds, non-finite handling, overlap,
 and effort are explicit.
 
 Proof-branch status: `CAUSAL_DEPTHWISE_CONV1D_FP` implements the scalar fixture
-for the remaining order-3 Bonsai frontier. `SILU_FP` composes after it under
-`tensor.strict-fp`. The VM does not add `SSM_CONV_SILU_FP`; a fused operation or
-retained-state variant requires future evidence that it is a reusable semantic
-boundary rather than a generated schedule convenience.
+for the order-3 Bonsai frontier. `SILU_FP` composes after it under
+`tensor.strict-fp`, and the composed canary admits, runs, and matches roots. The
+VM does not add `SSM_CONV_SILU_FP`; a fused operation or retained-state variant
+requires future evidence that it is a reusable semantic boundary rather than a
+generated schedule convenience.
 
 ### Gated delta-rule state transition
 

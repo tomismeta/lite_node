@@ -245,14 +245,12 @@ failures as packet, admission-policy, missing-primitive, data-binding,
 effort/limit, determinism, or harness-only.
 
 Current LiteNode proof branch includes `LOAD_F32_LE_FP`, `SIGMOID_FP`,
-`SOFTPLUS_FP`, `SILU_FP`, and `CAUSAL_DEPTHWISE_CONV1D_FP`. The next frontier
-bundle should use real opcodes for the order-3 frontier and express
-`ssm_conv_silu_fp` as `CAUSAL_DEPTHWISE_CONV1D_FP -> SILU_FP`. Do not emit a
-sentinel for that operation, do not emit `SSM_CONV_SILU_FP`, and do not request
-`LOAD_F64_LE_FP`. The composed canary should request both
-`sequence.causal-convolution` and `tensor.strict-fp`, then compare output to
-the scalar fixture root
-`f1b483b26afa993db5622ad0010c3e56b3e4a7cefaf687529dad1c3c66767d56`.
+`SOFTPLUS_FP`, `SILU_FP`, and `CAUSAL_DEPTHWISE_CONV1D_FP`. The order-3
+Bonsai frontier has been re-emitted against LiteNode `d9aa419`; all four
+canaries were accepted, ran, and matched roots. The next frontier bundle should
+derive the next generated Bonsai schedule frontier after order `3`, emit
+independent canaries per generic operation family, and keep using
+`--scan-policy` before `--run-session`.
 
 ## Current Interop Check
 

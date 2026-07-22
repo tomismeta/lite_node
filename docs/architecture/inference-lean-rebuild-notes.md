@@ -204,6 +204,19 @@ and resolves the `ssm_conv_silu_fp` boundary as `CAUSAL_DEPTHWISE_CONV1D_FP`
 followed by `SILU_FP`. LiteNode still does not add a fused SSM opcode or admit
 the older host-floating-point instruction family.
 
+`octra-inference` re-emitted that order-3 frontier against LiteNode `d9aa419`:
+
+```text
+/home/exedev/evidence/octra-inference/schedule-frontier-bundle-d9aa419-clean-20260722-203424
+```
+
+`load_f32_le_fp`, `sigmoid_fp`, `softplus_fp`, and composed
+`ssm_conv_silu_fp` all passed `--scan-policy`, `--run-session`, and root
+comparison. The SSM scalar fixture root matched
+`f1b483b26afa993db5622ad0010c3e56b3e4a7cefaf687529dad1c3c66767d56`; the
+session output root was
+`b0a0dab87ae96b29d34b36ee9a07732bb272fddb5b78c311f4c19b77519beabd`.
+
 The source-built LiteNode harness was run from this branch with the explicit
 inference harness profile:
 
@@ -370,13 +383,11 @@ The next useful packet from the `octra-inference` side is not another range
 smoke proof, reference-output canary, generic-`MATMUL_FP` primitive canary, or
 standalone Q1 fixture package. Those now exist.
 
-The next useful artifact is a refreshed order-3 frontier bundle that uses the
-real `LOAD_F32_LE_FP`, `SIGMOID_FP`, `SOFTPLUS_FP`, `CAUSAL_DEPTHWISE_CONV1D_FP`,
-and `SILU_FP` opcodes. Emit `ssm_conv_silu_fp` as the composed
-`CAUSAL_DEPTHWISE_CONV1D_FP -> SILU_FP` program, not as a sentinel and not as
-`SSM_CONV_SILU_FP`. Run `--scan-policy` on each canary before trying
-`--run-session`, then compare the composed canary output to the scalar fixture
-root `f1b483b26afa993db5622ad0010c3e56b3e4a7cefaf687529dad1c3c66767d56`.
+The next useful artifact is a derived next-frontier bundle from the generated
+Bonsai schedule after order `3`. Use the same discipline: independent tiny
+canaries per generic operation family, `--scan-policy` before `--run-session`,
+real opcodes when LiteNode has them, and sentinel canaries only for operations
+that have no VM opcode yet.
 
 Preserve the same model-neutral packet boundary, keep Bonsai/Qwen/tokenizer
 details in sidecars, and classify every failure as a packet, admission-policy,
