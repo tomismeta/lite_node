@@ -21,7 +21,9 @@ let of_instr = function
   | Contract_vm.LINEAR_Q1_G128_FP _ -> [Memory_read; Memory_write]
   | Contract_vm.LOAD_F32_LE_FP _ -> [Memory_write]
   | Contract_vm.SIGMOID_FP _
-  | Contract_vm.SOFTPLUS_FP _ -> [Memory_read; Memory_write]
+  | Contract_vm.SOFTPLUS_FP _
+  | Contract_vm.SILU_FP _
+  | Contract_vm.CAUSAL_DEPTHWISE_CONV1D_FP _ -> [Memory_read; Memory_write]
   | Contract_vm.SLOAD _
   | Contract_vm.SLOADK _
   | Contract_vm.SKEYS _

@@ -142,6 +142,7 @@ type instr =
   | LOAD_F32_LE_FP of reg * reg * reg * reg
   | SIGMOID_FP of reg * reg
   | SOFTPLUS_FP of reg * reg
+  | CAUSAL_DEPTHWISE_CONV1D_FP of reg * reg * reg * reg * reg * reg
   | SHIFT_ROUND_INPLACE of reg * reg * reg
   | MATMUL_FP of reg * reg * reg * reg * reg * reg
   | RMSNORM_FP of reg * reg * reg
@@ -339,6 +340,7 @@ let effort_cost = function
   | LOAD_F32_LE_FP _ -> 30
   | SIGMOID_FP _ -> 20
   | SOFTPLUS_FP _ -> 20
+  | CAUSAL_DEPTHWISE_CONV1D_FP _ -> 100
   | SHIFT_ROUND_INPLACE _ -> 5
   | MATMUL_FP _ -> 200
   | RMSNORM_FP _ -> 50
@@ -903,8 +905,12 @@ let strict_operands st = function
     is_numeric (getr st dst) && is_text (getr st source)
     && is_numeric (getr st offset) && is_numeric (getr st length)
   | SIGMOID_FP (addr, count)
-  | SOFTPLUS_FP (addr, count) ->
+  | SOFTPLUS_FP (addr, count)
+  | SILU_FP (addr, count) ->
     is_numeric (getr st addr) && is_numeric (getr st count)
+  | CAUSAL_DEPTHWISE_CONV1D_FP (dst, input, kernel, timesteps, channels, width) ->
+    List.for_all (fun reg -> is_numeric (getr st reg))
+      [dst; input; kernel; timesteps; channels; width]
   | APPEND_VEC_Q16 (dst, pos, source, length) ->
     List.for_all (fun reg -> is_numeric (getr st reg)) [dst; pos; source; length]
   | ARGMAX_Q16 (dest, addr, length) ->
@@ -2214,6 +2220,59 @@ let exec_one st op =
        map_fp64_inplace st addr n (fun x ->
          if x > 0.0 then x +. log1p (exp (-. x)) else log1p (exp x))
      | _ -> revert st)
+  | CAUSAL_DEPTHWISE_CONV1D_FP
+      (rs_dst, rs_input, rs_kernel, rs_t, rs_c, rs_w) ->
+    (match read_int st rs_dst, read_int st rs_input, read_int st rs_kernel,
+           read_int st rs_t, read_int st rs_c, read_int st rs_w with
+     | Some dst, Some input, Some kernel, Some timesteps, Some channels,
+       Some width
+       when timesteps > 0 && channels > 0 && width > 0 ->
+       (match checked_product timesteps channels,
+              checked_product channels width with
+        | Some values_n, Some kernel_n
+          when valid_mem_span dst values_n
+               && valid_mem_span input values_n
+               && valid_mem_span kernel kernel_n ->
+          if not (add_dyn_product st [timesteps; channels; width] 1) then
+            revert st
+          else
+            let input_values =
+              Array.init values_n (fun i ->
+                mem_read_fp64 st.memory.data (input + i))
+            in
+            let kernel_values =
+              Array.init kernel_n (fun i ->
+                mem_read_fp64 st.memory.data (kernel + i))
+            in
+            if not (Array.for_all Option.is_some input_values)
+               || not (Array.for_all Option.is_some kernel_values) then
+              revert st
+            else
+              let input_values = Array.map Option.get input_values in
+              let kernel_values = Array.map Option.get kernel_values in
+              let output = Array.make values_n 0.0 in
+              for t = 0 to timesteps - 1 do
+                for c = 0 to channels - 1 do
+                  let acc = ref 0.0 in
+                  for k = 0 to width - 1 do
+                    if t >= k then
+                      acc :=
+                        !acc
+                        +. (input_values.(((t - k) * channels) + c)
+                            *. kernel_values.((c * width) + k))
+                  done;
+                  output.((t * channels) + c) <- !acc
+                done
+              done;
+              if not (Array.for_all finite_fp64 output) then revert st
+              else begin
+                for i = 0 to values_n - 1 do
+                  mem_set_fp64 st.memory.data (dst + i) output.(i)
+                done;
+                true
+              end
+        | _ -> revert st)
+     | _ -> revert st)
   | MATMUL_FP (rd_addr, rs_lhs, rs_rhs, rs_m, rs_k, rs_n) ->
     let dst = Z.to_int (to_z (getr st rd_addr)) in
     let lhs = Z.to_int (to_z (getr st rs_lhs)) in
@@ -2272,20 +2331,11 @@ let exec_one st op =
       end
     end
   | SILU_FP (rs_addr, rs_n) ->
-    let addr = Z.to_int (to_z (getr st rs_addr)) in
-    let n = Z.to_int (to_z (getr st rs_n)) in
-    if n <= 0 || n > 131072 then revert st
-    else begin
-      if not (add_dyn_product st [n; 3] 1) then revert st
-      else begin
-        for i = 0 to n - 1 do
-          let x = mem_get_fp64 st.memory.data (addr + i) in
-          let s = 1.0 /. (1.0 +. exp (-. x)) in
-          mem_set_fp64 st.memory.data (addr + i) (x *. s)
-        done;
-        true
-      end
-    end
+    (match read_int st rs_addr, read_int st rs_n with
+     | Some addr, Some n ->
+       map_fp64_inplace st addr n (fun x ->
+         x *. (1.0 /. (1.0 +. exp (-. x))))
+     | _ -> revert st)
   | ELEMWISE_MUL_FP (rs_dst, rs_src, rs_n) ->
     let dst = Z.to_int (to_z (getr st rs_dst)) in
     let src = Z.to_int (to_z (getr st rs_src)) in
@@ -3164,6 +3214,7 @@ module Verifier = struct
             | LOAD_F32_LE_FP (d,s,o,n) -> check_regs pc [d;s;o;n]
             | SIGMOID_FP (a,n) -> check_regs pc [a;n]
             | SOFTPLUS_FP (a,n) -> check_regs pc [a;n]
+            | CAUSAL_DEPTHWISE_CONV1D_FP (d,i,k,t,c,w) -> check_regs pc [d;i;k;t;c;w]
             | SHIFT_ROUND_INPLACE (a,n,b) -> check_regs pc [a;n;b]
             | MATMUL_FP (d,l,r,m,k,n) -> check_regs pc [d;l;r;m;k;n]
             | RMSNORM_FP (a,n,g) -> check_regs pc [a;n;g]

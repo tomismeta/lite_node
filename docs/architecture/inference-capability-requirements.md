@@ -55,7 +55,9 @@ earliest roadmap phase in which the semantic disposition can be accepted.
 | L2 normalization | conditional primitive | `tensor.strict-fp` | 4 |
 | sigmoid | primitive | `tensor.strict-fp` | 3 |
 | softplus | primitive | `tensor.strict-fp` | 3 |
-| causal convolution with state | primitive | `sequence.causal-convolution` | 4 |
+| SiLU | primitive | `tensor.strict-fp` | 3 |
+| causal depthwise convolution | primitive | `sequence.causal-convolution` | 3 |
+| causal convolution with retained state | conditional primitive | `sequence.causal-convolution` | 4 |
 | gated delta-rule update | candidate primitive | `sequence.delta-rule` | 4 |
 | interleaved multi-axis RoPE | composition | `tensor.attention` | 3 |
 
@@ -190,25 +192,42 @@ contract using the stable branch `x + ln1p(exp(-x))` for positive inputs and
 `tensor.strict-fp` is present; generic Program admission still rejects it as
 consensus unsafe.
 
-If sigmoid or softplus is used only inside an accepted delta-rule transition,
-its semantics may remain part of that transition instead of adding another
-opcode.
+### SiLU
 
-## Stateful Sequence Computation
+Legacy label: `silu_fp`.
 
-### Causal convolution with state
+Disposition: **primitive** when generated code composes it with another accepted
+operation.
 
-Legacy label: `causal_conv_with_state_fp`.
+Proof-branch status: `SILU_FP` now uses the same bounded, candidate-write f64
+activation path as sigmoid and softplus. It is admitted only by the inference
+policy when `tensor.strict-fp` is present; generic Program admission still
+rejects it as consensus unsafe.
+
+If sigmoid, softplus, or SiLU is used only inside an accepted delta-rule
+transition, its semantics may remain part of that transition instead of adding
+another opcode.
+
+## Sequence Computation
+
+### Causal depthwise convolution
+
+Legacy labels: `ssm_conv_silu_fp`, `causal_conv_with_state_fp`.
 
 Disposition: **primitive**, with activation composed separately.
 
-The operation performs a bounded causal or depthwise convolution and produces
-candidate next state atomically. Kernel width, channels, dilation if supported,
-state layout, overlap, and initialization are explicit.
+The operation performs a bounded stateless depthwise causal convolution. Input
+values are row-major by timestep and channel; kernel values are channel-major by
+channel and kernel offset. The source spans are snapshotted before the
+destination is written, so destination/input and destination/kernel aliases are
+well-defined. Kernel width, channel count, bounds, non-finite handling, overlap,
+and effort are explicit.
 
-SiLU remains the existing activation operation. A fused convolution-and-SiLU
-operation is considered only after identical semantics are proven and measured
-VM transition cost justifies it.
+Proof-branch status: `CAUSAL_DEPTHWISE_CONV1D_FP` implements the scalar fixture
+for the remaining order-3 Bonsai frontier. `SILU_FP` composes after it under
+`tensor.strict-fp`. The VM does not add `SSM_CONV_SILU_FP`; a fused operation or
+retained-state variant requires future evidence that it is a reusable semantic
+boundary rather than a generated schedule convenience.
 
 ### Gated delta-rule state transition
 
@@ -332,7 +351,7 @@ The old ten-item inventory successfully identified real Bonsai compute gaps.
 It does not define the implementation count:
 
 - Q1 linear and gather form one compressed semantic family;
-- sigmoid and softplus may remain internal to another accepted transition;
+- sigmoid, softplus, and SiLU may remain internal to another accepted transition;
 - causal convolution composes with SiLU;
 - IMRoPE remains generated composition; and
 - prepared layouts and native kernels stay below semantic operations.

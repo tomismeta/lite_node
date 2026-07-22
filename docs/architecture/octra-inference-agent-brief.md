@@ -244,12 +244,15 @@ Every frontier canary should preserve the five demo files above, keep
 failures as packet, admission-policy, missing-primitive, data-binding,
 effort/limit, determinism, or harness-only.
 
-Current LiteNode proof branch includes `LOAD_F32_LE_FP`, `SIGMOID_FP`, and
-`SOFTPLUS_FP`. The next frontier bundle should use those real opcodes for
-`load_f32_le_fp`, `sigmoid_fp`, and `softplus_fp`, and keep a sentinel canary
-only for the remaining order-3 operation, `ssm_conv_silu_fp`. Before LiteNode
-adds that operation, decide whether the clean VM boundary is causal convolution
-plus activation composition or a separately justified fused primitive.
+Current LiteNode proof branch includes `LOAD_F32_LE_FP`, `SIGMOID_FP`,
+`SOFTPLUS_FP`, `SILU_FP`, and `CAUSAL_DEPTHWISE_CONV1D_FP`. The next frontier
+bundle should use real opcodes for the order-3 frontier and express
+`ssm_conv_silu_fp` as `CAUSAL_DEPTHWISE_CONV1D_FP -> SILU_FP`. Do not emit a
+sentinel for that operation, do not emit `SSM_CONV_SILU_FP`, and do not request
+`LOAD_F64_LE_FP`. The composed canary should request both
+`sequence.causal-convolution` and `tensor.strict-fp`, then compare output to
+the scalar fixture root
+`f1b483b26afa993db5622ad0010c3e56b3e4a7cefaf687529dad1c3c66767d56`.
 
 ## Current Interop Check
 

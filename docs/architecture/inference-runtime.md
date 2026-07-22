@@ -168,6 +168,7 @@ Capabilities describe semantics, not implementations. Representative
 capability families are:
 
 - `tensor.fixed`;
+- `tensor.strict-fp`;
 - `tensor.q1-g128`;
 - `tensor.attention`;
 - `sequence.causal-convolution`;
@@ -303,10 +304,10 @@ The VM should grow by coherent primitive families:
 An algorithmic delta-rule state transition is defensible if its grouping,
 gating, aliasing, and rollback semantics are complete and model neutral. Its
 name must describe the mathematical transition rather than a model or network.
-`SSM_CONV_SILU_FP` should first be expressed as causal convolution followed by
-the existing SiLU operation. A fused operation is acceptable only when a
-measured boundary cost or atomicity requirement justifies a separately
-specified semantic primitive.
+The current proof branch expresses the `ssm_conv_silu_fp` frontier as stateless
+causal depthwise convolution followed by `SILU_FP`. A fused operation is
+acceptable only when a measured boundary cost, retained-state requirement, or
+atomicity requirement justifies a separately specified semantic primitive.
 
 ### Primitive admission rule
 
@@ -520,7 +521,8 @@ Exit gate: synthetic programs safely compose the substrate without model data.
 
 1. Specify Q1-G128 encoding, linear, and gather semantics.
 2. Specify required standalone activation and normalization operations.
-3. Add generic causal convolution with candidate state.
+3. Add stateless generic causal depthwise convolution first; add retained state
+   only when a streaming schedule requires it.
 4. Specify the parameterized delta-rule state transition.
 5. Attention binary outcome: either existing attention becomes fully generic
    and specified under the primitive admission rule, or it is decomposed into

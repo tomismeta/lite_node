@@ -83,6 +83,8 @@ let host_float_cases = [
    VM.LINEAR_Q1_G128_FP (0, 1, 2, 3, 4, 5, 6));
   ("sigmoid-fp", "SIGMOID_FP", VM.SIGMOID_FP (0, 1));
   ("softplus-fp", "SOFTPLUS_FP", VM.SOFTPLUS_FP (0, 1));
+  ("causal-depthwise-conv1d-fp", "CAUSAL_DEPTHWISE_CONV1D_FP",
+   VM.CAUSAL_DEPTHWISE_CONV1D_FP (0, 1, 2, 3, 4, 5));
 ]
 
 let profiled_cases = [

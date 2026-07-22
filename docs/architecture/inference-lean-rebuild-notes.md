@@ -183,10 +183,9 @@ The accepted LiteNode rerun is recorded beside the original artifact as
 `lite-node-admission-session-report.litenode-rerun.json`.
 
 The same proof branch now exposes the standalone activation frontier as
-`SIGMOID_FP` and `SOFTPLUS_FP`, gated in plain inference by explicit
+`SIGMOID_FP`, `SOFTPLUS_FP`, and `SILU_FP`, gated in plain inference by explicit
 `tensor.strict-fp`. The gate is enumerated opcode-by-opcode; it does not
-authorize `RMSNORM_FP`, `SILU_FP`, or the rest of the older host-floating-point
-family.
+authorize `RMSNORM_FP` or the rest of the older host-floating-point family.
 
 ## Schedule Frontier Bundle
 
@@ -197,13 +196,13 @@ family.
 ```
 
 The next Bonsai frontier is order `3`:
-`load_f32_le_fp + ssm_conv_silu_fp + softplus_fp + sigmoid_fp`. This branch now
-adds the generic `LOAD_F32_LE_FP` typed-ingress opcode under
-`storage.authenticated-range` and the standalone activation opcodes
-`SIGMOID_FP` and `SOFTPLUS_FP` under explicit `tensor.strict-fp` proof
-admission. The remaining order-3 operation still requires a separate design
-decision before LiteNode should add a fused opcode or admit existing
-host-floating-point instructions.
+`load_f32_le_fp + ssm_conv_silu_fp + softplus_fp + sigmoid_fp`. This branch adds
+the generic `LOAD_F32_LE_FP` typed-ingress opcode under
+`storage.authenticated-range`, the standalone activation opcodes `SIGMOID_FP`,
+`SOFTPLUS_FP`, and `SILU_FP` under explicit `tensor.strict-fp` proof admission,
+and resolves the `ssm_conv_silu_fp` boundary as `CAUSAL_DEPTHWISE_CONV1D_FP`
+followed by `SILU_FP`. LiteNode still does not add a fused SSM opcode or admit
+the older host-floating-point instruction family.
 
 The source-built LiteNode harness was run from this branch with the explicit
 inference harness profile:
@@ -372,10 +371,12 @@ smoke proof, reference-output canary, generic-`MATMUL_FP` primitive canary, or
 standalone Q1 fixture package. Those now exist.
 
 The next useful artifact is a refreshed order-3 frontier bundle that uses the
-real `LOAD_F32_LE_FP`, `SIGMOID_FP`, and `SOFTPLUS_FP` opcodes, and keeps a
-sentinel canary only for `ssm_conv_silu_fp`. Run `--scan-policy` on each canary
-before trying `--run-session`. This lets LiteNode see the remaining blocker
-without turning the VM into a speculative math-porting project.
+real `LOAD_F32_LE_FP`, `SIGMOID_FP`, `SOFTPLUS_FP`, `CAUSAL_DEPTHWISE_CONV1D_FP`,
+and `SILU_FP` opcodes. Emit `ssm_conv_silu_fp` as the composed
+`CAUSAL_DEPTHWISE_CONV1D_FP -> SILU_FP` program, not as a sentinel and not as
+`SSM_CONV_SILU_FP`. Run `--scan-policy` on each canary before trying
+`--run-session`, then compare the composed canary output to the scalar fixture
+root `f1b483b26afa993db5622ad0010c3e56b3e4a7cefaf687529dad1c3c66767d56`.
 
 Preserve the same model-neutral packet boundary, keep Bonsai/Qwen/tokenizer
 details in sidecars, and classify every failure as a packet, admission-policy,

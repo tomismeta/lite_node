@@ -120,6 +120,11 @@ let softplus_output =
     "53b6530be595923f25c1bebf7a0cd43fef39fafe422ee63f49b0efaf1e03f53f\
      b6530be595121040"
 
+let silu_output =
+  bytes_of_hex
+    "343f6c2d2736c2bf86ba54145636d1bf0000000000000000bda2d5f5d464e73f\
+     0e3c298d9ddc0640"
+
 let check_golden label op input expected =
   let state, ok = run_activation op input in
   check (label ^ " succeeds") ok;
@@ -131,32 +136,67 @@ let check_golden label op input expected =
     (fixture_bits expected)
 
 let check_missing_cell_reverts_atomically () =
-  let state =
-    VM.create_state
-      ~limit:1_000_000
-      ~caller:"caller"
-      ~origin:"origin"
-      ~address:"contract"
-      ~value:Z.zero
-      ~storage:(Hashtbl.create 0)
-      ()
-  in
-  set_int_reg state 0 100;
-  set_int_reg state 1 2;
-  set_f64_bits state 100 (Int64.bits_of_float 2.0);
-  set_f64_bits state 101 (Int64.bits_of_float 9.0);
-  Hashtbl.remove state.VM.memory.data 101;
-  check "missing activation input reverts"
-    (not (VM.run state [|VM.SIGMOID_FP (0, 1); VM.STOP|]));
-  check "first input unchanged"
-    (f64_bits state 100 = Int64.bits_of_float 2.0);
-  check "second input remains empty"
-    (not (Hashtbl.mem state.VM.memory.data 101))
+  List.iter
+    (fun (name, op) ->
+      let state =
+        VM.create_state
+          ~limit:1_000_000
+          ~caller:"caller"
+          ~origin:"origin"
+          ~address:"contract"
+          ~value:Z.zero
+          ~storage:(Hashtbl.create 0)
+          ()
+      in
+      set_int_reg state 0 100;
+      set_int_reg state 1 2;
+      set_f64_bits state 100 (Int64.bits_of_float 2.0);
+      set_f64_bits state 101 (Int64.bits_of_float 9.0);
+      Hashtbl.remove state.VM.memory.data 101;
+      check (name ^ " missing input reverts")
+        (not (VM.run state [|op; VM.STOP|]));
+      check (name ^ " first input unchanged")
+        (f64_bits state 100 = Int64.bits_of_float 2.0);
+      check (name ^ " second input remains empty")
+        (not (Hashtbl.mem state.VM.memory.data 101)))
+    [
+      "SIGMOID_FP", VM.SIGMOID_FP (0, 1);
+      "SILU_FP", VM.SILU_FP (0, 1);
+    ]
 
 let check_nonfinite_reverts_atomically () =
+  List.iter
+    (fun (name, op) ->
+      let state =
+        VM.create_state
+          ~limit:1_000_000
+          ~caller:"caller"
+          ~origin:"origin"
+          ~address:"contract"
+          ~value:Z.zero
+          ~storage:(Hashtbl.create 0)
+          ()
+      in
+      set_int_reg state 0 100;
+      set_int_reg state 1 2;
+      set_f64_bits state 100 0x7ff0000000000000L;
+      set_f64_bits state 101 (Int64.bits_of_float 9.0);
+      check (name ^ " non-finite input reverts")
+        (not (VM.run state [|op; VM.STOP|]));
+      check (name ^ " non-finite input unchanged")
+        (f64_bits state 100 = 0x7ff0000000000000L);
+      check (name ^ " following input unchanged")
+        (f64_bits state 101 = Int64.bits_of_float 9.0))
+    [
+      "SOFTPLUS_FP", VM.SOFTPLUS_FP (0, 1);
+      "SILU_FP", VM.SILU_FP (0, 1);
+    ]
+
+let check_strict_operands () =
   let state =
     VM.create_state
       ~limit:1_000_000
+      ~strict_values:true
       ~caller:"caller"
       ~origin:"origin"
       ~address:"contract"
@@ -164,14 +204,13 @@ let check_nonfinite_reverts_atomically () =
       ~storage:(Hashtbl.create 0)
       ()
   in
-  set_int_reg state 0 100;
-  set_int_reg state 1 2;
-  set_f64_bits state 100 0x7ff0000000000000L;
-  set_f64_bits state 101 (Int64.bits_of_float 9.0);
-  check "non-finite activation input reverts"
-    (not (VM.run state [|VM.SOFTPLUS_FP (0, 1); VM.STOP|]));
-  check "non-finite input unchanged" (f64_bits state 100 = 0x7ff0000000000000L);
-  check "following input unchanged" (f64_bits state 101 = Int64.bits_of_float 9.0)
+  state.VM.regs.(0) <- VM.VString "not-an-address";
+  set_int_reg state 1 1;
+  set_f64_bits state 100 (Int64.bits_of_float 1.0);
+  check "silu strict operand reverts"
+    (not (VM.run state [|VM.SILU_FP (0, 1); VM.STOP|]));
+  check "silu strict operand leaves memory unchanged"
+    (f64_bits state 100 = Int64.bits_of_float 1.0)
 
 let check_invalid_shape_and_effort_reverts () =
   let state =
@@ -278,6 +317,7 @@ let check_capability_gate () =
     [
       "SIGMOID_FP", VM.SIGMOID_FP (0, 1);
       "SOFTPLUS_FP", VM.SOFTPLUS_FP (0, 1);
+      "SILU_FP", VM.SILU_FP (0, 1);
     ]
 
 let check_existing_fp_family_remains_forbidden () =
@@ -291,7 +331,6 @@ let check_existing_fp_family_remains_forbidden () =
     "ROPE_APPLY", VM.ROPE_APPLY (0, 1, 2, 3);
     "MATMUL_FP", VM.MATMUL_FP (0, 1, 2, 3, 4, 5);
     "RMSNORM_FP", VM.RMSNORM_FP (0, 1, 2);
-    "SILU_FP", VM.SILU_FP (0, 1);
     "ELEMWISE_MUL_FP", VM.ELEMWISE_MUL_FP (0, 1, 2);
     "RESIDUAL_ADD_FP", VM.RESIDUAL_ADD_FP (0, 1, 2);
     "ROPE_APPLY_FP", VM.ROPE_APPLY_FP (0, 1, 2, 3);
@@ -331,6 +370,7 @@ let check_generic_admission_rejection () =
     [
       "SIGMOID_FP", VM.SIGMOID_FP (0, 1);
       "SOFTPLUS_FP", VM.SOFTPLUS_FP (0, 1);
+      "SILU_FP", VM.SILU_FP (0, 1);
     ]
 
 let compiler_contract declaration name =
@@ -386,6 +426,7 @@ let check_compiler_surface () =
     [
       "sigmoid_fp", (function VM.SIGMOID_FP _ -> true | _ -> false);
       "softplus_fp", (function VM.SOFTPLUS_FP _ -> true | _ -> false);
+      "silu_fp", (function VM.SILU_FP _ -> true | _ -> false);
     ]
 
 let check_wire_roundtrip () =
@@ -404,20 +445,24 @@ let check_wire_roundtrip () =
     [
       "SIGMOID_FP r0, r1", VM.SIGMOID_FP (0, 1);
       "SOFTPLUS_FP r0, r1", VM.SOFTPLUS_FP (0, 1);
+      "SILU_FP r0, r1", VM.SILU_FP (0, 1);
     ]
 
 let check_effects () =
   let effects =
     Program_effects.names
-      (Program_effects.scan [|VM.SIGMOID_FP (0, 1); VM.SOFTPLUS_FP (0, 1)|])
+      (Program_effects.scan
+         [|VM.SIGMOID_FP (0, 1); VM.SOFTPLUS_FP (0, 1); VM.SILU_FP (0, 1)|])
   in
   check "activation effects" (effects = ["memory_read"; "memory_write"])
 
 let () =
   check_golden "sigmoid" (VM.SIGMOID_FP (0, 1)) sigmoid_input sigmoid_output;
   check_golden "softplus" (VM.SOFTPLUS_FP (0, 1)) softplus_input softplus_output;
+  check_golden "silu" (VM.SILU_FP (0, 1)) sigmoid_input silu_output;
   check_missing_cell_reverts_atomically ();
   check_nonfinite_reverts_atomically ();
+  check_strict_operands ();
   check_invalid_shape_and_effort_reverts ();
   check_capability_gate ();
   check_existing_fp_family_remains_forbidden ();
