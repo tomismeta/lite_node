@@ -135,6 +135,40 @@ atomicity, and effort accounting. If it returns floating-point bytes, those
 bytes still need software-defined numerical semantics and cross-platform
 conformance vectors.
 
+The `octra-inference` side has now supplied the scalar Q1-G128 contract and
+tiny golden fixtures:
+
+```text
+/home/exedev/evidence/octra-inference/q1-g128-golden-fixtures-20260722-134349
+```
+
+Key fixture values:
+
+| Field | Value |
+| --- | --- |
+| Scalar contract | `contracts/q1-g128-scalar-reference.md` |
+| Rust oracle | `contracts/q1-g128-scalar-reference.rs` |
+| Primitive label | `linear_q1_0_g128_fp` |
+| Dimensions | `m=2`, `k=256`, `n=3`, `group_size=128`, `block_bytes=18` |
+| Numeric profile | `scalar_binary64_accumulation` |
+| Input bytes | `4096`, SHA-256 `7c0a594504cdff24a4869c837082443200a552263c209821610033b1c88d3bec` |
+| Q1 owner bytes | `108`, SHA-256 `57f9dadd168580d1b39660f54e5a21b480a70bc3017a90e3892f7c74f2895785` |
+| Expected output bytes | `48`, SHA-256 `43411283d083bd6e959bca6aa7edbebc55d8ad251510d992bd52046ac71d9d22` |
+| Output root | `ff5f8319d1e207f368c50ed98b8a361639db527f486c8acdbb62a2c56037cea1` |
+
+This proof branch exposes that contract as `LINEAR_Q1_G128_FP`, gated in plain
+inference by `tensor.q1-g128`. Generic Program admission still rejects it as
+consensus-unsafe, and `MATMUL_FP` remains rejected. The implementation is still
+evidence for the lean rebuild, not the final merge shape: the fresh branch
+should either prove the binary64 profile with cross-machine conformance or move
+this primitive to software-defined fixed arithmetic before treating it as
+consensus-ready.
+
+The existing LiteNode session ABI roots VM values, not raw tensor bytes. A
+direct canary should therefore compare the output cells decoded as little-endian
+binary64 bit patterns against `expected-output.f64le.bin`, while reporting the
+LiteNode session output root separately.
+
 Caveat: this evidence used the existing built VPS harness at LiteNode source
 commit `2a5803b`, with executable hash
 `98ac8bed595e180adb252f9e6247b4db6087db1b3d35b03e6544ab963d4cefcc`.
@@ -274,23 +308,21 @@ The lean branch should not automatically port these proof-branch surfaces:
 ## Next Ask For `octra-inference`
 
 The next useful packet from the `octra-inference` side is not another range
-smoke proof, reference-output canary, or generic-`MATMUL_FP` primitive canary.
-Those now exist.
+smoke proof, reference-output canary, generic-`MATMUL_FP` primitive canary, or
+standalone Q1 fixture package. Those now exist.
 
-Until LiteNode exposes a deterministic projection primitive, the useful
-`octra-inference` work is to supply the exact reference contract for that
-primitive:
+The next useful artifact is a direct VM canary using `LINEAR_Q1_G128_FP`:
 
-1. Provide scalar reference semantics for Q1-G128 grouped linear projection,
-   including byte layout, scale decode, accumulation, rounding, and output
-   bytes.
-2. Provide tiny golden fixtures with input bytes, Q1 owner bytes, dimensions,
-   expected output bytes, output SHA-256, and output root.
-3. Preserve the same model-neutral packet boundary: roots and capabilities in
+1. Re-emit the primitive canary using `LINEAR_Q1_G128_FP` rather than
+   `MATMUL_FP`.
+2. Keep Q1 owner bytes bound through `model-ranges.json` and `FLOAD`.
+3. Request capability `tensor.q1-g128`; do not request `tensor.strict-fp`.
+4. Preserve the same model-neutral packet boundary: roots and capabilities in
    LiteNode-facing files; Bonsai/Qwen/tokenizer details in sidecars.
-4. Once LiteNode has the primitive, re-emit the primitive canary using that
-   opcode rather than `MATMUL_FP`.
-5. Run the LiteNode admission/session harness and classify any failure as a
+5. Compare VM output cells, decoded as little-endian binary64 bit patterns,
+   against the Q1-G128 golden fixture SHA-256 and root; report the LiteNode
+   session output root separately.
+6. Run the LiteNode admission/session harness and classify any failure as a
    packet, admission-policy, missing-primitive, data-binding, effort/limit,
    determinism, or harness-only gap.
 

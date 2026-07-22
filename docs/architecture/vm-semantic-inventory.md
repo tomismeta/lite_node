@@ -130,7 +130,7 @@ instruction type or execution loop.
 
 ## Current Compute Matrix
 
-The current inference-adjacent surface contains two blob instructions and 39
+The current inference-adjacent surface contains two blob instructions and 40
 compute instructions. The labels below describe present admission behavior, not
 the intended future numerical profiles.
 
@@ -140,6 +140,7 @@ the intended future numerical profiles.
 | Legacy integer or fixed | 7 | Allowed | Unsupported by type flow |
 | Host-assisted fixed | 6 | Rejected as host float | Rejected as host float |
 | Typed Q16 | 13 | Rejected as Program-only | Accepted by type flow |
+| Q1-G128 proof | 1 | Rejected as host/profiled float | Accepted by type flow |
 | Unclassified Q16 | 2 | Allowed | Unsupported by type flow |
 | FP | 11 | Rejected as host float | Rejected as host float |
 
@@ -155,6 +156,7 @@ The groups contain:
   `RMSNORM_Q16_INPLACE`, `SILU_Q16_INPLACE`, `ROPE_APPLY_Q16`,
   `ATTENTION_KV_Q16`, `VECDOT_Q16`, `ELEMWISE_MUL_Q16`,
   `RESIDUAL_ADD_Q16`, `LOAD_INT8_Q16`, `APPEND_VEC_Q16`, and `ARGMAX_Q16`.
+- Q1-G128 proof: `LINEAR_Q1_G128_FP`.
 - Unclassified Q16: `MATMUL_Q16` and `SHIFT_ROUND_INPLACE`.
 - FP: `MATMUL_FP`, `RMSNORM_FP`, `SILU_FP`, `ELEMWISE_MUL_FP`,
   `RESIDUAL_ADD_FP`, `ROPE_APPLY_FP`, `LOAD_INT8_FP`, `VECDOT_FP`,
@@ -165,16 +167,17 @@ normal verifier and execution checks still apply.
 
 The supporting surfaces have different coverage:
 
-- bytecode encoding, decoding, and register verification cover all 41
+- bytecode encoding, decoding, and register verification cover all 42
   inference-adjacent instructions;
-- `oct_gen.ml` can lower builtins to all 41 instructions;
-- the assembler renderer covers all 41, while its parser covers blobs and the
-  13 Typed Q16 instructions;
-- strict runtime operand checking covers the Typed Q16 group and selected data
-  loaders, but not the complete compute surface;
-- Program type flow covers the 13 Typed Q16 instructions only; and
-- the effect scan assigns no memory or blob effect to any of the 41
-  instructions.
+- `oct_gen.ml` can lower builtins to all 42 instructions;
+- the assembler renderer covers all 42, while its parser covers blobs, the
+  13 Typed Q16 instructions, and the Q1-G128 proof opcode;
+- strict runtime operand checking covers the Typed Q16 group, the Q1-G128 proof
+  opcode, and selected data loaders, but not the complete compute surface;
+- Program type flow covers the 13 Typed Q16 instructions and the Q1-G128 proof
+  opcode; and
+- the effect scan assigns memory read/write to the Q1-G128 proof opcode, but
+  still assigns no memory or blob effect to the older tensor instructions.
 
 ## Per-Instruction Closure
 

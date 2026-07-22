@@ -415,6 +415,10 @@ let step facts pc env = function
   | Contract_vm.ELEMWISE_MUL_Q16 (dest, source, count)
   | Contract_vm.RESIDUAL_ADD_Q16 (dest, source, count) ->
     expect_nums pc env [dest; source; count]
+  | Contract_vm.LINEAR_Q1_G128_FP (dest, left, q1, offset, rows, inner, cols) ->
+    (match expect pc env q1 (function String | Bytes | Bytes32 -> true | _ -> false) "bytes" with
+     | Error error -> Error error
+     | Ok _ -> expect_nums pc env [dest; left; offset; rows; inner; cols])
   | Contract_vm.FSTORE (dest, source) ->
     (match expect_text pc env source with
      | Error error -> Error error

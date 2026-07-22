@@ -89,6 +89,7 @@ let opcode_class = function
   | Contract_vm.LOAD_INT8_Q16 _
   | Contract_vm.APPEND_VEC_Q16 _
   | Contract_vm.ARGMAX_Q16 _ -> Requires "tensor.fixed"
+  | Contract_vm.LINEAR_Q1_G128_FP _ -> Requires "tensor.q1-g128"
   | Contract_vm.MATMUL_Q16 _ -> Forbidden
   | op when Opcode_policy.uses_host_float op -> Forbidden
   | _ -> Allowed

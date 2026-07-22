@@ -16,8 +16,9 @@ type effect =
 type t = effect list
 
 let of_instr = function
-  | Contract_vm.MLOAD _ | Contract_vm.MLOADR _ -> Some Memory_read
-  | Contract_vm.MSTORE _ | Contract_vm.MSTORER _ -> Some Memory_write
+  | Contract_vm.MLOAD _ | Contract_vm.MLOADR _ -> [Memory_read]
+  | Contract_vm.MSTORE _ | Contract_vm.MSTORER _ -> [Memory_write]
+  | Contract_vm.LINEAR_Q1_G128_FP _ -> [Memory_read; Memory_write]
   | Contract_vm.SLOAD _
   | Contract_vm.SLOADK _
   | Contract_vm.SKEYS _
@@ -26,18 +27,18 @@ let of_instr = function
   | Contract_vm.FLOAD _
   | Contract_vm.OBJECT_MEMBER_COUNT _
   | Contract_vm.OBJECT_HAS_MEMBER _
-  | Contract_vm.OBJECT_MEMBER_REF_AT _ -> Some Storage_read
+  | Contract_vm.OBJECT_MEMBER_REF_AT _ -> [Storage_read]
   | Contract_vm.SSTORE _
   | Contract_vm.SSTOREK _
   | Contract_vm.SDEL _
   | Contract_vm.SDELK _
   | Contract_vm.SSTOREN _
   | Contract_vm.FSTORE _
-  | Contract_vm.OBJECT_TRANSITION_APPLY _ -> Some Storage_write
-  | Contract_vm.XCALL _ | Contract_vm.CALL_INT _ -> Some Call
-  | Contract_vm.SPAWN _ | Contract_vm.SPAWN2 _ -> Some Deploy
-  | Contract_vm.TRANSFER _ -> Some Transfer
-  | Contract_vm.EMIT _ -> Some Emit
+  | Contract_vm.OBJECT_TRANSITION_APPLY _ -> [Storage_write]
+  | Contract_vm.XCALL _ | Contract_vm.CALL_INT _ -> [Call]
+  | Contract_vm.SPAWN _ | Contract_vm.SPAWN2 _ -> [Deploy]
+  | Contract_vm.TRANSFER _ -> [Transfer]
+  | Contract_vm.EMIT _ -> [Emit]
   | Contract_vm.FHE_LOAD_PK _
   | Contract_vm.FHE_ADD _
   | Contract_vm.FHE_SUB _
@@ -55,11 +56,11 @@ let of_instr = function
   | Contract_vm.FHE_SER _
   | Contract_vm.FHE_DESER _
   | Contract_vm.FHE_SER_PK _
-  | Contract_vm.FHE_DESER_PK _ -> Some Fhe
+  | Contract_vm.FHE_DESER_PK _ -> [Fhe]
   | Contract_vm.CHECKPOINT
   | Contract_vm.ROLLBACK
-  | Contract_vm.COMMIT -> Some Journal
-  | _ -> None
+  | Contract_vm.COMMIT -> [Journal]
+  | _ -> []
 
 let add effect effects =
   if List.mem effect effects then effects else effects @ [effect]
@@ -67,9 +68,10 @@ let add effect effects =
 let scan code =
   Array.fold_left
     (fun effects instr ->
-      match of_instr instr with
-      | None -> effects
-      | Some effect -> add effect effects)
+      List.fold_left
+        (fun effects effect -> add effect effects)
+        effects
+        (of_instr instr))
     [] code
 
 let names effects =

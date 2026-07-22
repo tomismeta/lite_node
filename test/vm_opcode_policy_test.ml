@@ -70,6 +70,8 @@ let host_float_cases = [
   ("attention-fp", "ATTENTION_KV_FP",
    VM.ATTENTION_KV_FP (0, 1, 2, 3, 4, 5, 6, 7));
   ("append-fp", "APPEND_VEC_FP", VM.APPEND_VEC_FP (0, 1, 2, 3));
+  ("linear-q1-g128", "LINEAR_Q1_G128_FP",
+   VM.LINEAR_Q1_G128_FP (0, 1, 2, 3, 4, 5, 6));
 ]
 
 let program_only_cases = [

@@ -38,7 +38,7 @@ network admission, or publisher endorsement.
 | Request admission | Target and limit checks added | Feed runtime proof from admitted roots |
 | Immutable ranges | Local authenticated pinning and plan binding added | Back with resident reader |
 | Ontology guard | Runtime source scan added | No model-family names enter VM code |
-| Tensor substrate | Not started | Add only generic accepted primitives |
+| Tensor substrate | Q1-G128 linear proof primitive added | Re-emit direct primitive canary |
 | Sessions | Plan-bound local candidate runner added | Add node residency and scheduler |
 | Receipts | Output and candidate roots added locally | Add full diagnostics object |
 

@@ -138,6 +138,7 @@ type instr =
   | APPEND_VEC_Q16 of reg * reg * reg * reg
   | ARGMAX_Q16 of reg * reg * reg
   | MATMUL_Q16 of reg * reg * reg * reg * reg * reg
+  | LINEAR_Q1_G128_FP of reg * reg * reg * reg * reg * reg * reg
   | SHIFT_ROUND_INPLACE of reg * reg * reg
   | MATMUL_FP of reg * reg * reg * reg * reg * reg
   | RMSNORM_FP of reg * reg * reg
@@ -331,6 +332,7 @@ let effort_cost = function
   | APPEND_VEC_Q16 _ -> 5
   | ARGMAX_Q16 _ -> 5
   | MATMUL_Q16 _ -> 100
+  | LINEAR_Q1_G128_FP _ -> 200
   | SHIFT_ROUND_INPLACE _ -> 5
   | MATMUL_FP _ -> 200
   | RMSNORM_FP _ -> 50
@@ -511,8 +513,41 @@ let mem_get_fp64 mem a =
   | Some (VInt z) -> z_to_fp64 z
   | _ -> 0.0
 
+let finite_fp64 value =
+  match classify_float value with
+  | FP_nan
+  | FP_infinite -> false
+  | FP_normal
+  | FP_subnormal
+  | FP_zero -> true
+
+let mem_read_fp64 mem a =
+  match Hashtbl.find_opt mem a with
+  | Some (VInt z) when Z.fits_int64 z ->
+    let value = Int64.float_of_bits (Z.to_int64 z) in
+    if finite_fp64 value then Some value else None
+  | _ -> None
+
 let mem_set_fp64 mem a f =
   Hashtbl.replace mem a (VInt (fp64_to_z f))
+
+let fp16_le_to_fp64 data offset =
+  let bits =
+    Char.code data.[offset]
+    lor (Char.code data.[offset + 1] lsl 8)
+  in
+  let sign = if bits land 0x8000 = 0 then 1.0 else -1.0 in
+  let exponent = (bits lsr 10) land 0x1f in
+  let fraction = bits land 0x03ff in
+  match exponent, fraction with
+  | 0, 0 -> Some (sign *. 0.0)
+  | 0, _ ->
+    Some (sign *. (float_of_int fraction /. 1024.0) *. (2.0 ** -14.0))
+  | 31, _ -> None
+  | _ ->
+    Some
+      (sign *. (1.0 +. (float_of_int fraction /. 1024.0))
+       *. (2.0 ** (float_of_int (exponent - 15))))
 
 let make_u64 z =
   if validate_u64 z then Some (VU64 z) else None
@@ -829,6 +864,11 @@ let strict_operands st = function
     is_numeric (getr st dst) && is_text (getr st source)
     && is_numeric (getr st offset) && is_numeric (getr st length)
     && is_numeric (getr st scale)
+  | LINEAR_Q1_G128_FP (dst, lhs, q1, offset, rows, inner, cols) ->
+    is_numeric (getr st dst) && is_numeric (getr st lhs)
+    && is_text (getr st q1) && is_numeric (getr st offset)
+    && is_numeric (getr st rows) && is_numeric (getr st inner)
+    && is_numeric (getr st cols)
   | APPEND_VEC_Q16 (dst, pos, source, length) ->
     List.for_all (fun reg -> is_numeric (getr st reg)) [dst; pos; source; length]
   | ARGMAX_Q16 (dest, addr, length) ->
@@ -2020,6 +2060,73 @@ let exec_one st op =
              | None -> revert st)
           | None -> revert st)
      | _ -> revert st)
+  | LINEAR_Q1_G128_FP (rs_dst, rs_lhs, rs_q1, rs_off, rs_m, rs_k, rs_n) ->
+    (match read_int st rs_dst, read_int st rs_lhs, to_bytes (getr st rs_q1),
+           read_int st rs_off, read_int st rs_m, read_int st rs_k,
+           read_int st rs_n with
+     | Some dst, Some lhs, Some q1, Some off, Some m, Some k, Some n
+       when off >= 0 && m > 0 && k > 0 && n > 0 && k mod 128 = 0
+            && m <= 32768 && k <= 32768 && n <= 32768 ->
+       let group = 128 in
+       let block_bytes = 18 in
+       let blocks_per_output = k / group in
+       (match checked_product m k, checked_product m n,
+              checked_product n blocks_per_output with
+        | Some lhs_n, Some dst_n, Some blocks ->
+          (match checked_product blocks block_bytes with
+           | Some q1_n
+             when valid_mem_span lhs lhs_n && valid_mem_span dst dst_n
+                  && off <= String.length q1
+                  && q1_n <= String.length q1 - off ->
+             if not (add_dyn_product st [m; n; k] 512) then revert st
+             else
+               let lhs_values =
+                 Array.init lhs_n (fun i -> mem_read_fp64 st.memory.data (lhs + i))
+               in
+               if not (Array.for_all Option.is_some lhs_values) then revert st
+               else
+                 let lhs_values = Array.map Option.get lhs_values in
+                 let output = Array.make dst_n 0.0 in
+                 let ok = ref true in
+                 for row = 0 to m - 1 do
+                   for col = 0 to n - 1 do
+                     let acc = ref 0.0 in
+                     for block = 0 to blocks_per_output - 1 do
+                       let block_offset =
+                         off + (((col * blocks_per_output) + block) * block_bytes)
+                       in
+                       match fp16_le_to_fp64 q1 block_offset with
+                       | None -> ok := false
+                       | Some scale ->
+                         for item = 0 to group - 1 do
+                           let sign_byte =
+                             Char.code q1.[block_offset + 2 + (item lsr 3)]
+                           in
+                           let sign =
+                             if (sign_byte lsr (item land 7)) land 1 = 1 then
+                               1.0
+                             else
+                               -1.0
+                           in
+                           let lhs_value =
+                             lhs_values.((row * k) + (block * group) + item)
+                           in
+                           acc := !acc +. (lhs_value *. sign *. scale)
+                         done
+                     done;
+                     output.((row * n) + col) <- !acc
+                   done
+                 done;
+                 if not !ok || not (Array.for_all finite_fp64 output) then revert st
+                 else begin
+                   for i = 0 to dst_n - 1 do
+                     mem_set_fp64 st.memory.data (dst + i) output.(i)
+                   done;
+                   true
+                 end
+           | _ -> revert st)
+        | _ -> revert st)
+     | _ -> revert st)
   | MATMUL_FP (rd_addr, rs_lhs, rs_rhs, rs_m, rs_k, rs_n) ->
     let dst = Z.to_int (to_z (getr st rd_addr)) in
     let lhs = Z.to_int (to_z (getr st rs_lhs)) in
@@ -2966,6 +3073,7 @@ module Verifier = struct
             | APPEND_VEC_Q16 (d,p,s,n) -> check_regs pc [d;p;s;n]
             | ARGMAX_Q16 (d,a,n) -> check_regs pc [d;a;n]
             | MATMUL_Q16 (d,l,r,m,k,n) -> check_regs pc [d;l;r;m;k;n]
+            | LINEAR_Q1_G128_FP (d,l,q,o,m,k,n) -> check_regs pc [d;l;q;o;m;k;n]
             | SHIFT_ROUND_INPLACE (a,n,b) -> check_regs pc [a;n;b]
             | MATMUL_FP (d,l,r,m,k,n) -> check_regs pc [d;l;r;m;k;n]
             | RMSNORM_FP (a,n,g) -> check_regs pc [a;n;g]

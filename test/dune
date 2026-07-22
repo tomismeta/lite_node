@@ -4,6 +4,11 @@
  (libraries octra_vm))
 
 (test
+ (name q1_g128_primitive_test)
+ (modules q1_g128_primitive_test)
+ (libraries octra_vm inference_test_support digestif digestif.c))
+
+(test
  (name execution_requirement_test)
  (modules execution_requirement_test)
  (libraries octra_vm))

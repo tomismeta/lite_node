@@ -85,13 +85,11 @@ let of_program ?(facts = Program_type_flow.empty_facts) code =
 
 let of_inference_code_with_requirement
     ?(facts = Program_type_flow.empty_facts)
-    ~support
-    ~requirement
-    code =
-  (* Inference uses the same consensus-safe admission policy as programs.
-     A numerical capability is not sufficient to make host floating-point
-     operations deterministic; a numerical profile must bind those semantics
-     to execution before this path is widened. *)
+  ~support
+  ~requirement
+  code =
+  (* Inference applies its requirement-aware opcode policy before admitting a
+     Program envelope; generic Program admission remains stricter. *)
   match Execution_requirement.check support requirement with
   | Error error ->
     Error (Unsafe_error
@@ -102,9 +100,22 @@ let of_inference_code_with_requirement
      | Some violation ->
        Error (Unsafe_error (Inference_opcode_policy.error_message violation))
      | None ->
-       (match of_program ~facts code with
-        | Error error -> Error error
-        | Ok admitted -> Ok { admitted with requirement = Some requirement }))
+       (match Contract_vm.Verifier.verify code with
+        | Error err -> Error (Verify_error (verifier_error err))
+        | Ok () ->
+          (match Program_type_flow.check ~facts code with
+           | Error error ->
+             Error
+               (Verify_error
+                  ("Program type flow: " ^ Program_type_flow.error_message error))
+           | Ok () ->
+             Ok {
+               admitted_code = Array.copy code;
+               admitted_effects = Program_effects.scan code;
+               profile = Program facts;
+               requirement = Some requirement;
+               provenance = Raw_code;
+             })))
 
 let cert_field name fields =
   match List.filter (fun (key, _) -> String.equal key name) fields with

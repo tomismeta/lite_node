@@ -887,7 +887,7 @@ let rec typ_of_expr env = function
      | "matmul" | "softmax" | "softmax_q16" | "layernorm" | "layernorm_q16"
      | "relu" | "rmsnorm" | "rmsnorm_q16" | "silu" | "silu_q16" | "elemwise_mul"
      | "load_int8" | "load_int8_b64" | "residual_add" | "rope_apply" | "rope_apply_q16"
-     | "matmul_q16" | "shift_round"
+     | "matmul_q16" | "linear_q1_0_g128_fp" | "shift_round"
      | "matmul_fp" | "rmsnorm_fp" | "silu_fp" | "elemwise_mul_fp"
      | "residual_add_fp" | "rope_apply_fp" | "load_int8_fp"
      | "attention_kv_fp" | "attention_kv_q16" | "append_vec_fp"
@@ -1561,6 +1561,13 @@ and gen_builtin env name args =
    | "matmul_q16" ->
      emit env (Contract_vm.MATMUL_Q16 (nth 0, nth 1, nth 2, nth 3, nth 4, nth 5));
      emit env (Contract_vm.LDI (rd, VBool true))
+   | "linear_q1_0_g128_fp" ->
+     if env.declaration <> ProgramDecl then
+       gerr env.line "linear_q1_0_g128_fp is available only in Program"
+     else begin
+       emit env (Contract_vm.LINEAR_Q1_G128_FP (nth 0, nth 1, nth 2, nth 3, nth 4, nth 5, nth 6));
+       emit env (Contract_vm.LDI (rd, VBool true))
+     end
    | "shift_round" ->
      emit env (Contract_vm.SHIFT_ROUND_INPLACE (nth 0, nth 1, nth 2));
      emit env (Contract_vm.LDI (rd, VBool true))

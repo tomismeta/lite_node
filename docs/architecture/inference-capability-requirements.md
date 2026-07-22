@@ -63,6 +63,12 @@ earliest roadmap phase in which the semantic disposition can be accepted.
 inference admission path still rejects host-floating-point VM opcodes until an
 exact numerical profile and replay gate exist.
 
+`tensor.q1-g128` now has a proof-branch scalar fixture and VM opcode for the
+linear case. That is sufficient for the next direct Bonsai primitive canary.
+It is not yet a release gate: binary64 accumulation still needs
+cross-platform conformance, or replacement with software-defined fixed
+arithmetic, before being treated as consensus-ready.
+
 The inventory closes at the Phase 0 design gate. New rows require evidence from
 a new model or a previously unrepresented generated schedule; they are not
 added as speculative VM features.
@@ -78,6 +84,12 @@ Disposition: **primitive**.
 The VM needs a generic matrix operation over a precisely specified Q1-G128
 encoding. The contract defines block bytes, scale decoding, row order,
 accumulation order, shape rules, offsets, output ownership, and effort.
+
+Proof-branch status: `LINEAR_Q1_G128_FP` implements the
+`linear_q1_0_g128_fp` scalar fixture contract under capability
+`tensor.q1-g128`. This is the narrow demo primitive for the next canary, not a
+blanket admission of `tensor.strict-fp`, and not an ordinary Program opcode
+outside inference admission.
 
 Physical block-major layouts, row bundling, worker pools, SIMD, and lookup
 tables are implementations of the same operation. They do not create new
