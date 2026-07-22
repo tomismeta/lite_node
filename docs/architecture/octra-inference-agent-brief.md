@@ -135,8 +135,10 @@ now admits the following boundary fields:
 ```
 
 LiteNode checks that the request targets the admitted target, the entrypoint is
-declared by the target, request limits fit inside the execution requirement,
-and an optional `request_root` matches the computed root.
+exactly `advance`, request limits fit inside the execution requirement, and an
+optional `request_root` matches the computed root. The admitted target must use
+the LiteNode session ABI root and exactly one `advance` entrypoint at label
+`100`.
 
 The model ranges object:
 
@@ -200,6 +202,9 @@ program implements that path with accepted generic VM primitives.
   identity and Git commits for source history.
 - Keep `consensus_accepted=false` on the local runtime proof path until a real
   network receipt exists.
+- Expect the LiteNode report to include `program_provenance` and
+  `program_attested`; the current local checked-envelope path should report
+  `program_attested=false`.
 
 ## Next Ask
 

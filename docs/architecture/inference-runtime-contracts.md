@@ -45,6 +45,7 @@ target_root      = H("octra:inference:target\0"      || target)
 range_root       = H("octra:inference:model-range\0" || range)
 model_ranges_root = H("octra:inference:model-ranges\0" || model_ranges)
 request_root     = H("octra:inference:request\0"     || request)
+session_abi_root = H("octra:inference:session-abi\0" || session_abi)
 session_root     = H("octra:inference:session\0"     || session)
 checkpoint_root  = H("octra:inference:checkpoint\0"  || checkpoint)
 receipt_root     = H("octra:inference:receipt\0"     || receipt)
@@ -90,9 +91,11 @@ consensus-safe admission path until a numerical profile defines and enforces
 their semantics. A capability declaration never turns an otherwise unsafe
 instruction into a consensus-safe one.
 
-Plain inference forbids `FHE_*` opcodes. Encrypted inference must enter through
-a separately defined encrypted profile; the plain runner also disables FHE in
-its VM execution context.
+Plain inference forbids `FHE_*` opcodes, storage/object-state reads and writes,
+blob writes, external calls, deploys, transfers, events, and journal operations.
+It also does not advertise `MATMUL_Q16` until Program type-flow supports that
+opcode. Encrypted inference must enter through a separately defined encrypted
+profile; the plain runner also disables FHE in its VM execution context.
 
 Multiple definitions may coexist during a rollout because their roots differ.
 Removing support is an operator and network activation decision recorded in
@@ -107,9 +110,14 @@ The target binds:
 - model release root;
 - execution descriptor root;
 - authenticated store root;
-- session ABI root, identifying target entrypoints, canonical input/output
-  shapes, and transition boundaries; and
-- target-owned entry points and canonical transition rules.
+- session ABI root, identifying the canonical input/output shape and transition
+  boundary; and
+- the single target-owned `advance` entrypoint for this phase.
+
+The first accepted target ABI is exact: request schema `1`, entrypoint
+`advance`, label `100`, request input root at memory cell `1000`, output base in
+`r0`, output cell count in `r1`, and retained candidate state equal to canonical
+VM memory.
 
 `octra-inference` produces and qualifies the target. LiteNode verifies its
 roots, admitted program, declared requirements, effects, and limits. LiteNode
@@ -136,9 +144,9 @@ A request binds:
 The first local admission packet uses the narrower boundary fields `schema`,
 `target_root`, `entrypoint`, `input_root`, `request_nonce`,
 `max_output_bytes`, and `max_advance_effort`. Admission checks target-root
-equality, declared entrypoint presence, and request limits against the
-execution requirement. Generation policy, stop policy, caller authority, and
-sampling roots remain target/request-owned extensions before network
+equality, requires `entrypoint = "advance"`, and checks request limits against
+the execution requirement. Generation policy, stop policy, caller authority,
+and sampling roots remain target/request-owned extensions before network
 activation.
 
 Raw prompt bytes, tokenization rules, and chat templates remain outside
@@ -151,6 +159,17 @@ policy and deterministic seed; the target consumes those values through generic
 selection operations. LiteNode does not receive logits and apply an informal
 runtime or RPC sampling policy.
 
+## Session ABI
+
+The first session ABI is a small descriptor, not a registry. LiteNode seeds
+`memory[1000]` with `VString request.input_root` before entering the target
+program and exposes the exact request input bytes as `blobs[input_root]`.
+Bytecode can therefore use `MLOAD` followed by authenticated `FLOAD` without
+baking request-specific roots into the admitted program.
+
+Only `advance` at label `100` enters model execution. Additional target
+entrypoint aliases are rejected until the session protocol explicitly grows.
+
 ## Output ABI
 
 The first local execution path uses one fixed, model-neutral output convention:
@@ -160,8 +179,8 @@ The first local execution path uses one fixed, model-neutral output convention:
 - the canonical output is the ordered value encoding of that span.
 
 The span must be initialized, its encoded size must fit `max_output_bytes`, and
-opaque values fail closed. Scratch memory and register state remain candidate
-state and do not affect `output_root`. The convention is bound into the output
+opaque values fail closed. Registers, storage, and blobs are not retained
+candidate state in the plain runner. The convention is bound into the output
 root with the target's `session_abi_root`; a future ABI descriptor may replace
 the fixed convention without changing the surrounding session protocol.
 
@@ -202,10 +221,10 @@ When committed target state exists, its payload is durable canonical session
 data. It is not stored only in an optional checkpoint.
 
 The first local runner accepts at most one successful advance. Its candidate
-root is a physical execution snapshot for diagnostics, not committed target
-state and not part of the session root. Multi-advance execution requires a
-canonical position and either replayable target progress or explicitly committed
-target state.
+root is the canonical VM memory payload retained at the transition boundary for
+diagnostics. It is not committed target state and not part of the session root.
+Multi-advance execution requires a canonical position and either replayable
+target progress or explicitly committed target state.
 
 The output prefix is append-only and hash-chained. A successful advance may
 append output, replace logical phase or position, increase cumulative effort,
@@ -401,10 +420,12 @@ lengths, checked byte bounds, duplicate ranges, and equality with the admitted
 target's model and store roots. It does not perform storage I/O, prepare native
 views, or assert publisher provenance.
 
-Programs may read authenticated immutable ranges and allocate bounded
-session-local scratch. Scratch is not authenticated model state. It becomes
-externally meaningful only when committed through a canonical output, session,
-or optional checkpoint root.
+Plain inference programs may read authenticated immutable ranges and request
+input bytes through `FLOAD`, then allocate bounded session-local memory scratch.
+They may not read or mutate storage/object state, store blobs,
+call/deploy/transfer, emit events, or use journal operations. Scratch is not
+authenticated model state. It becomes externally meaningful only when committed
+through a canonical output, session, candidate, or optional checkpoint root.
 
 The first local runner enforces `max_scratch_bytes` against the canonical
 mutable-memory payload at the transition boundary. Peak host allocation

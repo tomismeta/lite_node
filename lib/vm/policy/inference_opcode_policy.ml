@@ -35,6 +35,29 @@ let has_capability name requirement =
     requirement.Execution_requirement.capabilities
 
 let opcode_class = function
+  | Contract_vm.SLOAD _
+  | Contract_vm.SSTORE _
+  | Contract_vm.SDEL _
+  | Contract_vm.SLOADK _
+  | Contract_vm.SSTOREK _
+  | Contract_vm.SDELK _
+  | Contract_vm.SLOADN _
+  | Contract_vm.SSTOREN _
+  | Contract_vm.SKEYS _
+  | Contract_vm.SKEYS_PAGE _
+  | Contract_vm.FSTORE _
+  | Contract_vm.OBJECT_MEMBER_COUNT _
+  | Contract_vm.OBJECT_HAS_MEMBER _
+  | Contract_vm.OBJECT_MEMBER_REF_AT _
+  | Contract_vm.OBJECT_TRANSITION_APPLY _
+  | Contract_vm.XCALL _
+  | Contract_vm.SPAWN _
+  | Contract_vm.SPAWN2 _
+  | Contract_vm.TRANSFER _
+  | Contract_vm.CHECKPOINT
+  | Contract_vm.ROLLBACK
+  | Contract_vm.COMMIT
+  | Contract_vm.EMIT _ -> Forbidden
   | Contract_vm.FHE_LOAD_PK _
   | Contract_vm.FHE_ADD _
   | Contract_vm.FHE_SUB _
@@ -65,9 +88,9 @@ let opcode_class = function
   | Contract_vm.RESIDUAL_ADD_Q16 _
   | Contract_vm.LOAD_INT8_Q16 _
   | Contract_vm.APPEND_VEC_Q16 _
-  | Contract_vm.ARGMAX_Q16 _
-  | Contract_vm.MATMUL_Q16 _ -> Requires "tensor.fixed"
-  | op when Opcode_policy.uses_host_float op -> Requires "tensor.strict-fp"
+  | Contract_vm.ARGMAX_Q16 _ -> Requires "tensor.fixed"
+  | Contract_vm.MATMUL_Q16 _ -> Forbidden
+  | op when Opcode_policy.uses_host_float op -> Forbidden
   | _ -> Allowed
 
 let first_violation ~requirement code =

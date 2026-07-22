@@ -18,6 +18,7 @@ module Model = Octra_vm.Inference_model
 module Plan = Octra_vm.Inference_plan
 module Req = Octra_vm.Execution_requirement
 module Request = Octra_vm.Inference_request
+module Abi = Octra_vm.Inference_session_abi
 module Session = Octra_vm.Inference_session
 module Store = Octra_vm.Inference_store
 module Target = Octra_vm.Inference_target
@@ -64,7 +65,10 @@ let support =
   }
 
 let admitted () =
-  Inference_cert.admit ~support ~requirement [| VM.JDEST 100; VM.STOP |]
+  Inference_cert.admit
+    ~support
+    ~requirement
+    [| VM.JDEST Abi.advance_label; VM.STOP |]
 
 let target admitted =
   Target.{
@@ -73,8 +77,11 @@ let target admitted =
     model_root = hex_root 'e';
     execution_descriptor_root = hex_root '1';
     store_root = hex_root '2';
-    session_abi_root = hex_root '3';
-    entrypoints = [{ entry_name = "advance"; entry_label = 100 }];
+    session_abi_root = Abi.v1_root;
+    entrypoints = [{
+      entry_name = Abi.advance_entrypoint;
+      entry_label = Abi.advance_label;
+    }];
   }
 
 let model target encoding =
@@ -104,9 +111,9 @@ let pins model =
 
 let request target =
   Request.{
-    schema = 1;
+    schema = Abi.request_schema;
     target_root = Target.root target;
-    entrypoint = "advance";
+    entrypoint = Abi.advance_entrypoint;
     input_root = sha256 "";
     request_nonce = hex_root '5';
     max_output_bytes = 32;
@@ -178,7 +185,7 @@ let check_session_plan_identity () =
   | _ -> failwith "expected session plan identity rejection"
 
 let check_generic_admission_rejected () =
-  match Admission.of_program [| VM.JDEST 100; VM.STOP |] with
+  match Admission.of_program [| VM.JDEST Abi.advance_label; VM.STOP |] with
   | Error error -> failwith (Admission.error_message error)
   | Ok generic ->
     let target = target (admitted ()) in

@@ -797,6 +797,12 @@ let () =
               [
                 "status", `String "accepted";
                 "program_root", `String (Target.program_root admitted);
+                "program_provenance",
+                `String
+                  (Admission.provenance_name
+                     (Admission.provenance admitted));
+                "program_attested",
+                `Bool (Admission.program_attested admitted);
                 "requirement_root", `String requirement_root;
                 "target_root", `String target_root;
                 "program_instructions",

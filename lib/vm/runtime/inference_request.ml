@@ -78,7 +78,8 @@ let check_limit name value =
   if value >= 0 then Ok () else Error (Bad_limit (name, value))
 
 let validate request =
-  if request.schema <> 1 then Error (Bad_schema request.schema)
+  if request.schema <> Inference_session_abi.request_schema then
+    Error (Bad_schema request.schema)
   else
     match check_root request.target_root with
     | Error error -> Error error
@@ -132,9 +133,14 @@ let check ~target ~requirement request =
         Error (Requirement_root_mismatch
                  (target.requirement_root, actual_requirement_root))
       else
-        match Inference_target.entry_label target request.entrypoint with
-        | None -> Error (Entrypoint_unsupported request.entrypoint)
-        | Some _ -> check_limits request requirement.limits
+        if not
+            (String.equal
+               request.entrypoint
+               Inference_session_abi.advance_entrypoint)
+        then
+          Error (Entrypoint_unsupported request.entrypoint)
+        else
+          check_limits request requirement.limits
 
 let error_message = function
   | Bad_schema schema ->

@@ -69,7 +69,7 @@ evidence remain outside LiteNode.
 2. Align `octra-inference` target output with the VM target fields:
    `program_root`, `requirement_root`, `model_root`,
    `execution_descriptor_root`, `store_root`, `session_abi_root`, and
-   `entrypoints`.
+   exactly one `advance` entrypoint at label `100`.
 3. Add immutable range reads over authenticated model data with a scalar
    synthetic fixture before using Bonsai data. **Complete locally:** slices are
    pinned and addressed by their canonical range roots.
@@ -139,12 +139,14 @@ The target JSON contains:
 - `execution_descriptor_root`;
 - `store_root`;
 - `session_abi_root`;
-- `entrypoints`, as `{ "name": "...", "label": 100 }` objects; and
+- `entrypoints`, exactly `[ { "name": "advance", "label": 100 } ]`; and
 - optional `target_root`, which is checked when present.
 
 Successful output is a JSON report containing accepted program, requirement,
 target, optional request roots, admitted instruction count, effects, declared
-support mode, `runtime_support_verified=false`, and entrypoints.
+support mode, `runtime_support_verified=false`, `program_provenance`,
+`program_attested`, and entrypoints. The local harness reports
+`program_attested=false` until a trusted compiler-attestation path is used.
 
 When present, the request JSON contains:
 
@@ -158,7 +160,7 @@ When present, the request JSON contains:
 - optional `request_root`, which is checked when present.
 
 The harness verifies that `target_root` matches the admitted target, the
-entrypoint exists in the target, and request limits fit inside the execution
+entrypoint is exactly `advance`, and request limits fit inside the execution
 requirement.
 
 When present, the model ranges JSON contains:

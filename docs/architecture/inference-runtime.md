@@ -168,7 +168,6 @@ Capabilities describe semantics, not implementations. Representative
 capability families are:
 
 - `tensor.fixed`;
-- `tensor.strict-fp`;
 - `tensor.q1-g128`;
 - `tensor.attention`;
 - `sequence.causal-convolution`;
@@ -176,7 +175,9 @@ capability families are:
 - `storage.authenticated-range`.
 
 The exact names are protocol decisions made with the first implementation.
-They must remain algorithmic and model neutral.
+They must remain algorithmic and model neutral. Host-floating-point capability
+families are future-only until a numerical profile and admission path make them
+deterministic.
 
 The node advertises supported requirements. Admission performs exact matching
 of declared capability roots, numerical profile roots, and effort schedule
@@ -193,9 +194,8 @@ An inference target binds:
 - execution requirement root;
 - model release and execution descriptor roots;
 - authenticated store root;
-- `session_abi_root` (entrypoints, input/output shapes, and canonical
-  transition rules); and
-- target-owned entry points.
+- `session_abi_root` (input/output shape and canonical transition rules); and
+- the single target-owned `advance` entrypoint for the current phase.
 
 The runtime ABI is small:
 
@@ -432,7 +432,8 @@ and encrypted inference remain later phases.
 Current implementation status: the local fork can admit a five-file packet,
 authenticate and pin immutable owner bytes, bind them with a request and
 authenticated input into one execution plan, execute one target-owned
-`advance`, finalize, and emit output and diagnostic candidate roots. The
+`advance` through the fixed session ABI, finalize, and emit output and
+diagnostic candidate roots. The
 plan-bound runner is still local candidate evidence: it does not provide
 runtime-derived support roots, resident model state,
 node scheduling, or qualified Bonsai numerical semantics. The Bonsai canary is

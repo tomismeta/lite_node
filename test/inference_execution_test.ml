@@ -18,6 +18,7 @@ module Model = Octra_vm.Inference_model
 module Plan = Octra_vm.Inference_plan
 module Req = Octra_vm.Execution_requirement
 module Request = Octra_vm.Inference_request
+module Abi = Octra_vm.Inference_session_abi
 module Session = Octra_vm.Inference_session
 module Store = Octra_vm.Inference_store
 module Target = Octra_vm.Inference_target
@@ -73,8 +74,25 @@ let code ?(write_output = true) range_root =
   Array.concat
     [
       [|
-        VM.JDEST 100;
-        VM.LDI (2, VM.VString range_root);
+        VM.JDEST Abi.advance_label;
+        VM.LDI (4, VM.VString range_root);
+        VM.FLOAD (3, 4);
+      |];
+      output_code;
+      [|
+        VM.LDI (0, VM.VInt Z.zero);
+        VM.LDI (1, VM.VInt Z.one);
+        VM.STOP;
+      |];
+    ]
+
+let input_code ?(write_output = true) () =
+  let output_code = if write_output then [|VM.MSTORE (0, 3)|] else [||] in
+  Array.concat
+    [
+      [|
+        VM.JDEST Abi.advance_label;
+        VM.MLOAD (2, Abi.input_root_cell);
         VM.FLOAD (3, 2);
       |];
       output_code;
@@ -87,7 +105,7 @@ let code ?(write_output = true) range_root =
 
 let run_result ?(write_output = true) ?(max_output_bytes = 64)
     ?(max_scratch_bytes = 4096)
-    ?code_range_root bytes =
+    ?code_range_root ?program ?(input = "") bytes =
   let limits = Req.{ limits with max_scratch_bytes } in
   let requirement = Req.{ requirement with limits } in
   let support = Req.{ support with support_limits = limits } in
@@ -107,7 +125,11 @@ let run_result ?(write_output = true) ?(max_output_bytes = 64)
     | Some root -> root
     | None -> Model.range_root range
   in
-  let code = code ~write_output code_root in
+  let code =
+    match program with
+    | Some code -> code
+    | None -> code ~write_output code_root
+  in
   let admitted =
     Inference_cert.admit ~support ~requirement code
   in
@@ -118,16 +140,19 @@ let run_result ?(write_output = true) ?(max_output_bytes = 64)
       model_root = hex_root 'f';
       execution_descriptor_root = hex_root '1';
       store_root = hex_root '2';
-      session_abi_root = hex_root '3';
-      entrypoints = [{ entry_name = "advance"; entry_label = 100 }];
+      session_abi_root = Abi.v1_root;
+      entrypoints = [{
+        entry_name = Abi.advance_entrypoint;
+        entry_label = Abi.advance_label;
+      }];
     }
   in
   let request =
     Request.{
-      schema = 1;
+      schema = Abi.request_schema;
       target_root = Target.root target;
-      entrypoint = "advance";
-      input_root = sha256 "";
+      entrypoint = Abi.advance_entrypoint;
+      input_root = sha256 input;
       request_nonce = hex_root '5';
       max_output_bytes;
       max_advance_effort = 10000;
@@ -147,7 +172,7 @@ let run_result ?(write_output = true) ?(max_output_bytes = 64)
     | Error error -> failwith (Store.error_message error)
   in
   let plan =
-    match Plan.create ~admitted ~target ~request ~model ~pins ~input:"" with
+    match Plan.create ~admitted ~target ~request ~model ~pins ~input with
     | Ok plan -> plan
     | Error error -> failwith (Plan.error_message error)
   in
@@ -171,10 +196,10 @@ let starts_with prefix value =
   String.length value >= String.length prefix
   && String.sub value 0 (String.length prefix) = prefix
 
-let check_capability_gate () =
+let check_host_float_forbidden () =
   let one = Z.of_int64 (Int64.bits_of_float 1.0) in
   let host_float_code = [|
-    VM.JDEST 100;
+    VM.JDEST Abi.advance_label;
     VM.LDI (0, VM.VInt Z.zero);
     VM.LDI (1, VM.VInt Z.one);
     VM.LDI (2, VM.VInt one);
@@ -191,12 +216,15 @@ let check_capability_gate () =
   match
     Admission.of_inference_code_with_requirement ~support ~requirement host_float_code
   with
-  | Error (Admission.Unsafe_error _) -> ()
-  | _ -> failwith "expected consensus-safe host-float rejection"
+  | Error (Admission.Unsafe_error message) ->
+    check
+      "host-float opcode is forbidden"
+      (starts_with "inference opcode RMSNORM_FP" message)
+  | _ -> failwith "expected host-float rejection"
 
 let check_opcode_capability_gate () =
   let code = [|
-    VM.JDEST 100;
+    VM.JDEST Abi.advance_label;
     VM.LDI (0, VM.VString "missing-range");
     VM.FLOAD (1, 0);
     VM.STOP;
@@ -243,7 +271,7 @@ let check_fhe_forbidden () =
         Admission.of_inference_code_with_requirement
           ~support
           ~requirement
-          [| VM.JDEST 100; op; VM.STOP |]
+          [| VM.JDEST Abi.advance_label; op; VM.STOP |]
       with
       | Error (Admission.Unsafe_error message) ->
         check
@@ -252,10 +280,86 @@ let check_fhe_forbidden () =
       | _ -> failwith ("expected fhe opcode rejection: " ^ name))
     cases
 
+let check_state_surfaces_forbidden () =
+  let cases = [
+    "SLOAD", VM.SLOAD (0, "k");
+    "SSTORE", VM.SSTORE ("k", 0);
+    "SDEL", VM.SDEL "k";
+    "SLOADK", VM.SLOADK (0, 1);
+    "SSTOREK", VM.SSTOREK (0, 1);
+    "SDELK", VM.SDELK 0;
+    "SLOADN", VM.SLOADN (0, 1, 2);
+    "SSTOREN", VM.SSTOREN (0, 1, 2);
+    "SKEYS", VM.SKEYS (0, 1, 2);
+    "SKEYS_PAGE", VM.SKEYS_PAGE (0, 1, 2, 3, 4);
+    "FSTORE", VM.FSTORE (0, 1);
+    "OBJECT_MEMBER_COUNT", VM.OBJECT_MEMBER_COUNT (0, 1);
+    "OBJECT_HAS_MEMBER", VM.OBJECT_HAS_MEMBER (0, 1, 2);
+    "OBJECT_MEMBER_REF_AT", VM.OBJECT_MEMBER_REF_AT (0, 1, 2);
+    "OBJECT_TRANSITION_APPLY",
+    VM.OBJECT_TRANSITION_APPLY (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+    "XCALL", VM.XCALL (0, 1, 2, 3, 0);
+    "SPAWN", VM.SPAWN (0, 1);
+    "SPAWN2", VM.SPAWN2 (0, 1, 2, 0);
+    "TRANSFER", VM.TRANSFER (0, 1, 2);
+    "CHECKPOINT", VM.CHECKPOINT;
+    "ROLLBACK", VM.ROLLBACK;
+    "COMMIT", VM.COMMIT;
+    "EMIT", VM.EMIT ("event", []);
+  ] in
+  List.iter
+    (fun (name, op) ->
+      match
+        Admission.of_inference_code_with_requirement
+          ~support
+          ~requirement
+          [| VM.JDEST Abi.advance_label; op; VM.STOP |]
+      with
+      | Error (Admission.Unsafe_error message) ->
+        check
+          ("state opcode is forbidden: " ^ name)
+          (starts_with ("inference opcode " ^ name) message)
+      | _ -> failwith ("expected state opcode rejection: " ^ name))
+    cases
+
+let check_matmul_q16_forbidden () =
+  let requirement =
+    Req.{
+      requirement with
+      capabilities = [capability "tensor.fixed" (hex_root 'e')];
+    }
+  in
+  let support = Req.{ support with support_capabilities = requirement.capabilities } in
+  match
+    Admission.of_inference_code_with_requirement
+      ~support
+      ~requirement
+      [|
+        VM.JDEST Abi.advance_label;
+        VM.MATMUL_Q16 (0, 1, 2, 3, 4, 5);
+        VM.STOP;
+      |]
+  with
+  | Error (Admission.Unsafe_error message) ->
+    check
+      "MATMUL_Q16 is not advertised"
+      (starts_with "inference opcode MATMUL_Q16" message)
+  | _ -> failwith "expected MATMUL_Q16 rejection"
+
 let check_data_rooted_execution () =
   let left = run "\001\002\003\004" in
   let right = run "\004\003\002\001" in
   check "executed data changes output root" (not (String.equal left right))
+
+let check_request_rooted_execution () =
+  let program = input_code () in
+  let left = run_result ~program ~input:"left" "\001\002\003\004" in
+  let right = run_result ~program ~input:"right" "\001\002\003\004" in
+  match left, right with
+  | Ok left, Ok right ->
+    check "request input changes output root" (not (String.equal left right))
+  | Error error, _
+  | _, Error error -> failwith error
 
 let check_output_contract () =
   (match run_result ~write_output:false "\001\002\003\004" with
@@ -290,8 +394,11 @@ let check_output_contract () =
    | Ok _ -> failwith "expected scratch limit rejection")
 
 let () =
-  check_capability_gate ();
+  check_host_float_forbidden ();
   check_opcode_capability_gate ();
   check_fhe_forbidden ();
+  check_state_surfaces_forbidden ();
+  check_matmul_q16_forbidden ();
   check_data_rooted_execution ();
+  check_request_rooted_execution ();
   check_output_contract ()

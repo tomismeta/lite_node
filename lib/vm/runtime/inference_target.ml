@@ -32,9 +32,11 @@ type error =
   | Bad_root of string
   | Bad_name of string
   | Bad_entrypoint of string * int
-  | Uncertified_entrypoint of string * int
-  | Uncertified_program
-  | Duplicate_entrypoint of string
+  | Program_provenance_unsupported of Admission.provenance
+  | Session_abi_root_mismatch of string * string
+  | Missing_advance_entrypoint
+  | Unexpected_entrypoint of string * int
+  | Advance_label_mismatch of int * int
   | Program_root_mismatch of string * string
   | Missing_requirement
   | Requirement_root_mismatch of string * string
@@ -102,19 +104,49 @@ let program_root admitted =
        ^ Bytecode.encode (Admission.code admitted))
     |> to_hex)
 
-let rec check_entrypoints seen = function
+let rec check_entrypoint_names = function
   | [] -> Ok ()
   | entrypoint :: rest ->
-    if List.mem entrypoint.entry_name seen then
-      Error (Duplicate_entrypoint entrypoint.entry_name)
-    else
-      match check_name entrypoint.entry_name with
-      | Error error -> Error error
-      | Ok () ->
-        if entrypoint.entry_label < 0 then
-          Error (Bad_entrypoint (entrypoint.entry_name, entrypoint.entry_label))
-        else
-          check_entrypoints (entrypoint.entry_name :: seen) rest
+    match check_name entrypoint.entry_name with
+    | Error error -> Error error
+    | Ok () ->
+      if entrypoint.entry_label < 0 then
+        Error (Bad_entrypoint (entrypoint.entry_name, entrypoint.entry_label))
+      else
+        check_entrypoint_names rest
+
+let check_advance_entrypoint entrypoints =
+  let canonical entrypoint =
+    String.equal entrypoint.entry_name Inference_session_abi.advance_entrypoint
+    && entrypoint.entry_label = Inference_session_abi.advance_label
+  in
+  match check_entrypoint_names entrypoints with
+  | Error error -> Error error
+  | Ok () ->
+    match entrypoints with
+    | [] -> Error Missing_advance_entrypoint
+    | [{ entry_name; entry_label }]
+      when String.equal entry_name Inference_session_abi.advance_entrypoint ->
+      if entry_label = Inference_session_abi.advance_label then Ok ()
+      else
+        Error
+          (Advance_label_mismatch
+             (entry_label, Inference_session_abi.advance_label))
+    | [{ entry_name; entry_label }] ->
+      Error (Unexpected_entrypoint (entry_name, entry_label))
+    | entrypoint :: _ ->
+      let entrypoint =
+        match
+          List.find_opt
+            (fun entrypoint -> not (canonical entrypoint))
+            entrypoints
+        with
+        | Some entrypoint -> entrypoint
+        | None -> entrypoint
+      in
+      Error
+        (Unexpected_entrypoint
+           (entrypoint.entry_name, entrypoint.entry_label))
 
 let validate target =
   match check_root target.program_root with
@@ -134,7 +166,17 @@ let validate target =
               | Ok () ->
                 (match check_root target.session_abi_root with
                  | Error error -> Error error
-                 | Ok () -> check_entrypoints [] target.entrypoints)))))
+                 | Ok () ->
+                   if not
+                       (String.equal
+                          target.session_abi_root
+                          Inference_session_abi.v1_root)
+                   then
+                     Error
+                       (Session_abi_root_mismatch
+                          (target.session_abi_root, Inference_session_abi.v1_root))
+                   else
+                     check_advance_entrypoint target.entrypoints)))))
 
 let jdest_labels code =
   Array.fold_left
@@ -145,27 +187,14 @@ let jdest_labels code =
     []
     code
 
-let check_entrypoint_labels code entrypoints =
+let check_advance_label code =
   let labels = jdest_labels code in
-  let rec loop = function
-    | [] -> Ok ()
-    | entrypoint :: rest ->
-      if entrypoint.entry_label <> 100 then
-        Error (Uncertified_entrypoint
-                 (entrypoint.entry_name, entrypoint.entry_label))
-      else if List.mem entrypoint.entry_label labels then loop rest
-      else Error (Bad_entrypoint (entrypoint.entry_name, entrypoint.entry_label))
-  in
-  loop entrypoints
-
-let entry_label target name =
-  match
-    List.find_opt
-      (fun entrypoint -> String.equal entrypoint.entry_name name)
-      target.entrypoints
-  with
-  | Some entrypoint -> Some entrypoint.entry_label
-  | None -> None
+  if List.mem Inference_session_abi.advance_label labels then Ok ()
+  else
+    Error
+      (Bad_entrypoint
+         (Inference_session_abi.advance_entrypoint,
+          Inference_session_abi.advance_label))
 
 let check ~admitted target =
   match validate target with
@@ -182,23 +211,35 @@ let check ~admitted target =
         if not (String.equal target.requirement_root actual_requirement_root) then
           Error (Requirement_root_mismatch
                    (target.requirement_root, actual_requirement_root))
-        else if not (Admission.certified_source admitted) then
-          Error Uncertified_program
         else
-          check_entrypoint_labels
-            (Admission.code admitted)
-            target.entrypoints
+          match Admission.provenance admitted with
+          | Admission.Raw_code ->
+            Error (Program_provenance_unsupported Admission.Raw_code)
+          | Admission.Checked_envelope
+          | Admission.Attested_envelope ->
+            check_advance_label (Admission.code admitted)
 
 let error_message = function
   | Bad_root root -> Printf.sprintf "invalid root: %s" root
   | Bad_name name -> Printf.sprintf "invalid entrypoint name: %s" name
   | Bad_entrypoint (name, label) ->
     Printf.sprintf "invalid entrypoint %s: %d" name label
-  | Uncertified_entrypoint (name, label) ->
-    Printf.sprintf "uncertified entrypoint %s: %d" name label
-  | Uncertified_program -> "uncertified inference program"
-  | Duplicate_entrypoint name ->
-    Printf.sprintf "duplicate entrypoint: %s" name
+  | Program_provenance_unsupported provenance ->
+    Printf.sprintf
+      "unsupported inference program provenance: %s"
+      (Admission.provenance_name provenance)
+  | Session_abi_root_mismatch (actual, expected) ->
+    Printf.sprintf
+      "target session ABI root mismatch: actual %s expected %s"
+      actual expected
+  | Missing_advance_entrypoint ->
+    "missing advance entrypoint"
+  | Unexpected_entrypoint (name, label) ->
+    Printf.sprintf "unexpected entrypoint %s: %d" name label
+  | Advance_label_mismatch (actual, expected) ->
+    Printf.sprintf
+      "advance label mismatch: actual %d expected %d"
+      actual expected
   | Program_root_mismatch (expected, actual) ->
     Printf.sprintf
       "target program root mismatch: expected %s actual %s"

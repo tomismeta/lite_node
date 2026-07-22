@@ -17,6 +17,7 @@ module Plan = Octra_vm.Inference_plan
 module Receipt = Octra_vm.Inference_receipt
 module Req = Octra_vm.Execution_requirement
 module Request = Octra_vm.Inference_request
+module Abi = Octra_vm.Inference_session_abi
 module Session = Octra_vm.Inference_session
 module Store = Octra_vm.Inference_store
 module Target = Octra_vm.Inference_target
@@ -63,7 +64,10 @@ let support =
   }
 
 let admitted () =
-  Inference_cert.admit ~support ~requirement [| VM.JDEST 100; VM.STOP |]
+  Inference_cert.admit
+    ~support
+    ~requirement
+    [| VM.JDEST Abi.advance_label; VM.STOP |]
 
 let target admitted =
   Target.{
@@ -72,15 +76,18 @@ let target admitted =
     model_root = hex_root 'e';
     execution_descriptor_root = hex_root '1';
     store_root = hex_root '2';
-    session_abi_root = hex_root '3';
-    entrypoints = [{ entry_name = "advance"; entry_label = 100 }];
+    session_abi_root = Abi.v1_root;
+    entrypoints = [{
+      entry_name = Abi.advance_entrypoint;
+      entry_label = Abi.advance_label;
+    }];
   }
 
 let request target =
   Request.{
-    schema = 1;
+    schema = Abi.request_schema;
     target_root = Target.root target;
-    entrypoint = "advance";
+    entrypoint = Abi.advance_entrypoint;
     input_root = sha256 "";
     request_nonce = hex_root '5';
     max_output_bytes = 32;
@@ -126,6 +133,11 @@ let check_vectors () =
   let request = request target in
   let model = model target in
   check
+    "session ABI root vector"
+    (String.equal
+       Abi.v1_root
+       "be55d94fec70093495473690eb303aa617162e322b76426205ecaa4617d1bb90");
+  check
     "program root vector"
     (String.equal
        (Target.program_root admitted)
@@ -139,21 +151,21 @@ let check_vectors () =
     "target root vector"
     (String.equal
        (Target.root target)
-       "adba72e6be085d6685b77aa4cc2bd0ce4519dba4527261a176da03afa4a0ef5c");
+       "f7cfe92a4089b13cb7b6ff5eb4f28e39d7dd9c27fbfdddba71aeccd80394bc10");
   check
     "request root vector"
     (String.equal
        (Request.root request)
-       "35470aa3c2da7e284fe675bf59bc5fa4e5ba5b611226a90633c881d671ddd2e8");
+       "0a54434081377bdfb3b5b967c60da45f7e2a314d2d610d4f54ce79ecc4793881");
   check
     "session root vector"
     (String.equal
        (Session.root (open_session admitted target request model))
-       "892fc03d17f77ef2010ae701a0d8b6aff097c9369b563c55646fc91c34451361");
+       "1262abf9cb4a95b07349d79b0646cca8ae09e7df7e12a484476bcbe0358f3d70");
   let receipt = Receipt.{
-    target_root = "adba72e6be085d6685b77aa4cc2bd0ce4519dba4527261a176da03afa4a0ef5c";
-    request_root = "35470aa3c2da7e284fe675bf59bc5fa4e5ba5b611226a90633c881d671ddd2e8";
-    prior_session_root = "892fc03d17f77ef2010ae701a0d8b6aff097c9369b563c55646fc91c34451361";
+    target_root = "f7cfe92a4089b13cb7b6ff5eb4f28e39d7dd9c27fbfdddba71aeccd80394bc10";
+    request_root = "0a54434081377bdfb3b5b967c60da45f7e2a314d2d610d4f54ce79ecc4793881";
+    prior_session_root = "1262abf9cb4a95b07349d79b0646cca8ae09e7df7e12a484476bcbe0358f3d70";
     next_session_root = "6ec716d43d7d07ee63df75a1fce38d0423c11444523b54ac9249ddec153a5a86";
     prior_sequence = 0;
     next_sequence = 1;
@@ -167,7 +179,7 @@ let check_vectors () =
     "receipt root vector"
     (String.equal
        (Receipt.root receipt)
-       "9e5f1ff8196198ed626f4884ac661d0e87b998d6e32d6208b66bbf4b88299b47")
+       "46c51bbc35dd3e4d63a983ec4f90da5ce7f104db4d7a3d33bcd2cfee636554b4")
 
 let () =
   check_vectors ()

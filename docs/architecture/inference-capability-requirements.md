@@ -59,6 +59,10 @@ earliest roadmap phase in which the semantic disposition can be accepted.
 | gated delta-rule update | candidate primitive | `sequence.delta-rule` | 4 |
 | interleaved multi-axis RoPE | composition | `tensor.attention` | 3 |
 
+`tensor.strict-fp` rows are future semantic commitments. The current plain
+inference admission path still rejects host-floating-point VM opcodes until an
+exact numerical profile and replay gate exist.
+
 The inventory closes at the Phase 0 design gate. New rows require evidence from
 a new model or a previously unrepresented generated schedule; they are not
 added as speculative VM features.
@@ -261,6 +265,9 @@ The likely requirement surface is intentionally coarser than the legacy list:
 - `sequence.causal-convolution`;
 - `sequence.delta-rule`; and
 - `storage.authenticated-range`.
+
+`tensor.strict-fp` remains listed here as a roadmap family, not an admitted
+plain-runtime capability.
 
 These names are descriptive handles. The semantic root, not a number appended
 to the name, identifies the exact accepted definition.

@@ -15,6 +15,7 @@ Include at startup:
 
 module Admission = Octra_vm.Admission
 module Req = Octra_vm.Execution_requirement
+module Abi = Octra_vm.Inference_session_abi
 module Target = Octra_vm.Inference_target
 module VM = Octra_vm.Contract_vm
 
@@ -68,7 +69,7 @@ let support =
     support_limits;
   }
 
-let code = [| VM.JDEST 100; VM.STOP |]
+let code = [| VM.JDEST Abi.advance_label; VM.STOP |]
 
 let admitted () =
   Inference_cert.admit ~support ~requirement code
@@ -80,35 +81,21 @@ let target admitted =
     model_root = hex_root 'f';
     execution_descriptor_root = hex_root '1';
     store_root = hex_root '2';
-    session_abi_root = hex_root '3';
-    entrypoints = [
-      { entry_name = "advance"; entry_label = 100 };
-      { entry_name = "status"; entry_label = 100 };
-    ];
+    session_abi_root = Abi.v1_root;
+    entrypoints = [{
+      entry_name = Abi.advance_entrypoint;
+      entry_label = Abi.advance_label;
+    }];
   }
-
-let check_root_order () =
-  let admitted = admitted () in
-  let target = target admitted in
-  let left = Target.root target in
-  let right =
-    Target.root
-      Target.{ target with entrypoints = List.rev target.entrypoints }
-  in
-  check "target root sorts entrypoints" (String.equal left right)
 
 let check_supported () =
   let admitted = admitted () in
+  check
+    "checked provenance"
+    (Admission.provenance admitted = Admission.Checked_envelope);
   match Target.check ~admitted (target admitted) with
   | Ok () -> ()
   | Error error -> failwith (Target.error_message error)
-
-let check_entry_label () =
-  let admitted = admitted () in
-  let target = target admitted in
-  match Target.entry_label target "advance" with
-  | Some 100 -> ()
-  | _ -> failwith "missing advance entrypoint"
 
 let check_program_root_mismatch () =
   let admitted = admitted () in
@@ -135,43 +122,75 @@ let check_missing_requirement () =
      | Error Target.Missing_requirement -> ()
      | _ -> failwith "expected missing requirement")
 
-let check_uncertified_program () =
+let check_raw_program_rejected () =
   let expected = target (admitted ()) in
   match Admission.of_inference_code_with_requirement ~support ~requirement code with
   | Error error -> failwith (Admission.error_message error)
   | Ok admitted ->
     (match Target.check ~admitted expected with
-     | Error Target.Uncertified_program -> ()
-     | _ -> failwith "expected uncertified inference program")
+     | Error (Target.Program_provenance_unsupported Admission.Raw_code) -> ()
+     | _ -> failwith "expected raw inference program rejection")
 
-let check_missing_entrypoint_label () =
+let check_session_abi_root () =
+  let admitted = admitted () in
+  let target = target admitted in
+  let target = Target.{ target with session_abi_root = hex_root '3' } in
+  match Target.check ~admitted target with
+  | Error (Target.Session_abi_root_mismatch (_, _)) -> ()
+  | _ -> failwith "expected session ABI root mismatch"
+
+let check_missing_advance () =
+  let admitted = admitted () in
+  let target = target admitted in
+  let target = Target.{ target with entrypoints = [] } in
+  match Target.check ~admitted target with
+  | Error Target.Missing_advance_entrypoint -> ()
+  | _ -> failwith "expected missing advance entrypoint"
+
+let check_unexpected_entrypoint () =
   let admitted = admitted () in
   let target = target admitted in
   let target =
     Target.{
       target with
-      entrypoints = [{ entry_name = "advance"; entry_label = 101 }];
+      entrypoints = [{ entry_name = "status"; entry_label = Abi.advance_label }];
     }
   in
   match Target.check ~admitted target with
-  | Error (Target.Uncertified_entrypoint ("advance", 101)) -> ()
-  | _ -> failwith "expected uncertified entrypoint label"
+  | Error (Target.Unexpected_entrypoint ("status", _)) -> ()
+  | _ -> failwith "expected unexpected entrypoint"
 
-let check_duplicate_entrypoint () =
+let check_extra_entrypoint () =
   let admitted = admitted () in
   let target = target admitted in
   let target =
     Target.{
       target with
       entrypoints = [
-        { entry_name = "advance"; entry_label = 100 };
-        { entry_name = "advance"; entry_label = 100 };
+        { entry_name = Abi.advance_entrypoint; entry_label = Abi.advance_label };
+        { entry_name = "status"; entry_label = Abi.advance_label };
       ];
     }
   in
   match Target.check ~admitted target with
-  | Error (Target.Duplicate_entrypoint "advance") -> ()
-  | _ -> failwith "expected duplicate entrypoint"
+  | Error (Target.Unexpected_entrypoint ("status", _)) -> ()
+  | _ -> failwith "expected extra entrypoint rejection"
+
+let check_advance_label () =
+  let admitted = admitted () in
+  let target = target admitted in
+  let target =
+    Target.{
+      target with
+      entrypoints = [{
+        entry_name = Abi.advance_entrypoint;
+        entry_label = Abi.advance_label + 1;
+      }];
+    }
+  in
+  match Target.check ~admitted target with
+  | Error (Target.Advance_label_mismatch (_, _)) -> ()
+  | _ -> failwith "expected advance label mismatch"
 
 let check_bad_entrypoint_name () =
   let admitted = admitted () in
@@ -179,21 +198,36 @@ let check_bad_entrypoint_name () =
   let target =
     Target.{
       target with
-      entrypoints = [{ entry_name = "Advance"; entry_label = 100 }];
+      entrypoints = [{ entry_name = "Advance"; entry_label = Abi.advance_label }];
     }
   in
   match Target.check ~admitted target with
   | Error (Target.Bad_name "Advance") -> ()
   | _ -> failwith "expected bad entrypoint name"
 
+let check_missing_entrypoint_label () =
+  let target = target (admitted ()) in
+  let admitted =
+    Inference_cert.admit ~support ~requirement [| VM.JDEST 101; VM.STOP |]
+  in
+  let target =
+    Target.{ target with program_root = Target.program_root admitted }
+  in
+  match Target.check ~admitted target with
+  | Error (Target.Bad_entrypoint ("advance", label))
+    when label = Abi.advance_label -> ()
+  | _ -> failwith "expected missing advance label"
+
 let () =
-  check_root_order ();
   check_supported ();
-  check_entry_label ();
   check_program_root_mismatch ();
   check_requirement_root_mismatch ();
   check_missing_requirement ();
-  check_uncertified_program ();
-  check_missing_entrypoint_label ();
-  check_duplicate_entrypoint ();
-  check_bad_entrypoint_name ()
+  check_raw_program_rejected ();
+  check_session_abi_root ();
+  check_missing_advance ();
+  check_unexpected_entrypoint ();
+  check_extra_entrypoint ();
+  check_advance_label ();
+  check_bad_entrypoint_name ();
+  check_missing_entrypoint_label ()

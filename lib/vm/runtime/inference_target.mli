@@ -32,15 +32,16 @@ type error =
   | Bad_root of string
   | Bad_name of string
   | Bad_entrypoint of string * int
-  | Uncertified_entrypoint of string * int
-  | Uncertified_program
-  | Duplicate_entrypoint of string
+  | Program_provenance_unsupported of Admission.provenance
+  | Session_abi_root_mismatch of string * string
+  | Missing_advance_entrypoint
+  | Unexpected_entrypoint of string * int
+  | Advance_label_mismatch of int * int
   | Program_root_mismatch of string * string
   | Missing_requirement
   | Requirement_root_mismatch of string * string
 
 val program_root : Admission.t -> string
 val root : t -> string
-val entry_label : t -> string -> int option
 val check : admitted:Admission.t -> t -> (unit, error) result
 val error_message : error -> string

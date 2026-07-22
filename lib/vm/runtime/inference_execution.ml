@@ -29,9 +29,6 @@ type error =
   | Scratch_limit_exceeded of int * int
   | Execution_failed
 
-let sha256 raw =
-  Digestif.SHA256.(digest_string raw |> to_hex)
-
 let entrypoint_pc code label =
   let rec loop pc =
     if pc = Array.length code then None
@@ -82,54 +79,8 @@ let memory_payload state =
     bindings
     (fun value -> value_payload value)
 
-let register_payload state =
-  let bindings =
-    Array.to_list (Array.mapi (fun index value -> index, value) state.Contract_vm.regs)
-  in
-  bindings_payload
-    ~key_payload:string_of_int
-    bindings
-    (fun value -> value_payload value)
-
-let storage_payload state =
-  let bindings = sorted_bindings state.Contract_vm.storage String.compare in
-  bindings_payload
-    ~key_payload:(fun value -> value)
-    bindings
-    (fun value -> Ok ("storage:" ^ length_prefix value))
-
-let blob_payload state =
-  let bindings = sorted_bindings state.Contract_vm.blobs String.compare in
-  bindings_payload
-    ~key_payload:(fun value -> value)
-    bindings
-    (fun value ->
-      Ok
-        ("blob:" ^ string_of_int (String.length value) ^ ":" ^ sha256 value))
-
 let candidate_payload state =
-  match
-    memory_payload state,
-    register_payload state,
-    storage_payload state,
-    blob_payload state
-  with
-  | Ok memory, Ok registers, Ok storage, Ok blobs ->
-    Ok
-      (String.concat
-         "|"
-         [
-           "pc=" ^ string_of_int state.Contract_vm.pc;
-           "effort=" ^ string_of_int state.Contract_vm.effort_used;
-           "memory=" ^ memory;
-           "registers=" ^ registers;
-           "storage=" ^ storage;
-           "blobs=" ^ blobs;
-         ])
-  | Error error, _, _, _
-  | _, Error error, _, _
-  | _, _, Error error, _
-  | _, _, _, Error error -> Error error
+  memory_payload state
 
 let candidate_root ~target_root payload =
   Digestif.SHA256.(
@@ -145,12 +96,16 @@ let output_integer = function
     when Z.fits_int value -> Some (Z.to_int value)
   | _ -> None
 
-(* The session ABI reserves r0 for the output base and r1 for the number of
-   memory cells in the canonical output. Scratch memory and other registers
-   remain candidate state, not output state. *)
+(* The session ABI reserves r0/r1 for output bounds and writes request.input_root
+   into memory before entry. The retained candidate state is canonical memory;
+   immutable blobs are bound by the plan, not copied into scratch. *)
 let output_payload state ~max_bytes =
-  match output_integer state.Contract_vm.regs.(0),
-        output_integer state.Contract_vm.regs.(1) with
+  match
+    output_integer
+      state.Contract_vm.regs.(Inference_session_abi.output_base_register),
+    output_integer
+      state.Contract_vm.regs.(Inference_session_abi.output_count_register)
+  with
   | None, _
   | _, None -> Error (Invalid_output "r0/r1 must contain integer output bounds")
   | Some base, Some length when base < 0 || length < 0 ->
@@ -200,6 +155,16 @@ let add_pins state pins =
       Hashtbl.replace state.Contract_vm.blobs range.range_root range.bytes)
     (Inference_store.ranges pins)
 
+let bind_request_input state request input =
+  Hashtbl.replace
+    state.Contract_vm.memory.data
+    Inference_session_abi.input_root_cell
+    (Contract_vm.VString request.Inference_request.input_root);
+  Hashtbl.replace
+    state.Contract_vm.blobs
+    request.Inference_request.input_root
+    input
+
 let check_scratch_limit state ~max_bytes =
   match memory_payload state with
   | Error error -> Error error
@@ -220,11 +185,15 @@ let run ~plan () =
   let request = Inference_plan.request plan in
   let pins = Inference_plan.pins plan in
   let requirement = Inference_plan.requirement plan in
-  match Inference_target.entry_label target request.entrypoint with
-  | None -> Error (Entrypoint_unsupported request.entrypoint)
-  | Some label ->
-    (match entrypoint_pc (Admission.code admitted) label with
-     | None -> Error (Entrypoint_missing label)
+  if not
+      (String.equal
+         request.Inference_request.entrypoint
+         Inference_session_abi.advance_entrypoint)
+  then
+    Error (Entrypoint_unsupported request.entrypoint)
+  else
+    (match entrypoint_pc (Admission.code admitted) Inference_session_abi.advance_label with
+     | None -> Error (Entrypoint_missing Inference_session_abi.advance_label)
      | Some pc ->
        let state =
          Contract_vm.create_state
@@ -240,10 +209,7 @@ let run ~plan () =
            ()
        in
        add_pins state pins;
-       Hashtbl.replace
-         state.Contract_vm.blobs
-         request.Inference_request.input_root
-         (Inference_plan.input plan);
+       bind_request_input state request (Inference_plan.input plan);
        let fixed = Contract.fix_jumps (Admission.code admitted) in
        state.Contract_vm.pc <- pc;
        if not (Contract_vm.run state fixed) || state.Contract_vm.reverted then

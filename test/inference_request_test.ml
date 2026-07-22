@@ -15,6 +15,7 @@ Include at startup:
 
 module Req = Octra_vm.Execution_requirement
 module Request = Octra_vm.Inference_request
+module Abi = Octra_vm.Inference_session_abi
 module Target = Octra_vm.Inference_target
 module VM = Octra_vm.Contract_vm
 
@@ -65,7 +66,7 @@ let requirement =
     limits;
   }
 
-let code = [| VM.JDEST 100; VM.STOP |]
+let code = [| VM.JDEST Abi.advance_label; VM.STOP |]
 
 let admitted () =
   Inference_cert.admit ~support ~requirement code
@@ -78,15 +79,18 @@ let target () =
     model_root = hex_root 'f';
     execution_descriptor_root = hex_root '1';
     store_root = hex_root '2';
-    session_abi_root = hex_root '3';
-    entrypoints = [{ entry_name = "advance"; entry_label = 100 }];
+    session_abi_root = Abi.v1_root;
+    entrypoints = [{
+      entry_name = Abi.advance_entrypoint;
+      entry_label = Abi.advance_label;
+    }];
   }
 
 let request () =
   Request.{
-    schema = 1;
+    schema = Abi.request_schema;
     target_root = Target.root (target ());
-    entrypoint = "advance";
+    entrypoint = Abi.advance_entrypoint;
     input_root = hex_root '5';
     request_nonce = hex_root '4';
     max_output_bytes = 20;
@@ -97,7 +101,7 @@ let check_root_fixture () =
   check "request root fixture"
     (String.equal
        (Request.root (request ()))
-       "aa3e73c5af4cb387f7bd02cf05d1da9eab329e9d3988cea26a74a2a602274919")
+       "1073d3e54a7116f9e369af4bdb54b68a8e55fc0ca32aa0cff4ddc622161c148d")
 
 let check_supported () =
   match Request.check ~target:(target ()) ~requirement (request ()) with

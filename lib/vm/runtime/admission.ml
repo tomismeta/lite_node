@@ -6,12 +6,17 @@ type t = {
   admitted_effects : Program_effects.t;
   profile : profile;
   requirement : Execution_requirement.t option;
-  certified_source : bool;
+  provenance : provenance;
 }
 
 and profile =
   | Legacy
   | Program of Program_type_flow.facts
+
+and provenance =
+  | Raw_code
+  | Checked_envelope
+  | Attested_envelope
 
 type error =
   | Decode_error of string
@@ -60,7 +65,7 @@ let admit ~program code =
         admitted_effects = Program_effects.scan code;
         profile = if program then Program Program_type_flow.empty_facts else Legacy;
         requirement = None;
-        certified_source = false;
+        provenance = Raw_code;
       }
 
 let of_code code = admit ~program:false code
@@ -356,64 +361,68 @@ let verify_program_cert ~attested ~trusted raw_code code raw =
     | _ -> Error "program certificate must be an object"
   with _ -> Error "invalid program certificate"
 
-let decode_program ?(trusted = []) raw =
+let envelope_provenance ~attested =
+  if attested then Attested_envelope else Checked_envelope
+
+let decode_program_envelope ~attested ~trusted ~admit raw =
   match Program_envelope.decode raw with
   | Error error -> Error (Decode_error (Program_envelope.error_message error))
   | Ok envelope ->
     match Bytecode.decode envelope.code with
     | Error error -> Error (Decode_error error)
     | Ok code ->
-      (match verify_program_cert ~attested:true ~trusted envelope.code code envelope.cert with
+      (match verify_program_cert ~attested ~trusted envelope.code code envelope.cert with
        | Error error -> Error (Verify_error error)
        | Ok facts ->
-         (match of_program ~facts code with
+         (match admit ~facts code with
           | Error error -> Error error
-          | Ok admitted -> Ok { admitted with certified_source = true }))
+          | Ok admitted ->
+            Ok {
+              admitted with
+              provenance = envelope_provenance ~attested;
+            }))
+
+let decode_program ?(trusted = []) raw =
+  decode_program_envelope
+    ~attested:true
+    ~trusted
+    ~admit:(fun ~facts code -> of_program ~facts code)
+    raw
 
 let decode_deploy ?(trusted = []) raw =
   if Program_envelope.is_program raw then decode_program ~trusted raw
   else decode raw
 
 let decode_program_source raw =
-  match Program_envelope.decode raw with
-  | Error error -> Error (Decode_error (Program_envelope.error_message error))
-  | Ok envelope ->
-    match Bytecode.decode envelope.code with
-    | Error error -> Error (Decode_error error)
-    | Ok code ->
-      (match verify_program_cert ~attested:false ~trusted:[] envelope.code code envelope.cert with
-       | Error error -> Error (Verify_error error)
-       | Ok facts ->
-         (match of_program ~facts code with
-          | Error error -> Error error
-          | Ok admitted -> Ok { admitted with certified_source = true }))
+  decode_program_envelope
+    ~attested:false
+    ~trusted:[]
+    ~admit:(fun ~facts code -> of_program ~facts code)
+    raw
+
+let decode_inference_program ?(trusted = []) ~support ~requirement raw =
+  decode_program_envelope
+    ~attested:true
+    ~trusted
+    ~admit:(fun ~facts code ->
+      of_inference_code_with_requirement
+        ~facts
+        ~support
+        ~requirement
+        code)
+    raw
 
 let decode_inference_program_source ~support ~requirement raw =
-  match Program_envelope.decode raw with
-  | Error error -> Error (Decode_error (Program_envelope.error_message error))
-  | Ok envelope ->
-    (match Bytecode.decode envelope.code with
-     | Error error -> Error (Decode_error error)
-     | Ok code ->
-       (match
-          verify_program_cert
-            ~attested:false
-            ~trusted:[]
-            envelope.code
-            code
-            envelope.cert
-        with
-        | Error error -> Error (Verify_error error)
-        | Ok facts ->
-          (match
-             of_inference_code_with_requirement
-               ~facts
-               ~support
-               ~requirement
-               code
-           with
-           | Error error -> Error error
-           | Ok admitted -> Ok { admitted with certified_source = true })))
+  decode_program_envelope
+    ~attested:false
+    ~trusted:[]
+    ~admit:(fun ~facts code ->
+      of_inference_code_with_requirement
+        ~facts
+        ~support
+        ~requirement
+        code)
+    raw
 
 let code admitted =
   Array.copy admitted.admitted_code
@@ -427,8 +436,19 @@ let profile admitted =
 let requirement admitted =
   admitted.requirement
 
-let certified_source admitted =
-  admitted.certified_source
+let provenance admitted =
+  admitted.provenance
+
+let provenance_name = function
+  | Raw_code -> "raw_code"
+  | Checked_envelope -> "checked_envelope"
+  | Attested_envelope -> "attested_envelope"
+
+let program_attested admitted =
+  match admitted.provenance with
+  | Attested_envelope -> true
+  | Raw_code
+  | Checked_envelope -> false
 
 let error_message = function
   | Decode_error message

@@ -14,6 +14,7 @@ Include at startup:
 
 
 module Model = Octra_vm.Inference_model
+module Abi = Octra_vm.Inference_session_abi
 module Target = Octra_vm.Inference_target
 
 let check label condition =
@@ -29,7 +30,7 @@ let target =
     model_root = hex_root 'c';
     execution_descriptor_root = hex_root 'd';
     store_root = hex_root 'e';
-    session_abi_root = hex_root 'f';
+    session_abi_root = Abi.v1_root;
     entrypoints = [];
   }
 
