@@ -1654,7 +1654,10 @@ and gen_builtin env name args =
    | "vecdot_fp" ->
      emit env (Contract_vm.VECDOT_FP (rd, nth 0, nth 1, nth 2))
    | "argmax_fp" ->
-     emit env (Contract_vm.ARGMAX_FP (rd, nth 0, nth 1))
+     if env.declaration <> ProgramDecl then
+       gerr env.line "argmax_fp is available only in Program"
+     else
+       emit env (Contract_vm.ARGMAX_FP (rd, nth 0, nth 1))
    | "attention_kv_fp" ->
      emit env (Contract_vm.ATTENTION_KV_FP (nth 0, nth 1, nth 2, nth 3, nth 4, nth 5, nth 6, nth 7));
      emit env (Contract_vm.LDI (rd, VBool true))

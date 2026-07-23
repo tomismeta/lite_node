@@ -168,9 +168,10 @@ The groups contain:
 - Delta-rule proof: `GATED_DELTA_RULE_FP`.
 - Strict-FP normalization/vector proof: `RMSNORM_FP_EPS`,
   `ELEMWISE_MUL_FP`, and `RESIDUAL_ADD_FP`.
+- Selection proof: `ARGMAX_FP`.
 - Unclassified Q16: `MATMUL_Q16` and `SHIFT_ROUND_INPLACE`.
 - FP: `MATMUL_FP`, `RMSNORM_FP`, `ROPE_APPLY_FP`, `LOAD_INT8_FP`,
-  `VECDOT_FP`, `ARGMAX_FP`, `ATTENTION_KV_FP`, and `APPEND_VEC_FP`.
+  `VECDOT_FP`, `ATTENTION_KV_FP`, and `APPEND_VEC_FP`.
 
 "Allowed" means the current opcode policy does not reject the instruction. The
 normal verifier and execution checks still apply.

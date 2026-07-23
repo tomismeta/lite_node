@@ -104,12 +104,49 @@ let input_code ?(write_output = true) () =
       |];
     ]
 
+let fp_bits value =
+  VM.VInt (Z.of_int64 (Int64.bits_of_float value))
+
+let argmax_output_code values =
+  let count = List.length values in
+  let writes =
+    values
+    |> List.mapi (fun index value ->
+      [|
+        VM.LDI (2, fp_bits value);
+        VM.MSTORE (100 + index, 2);
+      |])
+    |> Array.concat
+  in
+  Array.concat
+    [
+      [|VM.JDEST Abi.advance_label|];
+      writes;
+      [|
+        VM.LDI (0, VM.VInt (Z.of_int 100));
+        VM.LDI (1, VM.VInt (Z.of_int count));
+        VM.ARGMAX_FP (2, 0, 1);
+        VM.MSTORE (200, 2);
+        VM.LDI (0, VM.VInt (Z.of_int 200));
+        VM.LDI (1, VM.VInt Z.one);
+        VM.STOP;
+      |];
+    ]
+
 let run_result ?(write_output = true) ?(max_output_bytes = 64)
     ?(max_scratch_bytes = 4096)
+    ?capabilities
     ?code_range_root ?program ?(input = "") bytes =
   let limits = Req.{ limits with max_scratch_bytes } in
-  let requirement = Req.{ requirement with limits } in
-  let support = Req.{ support with support_limits = limits } in
+  let capabilities =
+    match capabilities with
+    | None -> requirement.capabilities
+    | Some capabilities -> capabilities
+  in
+  let requirement = Req.{ requirement with capabilities; limits } in
+  let support =
+    Req.{ support with support_capabilities = capabilities; support_limits = limits }
+  in
   let owner = encoded bytes in
   let owner_root = sha256 owner in
   let range =
@@ -447,6 +484,27 @@ let check_output_contract () =
           error)
    | Ok _ -> failwith "expected scratch limit rejection")
 
+let check_argmax_output_contract () =
+  let argmax_cap = capability "tensor.argmax" (hex_root '6') in
+  let left =
+    run_result
+      ~program:(argmax_output_code [1.0; 5.0; 5.0])
+      ~capabilities:[argmax_cap]
+      "owner"
+  in
+  let right =
+    run_result
+      ~program:(argmax_output_code [1.0; 5.0; 6.0])
+      ~capabilities:[argmax_cap]
+      "owner"
+  in
+  match left, right with
+  | Ok left, Ok right ->
+    check "argmax output root shape" (String.length left = 64);
+    check "argmax output roots selected index" (not (String.equal left right))
+  | Error error, _
+  | _, Error error -> failwith error
+
 let () =
   check_host_float_forbidden ();
   check_opcode_capability_gate ();
@@ -457,4 +515,5 @@ let () =
   check_matmul_q16_forbidden ();
   check_data_rooted_execution ();
   check_request_rooted_execution ();
-  check_output_contract ()
+  check_output_contract ();
+  check_argmax_output_contract ()

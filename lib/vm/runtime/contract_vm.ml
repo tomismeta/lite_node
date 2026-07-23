@@ -933,7 +933,8 @@ let strict_operands st = function
        q_heads; k_heads; v_heads; key_dim; value_dim]
   | APPEND_VEC_Q16 (dst, pos, source, length) ->
     List.for_all (fun reg -> is_numeric (getr st reg)) [dst; pos; source; length]
-  | ARGMAX_Q16 (dest, addr, length) ->
+  | ARGMAX_Q16 (dest, addr, length)
+  | ARGMAX_FP (dest, addr, length) ->
     is_numeric (getr st dest) && is_numeric (getr st addr) && is_numeric (getr st length)
   | _ -> true
 
@@ -2835,25 +2836,20 @@ let exec_one st op =
       end
     end
   | ARGMAX_FP (rd, rs_addr, rs_n) ->
-    let addr = Z.to_int (to_z (getr st rs_addr)) in
-    let n = Z.to_int (to_z (getr st rs_n)) in
-    if n <= 0 || n > 1_048_576 then revert st
-    else begin
-      if not (add_dyn_effort st (n / 2)) then revert st
-      else begin
-        let best_id = ref 0 in
-        let best_val = ref neg_infinity in
-        for i = 0 to n - 1 do
-          let v = mem_get_fp64 st.memory.data (addr + i) in
-          if v > !best_val then begin
-            best_val := v;
-            best_id := i
-          end
-        done;
-        setr st rd (VInt (Z.of_int !best_id));
-        true
-      end
-    end
+    (match read_int st rs_addr, read_int st rs_n with
+     | Some addr, Some n when valid_large_mem_span addr n ->
+       if not (add_dyn_effort st (n / 2)) then revert st
+       else
+         (match read_fp64_array st.memory.data addr n with
+          | Some values ->
+            let best = ref 0 in
+            for index = 1 to n - 1 do
+              if values.(index) > values.(!best) then best := index
+            done;
+            setr st rd (VInt (Z.of_int !best));
+            true
+          | None -> revert st)
+     | _ -> revert st)
   | JMP addr ->
     st.pc <- addr; true
   | JIF (rs, addr) ->

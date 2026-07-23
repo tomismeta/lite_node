@@ -56,6 +56,7 @@ earliest roadmap phase in which the semantic disposition can be accepted.
 | sigmoid | primitive | `tensor.strict-fp` | 3 |
 | softplus | primitive | `tensor.strict-fp` | 3 |
 | SiLU | primitive | `tensor.strict-fp` | 3 |
+| argmax | primitive | `tensor.argmax` | 3 |
 | causal depthwise convolution | primitive | `sequence.causal-convolution` | 3 |
 | causal convolution with retained state | conditional primitive | `sequence.causal-convolution` | 4 |
 | gated delta-rule update | candidate primitive | `sequence.delta-rule` | 4 |
@@ -316,8 +317,13 @@ not itself conformance.
 Proof-branch status: `ELEMWISE_MUL_FP` and `RESIDUAL_ADD_FP` now have strict
 finite reads, checked large spans, exact in-place alias support,
 partial-overlap rejection, and candidate writes. The dynamic effort tariffs are
-`3 * count` for multiply and `2 * count` for residual add. They are admitted
-only by the inference policy when `tensor.strict-fp` is present.
+`3 * count` for multiply and `2 * count` for residual add. `ARGMAX_FP` reads a
+bounded finite FP span and returns the zero-based index of the first maximum
+under `tensor.argmax`. Missing cells, invalid spans, zero length, NaN, and
+infinities revert. Ties, including signed-zero ties, select the lowest index.
+Its current effort tariff is the static opcode cost plus `count / 2` with
+integer division. These operations are admitted only by the inference policy
+when their matching capability is present.
 
 Primitive specifications record analytic shape scaling before effort
 coefficients are chosen. Compressed linear work scales from declared output
@@ -333,6 +339,7 @@ The likely requirement surface is intentionally coarser than the legacy list:
 - `tensor.fixed`;
 - `tensor.strict-fp`;
 - `tensor.q1-g128`;
+- `tensor.argmax`;
 - `tensor.attention`;
 - `sequence.causal-convolution`;
 - `sequence.delta-rule`; and

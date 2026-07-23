@@ -168,6 +168,7 @@ let parse_line line =
       Contract_vm.ELEMWISE_MUL_FP (r 0, r 1, r 2)
     | "RESIDUAL_ADD_FP", [_;_;_] ->
       Contract_vm.RESIDUAL_ADD_FP (r 0, r 1, r 2)
+    | "ARGMAX_FP", [_;_;_] -> Contract_vm.ARGMAX_FP (r 0, r 1, r 2)
     | "FHE_LOAD_PK", [_;_] -> Contract_vm.FHE_LOAD_PK (r 0, r 1)
     | "FHE_ADD", [_;_;_;_] -> Contract_vm.FHE_ADD (r 0, r 1, r 2, r 3)
     | "FHE_SUB", [_;_;_;_] -> Contract_vm.FHE_SUB (r 0, r 1, r 2, r 3)

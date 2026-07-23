@@ -170,6 +170,7 @@ capability families are:
 - `tensor.fixed`;
 - `tensor.strict-fp`;
 - `tensor.q1-g128`;
+- `tensor.argmax`;
 - `tensor.attention`;
 - `sequence.causal-convolution`;
 - `sequence.delta-rule`; and

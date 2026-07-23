@@ -65,6 +65,11 @@ let int64_le bytes offset =
 let set_int_reg state reg value =
   state.VM.regs.(reg) <- VM.VInt (Z.of_int value)
 
+let int_reg state reg =
+  match state.VM.regs.(reg) with
+  | VM.VInt value when Z.fits_int value -> Z.to_int value
+  | _ -> failwith "missing int register"
+
 let set_f64_bits state addr bits =
   Hashtbl.replace state.VM.memory.data addr (VM.VInt (Z.of_int64 bits))
 
@@ -229,7 +234,24 @@ let check_strict_operands () =
   check "residual strict operand reverts"
     (not (VM.run state [|VM.RESIDUAL_ADD_FP (0, 1, 2); VM.STOP|]));
   check "residual strict operand leaves memory unchanged"
-    (f64_bits state 100 = Int64.bits_of_float 1.0)
+    (f64_bits state 100 = Int64.bits_of_float 1.0);
+  let state =
+    VM.create_state
+      ~limit:1_000_000
+      ~strict_values:true
+      ~caller:"caller"
+      ~origin:"origin"
+      ~address:"contract"
+      ~value:Z.zero
+      ~storage:(Hashtbl.create 0)
+      ()
+  in
+  state.VM.regs.(0) <- VM.VString "not-an-address";
+  set_int_reg state 1 1;
+  set_f64_bits state 100 (Int64.bits_of_float 1.0);
+  check "argmax strict operand reverts"
+    (not (VM.run state [|VM.ARGMAX_FP (2, 0, 1); VM.STOP|]));
+  check "argmax strict operand leaves destination" (int_reg state 2 = 0)
 
 let check_invalid_shape_and_effort_reverts () =
   let state =
@@ -415,6 +437,91 @@ let check_residual_effort () =
   check "residual one-under effort leaves dst"
     (f64_bits one_under 100 = Int64.bits_of_float 0.0)
 
+let check_argmax_fp () =
+  let state = fresh_state () in
+  set_int_reg state 0 100;
+  set_int_reg state 1 4;
+  set_f64_values state 100 [1.0; 3.0; 3.0; -1.0];
+  check "argmax succeeds"
+    (VM.run state [|VM.ARGMAX_FP (2, 0, 1); VM.STOP|]);
+  check "argmax chooses first maximum" (int_reg state 2 = 1);
+  let negative = fresh_state () in
+  set_int_reg negative 0 100;
+  set_int_reg negative 1 3;
+  set_f64_values negative 100 [-7.0; -2.0; -3.0];
+  check "argmax all-negative succeeds"
+    (VM.run negative [|VM.ARGMAX_FP (2, 0, 1); VM.STOP|]);
+  check "argmax all-negative chooses maximum" (int_reg negative 2 = 1);
+  let signed_zero = fresh_state () in
+  set_int_reg signed_zero 0 100;
+  set_int_reg signed_zero 1 2;
+  set_f64_bits signed_zero 100 (Int64.bits_of_float (-0.0));
+  set_f64_bits signed_zero 101 (Int64.bits_of_float 0.0);
+  check "argmax signed-zero tie succeeds"
+    (VM.run signed_zero [|VM.ARGMAX_FP (2, 0, 1); VM.STOP|]);
+  check "argmax signed-zero tie chooses first" (int_reg signed_zero 2 = 0);
+  let alias = fresh_state () in
+  set_int_reg alias 0 100;
+  set_int_reg alias 1 2;
+  set_f64_values alias 100 [1.0; 2.0];
+  check "argmax destination alias succeeds"
+    (VM.run alias [|VM.ARGMAX_FP (0, 0, 1); VM.STOP|]);
+  check "argmax destination alias writes index" (int_reg alias 0 = 1);
+  let missing = fresh_state () in
+  set_int_reg missing 0 100;
+  set_int_reg missing 1 2;
+  set_f64_bits missing 100 (Int64.bits_of_float 1.0);
+  check "argmax missing input reverts"
+    (not (VM.run missing [|VM.ARGMAX_FP (2, 0, 1); VM.STOP|]));
+  check "argmax missing input leaves destination" (int_reg missing 2 = 0);
+  let nonfinite = fresh_state () in
+  set_int_reg nonfinite 0 100;
+  set_int_reg nonfinite 1 2;
+  set_f64_bits nonfinite 100 0x7ff8000000000000L;
+  set_f64_bits nonfinite 101 (Int64.bits_of_float 1.0);
+  check "argmax non-finite input reverts"
+    (not (VM.run nonfinite [|VM.ARGMAX_FP (2, 0, 1); VM.STOP|]));
+  check "argmax non-finite input leaves destination" (int_reg nonfinite 2 = 0);
+  let infinity = fresh_state () in
+  set_int_reg infinity 0 100;
+  set_int_reg infinity 1 2;
+  set_f64_bits infinity 100 0x7ff0000000000000L;
+  set_f64_bits infinity 101 0xfff0000000000000L;
+  check "argmax infinity input reverts"
+    (not (VM.run infinity [|VM.ARGMAX_FP (2, 0, 1); VM.STOP|]));
+  check "argmax infinity input leaves destination" (int_reg infinity 2 = 0);
+  let zero = fresh_state () in
+  set_int_reg zero 0 100;
+  set_int_reg zero 1 0;
+  check "argmax zero length reverts"
+    (not (VM.run zero [|VM.ARGMAX_FP (2, 0, 1); VM.STOP|]));
+  let bad_addr = fresh_state () in
+  set_int_reg bad_addr 0 (-1);
+  set_int_reg bad_addr 1 1;
+  check "argmax negative address reverts"
+    (not (VM.run bad_addr [|VM.ARGMAX_FP (2, 0, 1); VM.STOP|]));
+  check "argmax negative address leaves destination" (int_reg bad_addr 2 = 0);
+  let too_large = fresh_state () in
+  set_int_reg too_large 0 100;
+  set_int_reg too_large 1 1_048_577;
+  check "argmax over-limit length reverts"
+    (not (VM.run too_large [|VM.ARGMAX_FP (2, 0, 1); VM.STOP|]));
+  check "argmax over-limit length leaves destination" (int_reg too_large 2 = 0);
+  let exact = fresh_state ~limit:10 () in
+  set_int_reg exact 0 100;
+  set_int_reg exact 1 10;
+  set_f64_values exact 100 (List.init 10 float_of_int);
+  check "argmax exact effort succeeds"
+    (VM.run exact [|VM.ARGMAX_FP (2, 0, 1)|]);
+  check "argmax exact effort charged" (exact.VM.effort_used = 10);
+  let one_under = fresh_state ~limit:9 () in
+  set_int_reg one_under 0 100;
+  set_int_reg one_under 1 10;
+  set_f64_values one_under 100 (List.init 10 float_of_int);
+  check "argmax one-under effort reverts"
+    (not (VM.run one_under [|VM.ARGMAX_FP (2, 0, 1)|]));
+  check "argmax one-under effort leaves destination" (int_reg one_under 2 = 0)
+
 let capability name capability_root =
   Req.{ name; root = capability_root }
 
@@ -488,6 +595,44 @@ let check_capability_gate () =
       "SILU_FP", VM.SILU_FP (0, 1);
       "RESIDUAL_ADD_FP", VM.RESIDUAL_ADD_FP (0, 1, 2);
     ]
+
+let check_argmax_capability_gate () =
+  let cap = capability "tensor.argmax" (hex_root 'd') in
+  (match
+     Admission.of_inference_code_with_requirement
+       ~support:(support [cap])
+       ~requirement:(requirement [cap])
+       (admission_code (VM.ARGMAX_FP (0, 1, 2)))
+   with
+   | Ok _ -> ()
+   | Error error -> failwith (Admission.error_message error));
+  (match
+     Admission.of_inference_code_with_requirement
+       ~support:(support [])
+       ~requirement:(requirement [])
+       (admission_code (VM.ARGMAX_FP (0, 1, 2)))
+   with
+   | Error (Admission.Unsafe_error message) ->
+     check
+       "argmax capability is named"
+       (starts_with
+          "inference opcode ARGMAX_FP at pc 4 requires capability tensor.argmax"
+          message)
+   | _ -> failwith "expected argmax capability rejection");
+  let fp_cap = capability "tensor.strict-fp" (hex_root 'e') in
+  match
+    Admission.of_inference_code_with_requirement
+      ~support:(support [fp_cap])
+      ~requirement:(requirement [fp_cap])
+      (admission_code (VM.ARGMAX_FP (0, 1, 2)))
+  with
+  | Error (Admission.Unsafe_error message) ->
+    check
+      "argmax is separate from strict fp"
+      (starts_with
+         "inference opcode ARGMAX_FP at pc 4 requires capability tensor.argmax"
+         message)
+  | _ -> failwith "expected argmax strict-fp rejection"
 
 let check_existing_fp_family_remains_forbidden () =
   let cap = capability "tensor.strict-fp" (hex_root 'd') in
@@ -600,6 +745,8 @@ let check_compiler_surface () =
       (function VM.SILU_FP _ -> true | _ -> false);
       "residual_add_fp", [Lang.EInt Z.zero; Lang.EInt Z.one; Lang.EInt Z.one],
       (function VM.RESIDUAL_ADD_FP _ -> true | _ -> false);
+      "argmax_fp", [Lang.EInt Z.zero; Lang.EInt Z.one],
+      (function VM.ARGMAX_FP _ -> true | _ -> false);
     ]
 
 let check_wire_roundtrip () =
@@ -620,6 +767,7 @@ let check_wire_roundtrip () =
       "SOFTPLUS_FP r0, r1", VM.SOFTPLUS_FP (0, 1);
       "SILU_FP r0, r1", VM.SILU_FP (0, 1);
       "RESIDUAL_ADD_FP r0, r1, r2", VM.RESIDUAL_ADD_FP (0, 1, 2);
+      "ARGMAX_FP r0, r1, r2", VM.ARGMAX_FP (0, 1, 2);
     ]
 
 let check_effects () =
@@ -634,7 +782,12 @@ let check_effects () =
     Program_effects.names
       (Program_effects.scan [|VM.RESIDUAL_ADD_FP (0, 1, 2)|])
   in
-  check "residual effects" (effects = ["memory_read"; "memory_write"])
+  check "residual effects" (effects = ["memory_read"; "memory_write"]);
+  let effects =
+    Program_effects.names
+      (Program_effects.scan [|VM.ARGMAX_FP (0, 1, 2)|])
+  in
+  check "argmax effects" (effects = ["memory_read"])
 
 let () =
   check_golden "sigmoid" (VM.SIGMOID_FP (0, 1)) sigmoid_input sigmoid_output;
@@ -647,7 +800,9 @@ let () =
   check_residual_add ();
   check_residual_reverts_atomically ();
   check_residual_effort ();
+  check_argmax_fp ();
   check_capability_gate ();
+  check_argmax_capability_gate ();
   check_existing_fp_family_remains_forbidden ();
   check_generic_admission_rejection ();
   check_compiler_surface ();
