@@ -1,6 +1,6 @@
 # Bonsai Demo Readiness
 
-Status: working plan, 2026-07-22.
+Status: working plan, 2026-07-23.
 
 This note defines the shortest clean path from the current runtime foundation
 to a credible Bonsai 27B demo. It is intentionally a demo-readiness plan, not a
@@ -38,9 +38,39 @@ network admission, or publisher endorsement.
 | Request admission | Target and limit checks added | Feed runtime proof from admitted roots |
 | Immutable ranges | Local authenticated pinning and plan binding added | Back with resident reader |
 | Ontology guard | Runtime source scan added | No model-family names enter VM code |
-| Tensor substrate | Direct Q1-G128, order-3 frontier, order-4 delta rule, and local order-5 RMSNorm/multiply primitives accepted in LiteNode tests | Re-emit the order-5 canaries from `octra-inference` and run them end-to-end |
-| Sessions | Plan-bound local candidate runner added | Add node residency and scheduler |
+| Tensor substrate | Direct Q1-G128, order-3 frontier, order-4 delta rule, order-5, and order-6 Bonsai prefix cutpoints accepted and matched through LiteNode canaries | Keep new primitives enumerated and capability gated |
+| Sessions | Plan-bound local candidate runner replayed the prompt-token final VM session under the hardened LiteNode harness | Add node residency and scheduler |
 | Receipts | Output and candidate roots added locally | Add full diagnostics object |
+
+## Latest Evidence
+
+`octra-inference` produced a prompt-token candidate bundle:
+
+```text
+/home/exedev/evidence/octra-inference/bonsai-prompt-token-demo-bundle-6fe1a88-20260723-052433/prompt-token-demo-bundle.cjson
+```
+
+The prompt was `In a hidden network, the model whispered`. The reference path
+generated token id `310`, decoded as ` to`. The bundle binds that prompt-token
+reference to the matched VM-native order-6 prefix proof; it does not claim a
+devnet consensus receipt or full LiteNode-owned sampling.
+
+The final VM session output root was:
+
+```text
+ad34b2188817679014dfb1c4977c6f67f00101b293e0de6d27c0636c5686542d
+```
+
+The same final VM packet was replayed against LiteNode `d400fa6`, which adds
+fail-closed inference opcode policy:
+
+```text
+/home/exedev/evidence/octra-lite-node-inference/prompt-token-d400fa6-rerun-20260723-070728/session-report.cjson
+```
+
+That rerun accepted the program envelope, admitted `41` immutable model ranges,
+executed `41456` instructions, preserved the same output root, reported
+`pvac_backend=unavailable-proof-only`, and kept `consensus_accepted=false`.
 
 ## Handoff Shape
 
@@ -83,14 +113,16 @@ evidence remain outside LiteNode.
    evidence bundle. **Complete locally for order-5 implementation:**
    `RMSNORM_FP_EPS` carries explicit binary64 epsilon bits and
    `ELEMWISE_MUL_FP` is hardened for strict finite, candidate-write execution.
-   **Next evidence gate:** `octra-inference` must re-emit the order-5 canaries
-   with the real opcodes and run the same scan/session loop.
+   **Complete locally for order-6 evidence:** all `52` order-6 cutpoints match
+   through LiteNode after the producer preserved the model schedule's residual
+   accumulation order.
 5. Add the minimum local session runner: open, one advance, status, finalize,
    and cancel with candidate rollback. **Complete locally:** the runner now
    consumes one validated execution plan and emits output and candidate roots.
-6. Point the existing Bonsai runtime-proof command at the new VM harness and
-   require exact token, hidden, norm, logits, requirement, target, request, and
-   output roots.
+6. Point the Bonsai prompt-token bundle at the hardened VM harness and require
+   exact requirement, target, request, model-range, output, and receipt roots.
+   **Complete for local candidate evidence:** the `d400fa6` harness replayed
+   the final prompt-token VM packet and matched the expected output root.
 
 ## Local Admission Harness
 
@@ -212,8 +244,9 @@ The current local session fixtures prove plan validation, authenticated input
 and range binding, candidate isolation, lifecycle transitions, output roots, and
 diagnostic candidate roots. They now include VM-native Q1-G128, order-3 Bonsai
 frontier canaries, LiteNode-side order-4 delta-rule evidence, and local
-order-5 RMSNorm/multiply evidence. They do not yet claim full Bonsai graph
-execution or resident model state.
+order-5/order-6 prefix evidence. They do not yet claim full LiteNode-owned
+tokenization, logits, sampling, devnet consensus execution, or resident model
+state.
 
 The root fixture test locks the current canonical encodings for the
 requirement, admitted program, target, request, session, and receipt objects.
