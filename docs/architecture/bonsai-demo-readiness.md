@@ -77,6 +77,31 @@ That rerun accepted the program envelope, admitted `41` immutable model ranges,
 executed `41456` instructions, preserved the same output root, reported
 `pvac_backend=unavailable-proof-only`, and kept `consensus_accepted=false`.
 
+The larger operator-facing demo artifact is:
+
+```text
+/home/exedev/evidence/octra-inference/bonsai-multitoken-demo-d400fa6-20260723-130225
+```
+
+It generates eight reference tokens:
+
+```text
+[310, 728, 11, 328, 40, 1044, 279, 11141]
+```
+
+decoded as:
+
+```text
+ to me, "I am the architect
+```
+
+That demo is intentionally labeled as
+`reference_continuation_plus_first_token_order6_prefix_vm_proof`: token
+generation and reference execution for all eight tokens are owned by
+`octra-inference`; LiteNode proof covers token `000`, specifically the
+VM-native order-6 prefix final-output-aggregation packet. The artifact records
+the missing work for full per-token VM proof.
+
 ## Handoff Shape
 
 `octra-inference` should hand LiteNode the following candidate packet:
