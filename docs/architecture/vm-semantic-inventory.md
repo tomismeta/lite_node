@@ -145,9 +145,9 @@ the intended future numerical profiles.
 | Strict-FP activation proof | 3 | Rejected as host/profiled float | Accepted by type flow |
 | Causal depthwise proof | 1 | Rejected as host/profiled float | Accepted by type flow |
 | Delta-rule proof | 1 | Rejected as host/profiled float | Accepted by type flow |
-| Strict-FP normalization/multiply proof | 2 | Rejected as host/profiled float | Accepted by type flow |
+| Strict-FP normalization/vector proof | 3 | Rejected as host/profiled float | Accepted by type flow |
 | Unclassified Q16 | 2 | Allowed | Unsupported by type flow |
-| FP | 9 | Rejected as host float | Rejected as host float |
+| FP | 8 | Rejected as host float | Rejected as host float |
 
 The groups contain:
 
@@ -166,12 +166,11 @@ The groups contain:
 - Strict-FP activation proof: `SIGMOID_FP`, `SOFTPLUS_FP`, and `SILU_FP`.
 - Causal depthwise proof: `CAUSAL_DEPTHWISE_CONV1D_FP`.
 - Delta-rule proof: `GATED_DELTA_RULE_FP`.
-- Strict-FP normalization/multiply proof: `RMSNORM_FP_EPS` and
-  `ELEMWISE_MUL_FP`.
+- Strict-FP normalization/vector proof: `RMSNORM_FP_EPS`,
+  `ELEMWISE_MUL_FP`, and `RESIDUAL_ADD_FP`.
 - Unclassified Q16: `MATMUL_Q16` and `SHIFT_ROUND_INPLACE`.
-- FP: `MATMUL_FP`, `RMSNORM_FP`, `RESIDUAL_ADD_FP`, `ROPE_APPLY_FP`,
-  `LOAD_INT8_FP`, `VECDOT_FP`, `ARGMAX_FP`, `ATTENTION_KV_FP`, and
-  `APPEND_VEC_FP`.
+- FP: `MATMUL_FP`, `RMSNORM_FP`, `ROPE_APPLY_FP`, `LOAD_INT8_FP`,
+  `VECDOT_FP`, `ARGMAX_FP`, `ATTENTION_KV_FP`, and `APPEND_VEC_FP`.
 
 "Allowed" means the current opcode policy does not reject the instruction. The
 normal verifier and execution checks still apply.

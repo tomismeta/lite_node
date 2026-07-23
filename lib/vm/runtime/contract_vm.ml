@@ -918,7 +918,8 @@ let strict_operands st = function
     && is_numeric (getr st count)
     && is_numeric (getr st gamma)
     && (match getr st epsilon with VInt z -> Z.fits_int64 z | _ -> false)
-  | ELEMWISE_MUL_FP (dst, source, count) ->
+  | ELEMWISE_MUL_FP (dst, source, count)
+  | RESIDUAL_ADD_FP (dst, source, count) ->
     List.for_all (fun reg -> is_numeric (getr st reg)) [dst; source; count]
   | CAUSAL_DEPTHWISE_CONV1D_FP (dst, input, kernel, timesteps, channels, width) ->
     List.for_all (fun reg -> is_numeric (getr st reg))
@@ -2607,21 +2608,32 @@ let exec_one st op =
           | _ -> revert st)
      | _ -> revert st)
   | RESIDUAL_ADD_FP (rs_dst, rs_src, rs_n) ->
-    let dst = Z.to_int (to_z (getr st rs_dst)) in
-    let src = Z.to_int (to_z (getr st rs_src)) in
-    let n = Z.to_int (to_z (getr st rs_n)) in
-    if n <= 0 || n > 1_048_576 then revert st
-    else begin
-      if not (add_dyn_effort st (n / 2)) then revert st
-      else begin
-        for i = 0 to n - 1 do
-          let a = mem_get_fp64 st.memory.data (dst + i) in
-          let b = mem_get_fp64 st.memory.data (src + i) in
-          mem_set_fp64 st.memory.data (dst + i) (a +. b)
-        done;
-        true
-      end
-    end
+    (match read_int st rs_dst, read_int st rs_src, read_int st rs_n with
+     | Some dst, Some src, Some n when n > 0 ->
+       if not
+            (List.for_all
+               (fun (addr, n) -> valid_large_mem_span addr n)
+               [dst, n; src, n])
+          || (ranges_overlap dst n src n && not (same_range dst n src n)) then
+         revert st
+       else if not (add_dyn_product st [n; 2] 1) then
+         revert st
+       else
+         (match read_fp64_array st.memory.data dst n,
+                read_fp64_array st.memory.data src n with
+          | Some dst_values, Some src_values ->
+            let output =
+              Array.init n (fun i -> dst_values.(i) +. src_values.(i))
+            in
+            if not (Array.for_all finite_fp64 output) then revert st
+            else begin
+              for i = 0 to n - 1 do
+                mem_set_fp64 st.memory.data (dst + i) output.(i)
+              done;
+              true
+            end
+          | _ -> revert st)
+     | _ -> revert st)
   | ROPE_APPLY_FP (rs_addr, rs_n_dim, rs_pos, rs_base) ->
     let addr = Z.to_int (to_z (getr st rs_addr)) in
     let n_dim = Z.to_int (to_z (getr st rs_n_dim)) in

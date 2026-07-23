@@ -210,6 +210,25 @@ let check_strict_operands () =
   check "silu strict operand reverts"
     (not (VM.run state [|VM.SILU_FP (0, 1); VM.STOP|]));
   check "silu strict operand leaves memory unchanged"
+    (f64_bits state 100 = Int64.bits_of_float 1.0);
+  let state =
+    VM.create_state
+      ~limit:1_000_000
+      ~strict_values:true
+      ~caller:"caller"
+      ~origin:"origin"
+      ~address:"contract"
+      ~value:Z.zero
+      ~storage:(Hashtbl.create 0)
+      ()
+  in
+  set_int_reg state 0 100;
+  state.VM.regs.(1) <- VM.VString "not-an-address";
+  set_int_reg state 2 1;
+  set_f64_bits state 100 (Int64.bits_of_float 1.0);
+  check "residual strict operand reverts"
+    (not (VM.run state [|VM.RESIDUAL_ADD_FP (0, 1, 2); VM.STOP|]));
+  check "residual strict operand leaves memory unchanged"
     (f64_bits state 100 = Int64.bits_of_float 1.0)
 
 let check_invalid_shape_and_effort_reverts () =
@@ -248,6 +267,154 @@ let check_invalid_shape_and_effort_reverts () =
   check "effort exhaustion leaves input unchanged"
     (f64_bits exhausted 100 = Int64.bits_of_float 1.0)
 
+let fresh_state ?(limit = 1_000_000) () =
+  VM.create_state
+    ~limit
+    ~caller:"caller"
+    ~origin:"origin"
+    ~address:"contract"
+    ~value:Z.zero
+    ~storage:(Hashtbl.create 0)
+    ()
+
+let set_f64_values state base values =
+  List.iteri
+    (fun index value ->
+      set_f64_bits state (base + index) (Int64.bits_of_float value))
+    values
+
+let check_residual_add () =
+  let state = fresh_state () in
+  set_int_reg state 0 100;
+  set_int_reg state 1 200;
+  set_int_reg state 2 3;
+  set_f64_values state 100 [1.5; -2.0; 0.25];
+  set_f64_values state 200 [0.5; 3.0; -4.0];
+  check "residual add succeeds"
+    (VM.run state [|VM.RESIDUAL_ADD_FP (0, 1, 2); VM.STOP|]);
+  List.iteri
+    (fun index expected ->
+      check
+        ("residual add output " ^ string_of_int index)
+        (f64_bits state (100 + index) = Int64.bits_of_float expected))
+    [2.0; 1.0; -3.75];
+  let same = fresh_state () in
+  set_int_reg same 0 100;
+  set_int_reg same 1 100;
+  set_int_reg same 2 2;
+  set_f64_values same 100 [1.25; -3.5];
+  check "residual add same range succeeds"
+    (VM.run same [|VM.RESIDUAL_ADD_FP (0, 1, 2); VM.STOP|]);
+  check "residual add same range doubles first"
+    (f64_bits same 100 = Int64.bits_of_float 2.5);
+  check "residual add same range doubles second"
+    (f64_bits same 101 = Int64.bits_of_float (-7.0))
+
+let check_residual_reverts_atomically () =
+  let missing = fresh_state () in
+  set_int_reg missing 0 100;
+  set_int_reg missing 1 200;
+  set_int_reg missing 2 2;
+  set_f64_values missing 100 [7.0; 8.0];
+  set_f64_bits missing 200 (Int64.bits_of_float 1.0);
+  check "residual missing source reverts"
+    (not (VM.run missing [|VM.RESIDUAL_ADD_FP (0, 1, 2); VM.STOP|]));
+  check "residual missing source leaves first dst"
+    (f64_bits missing 100 = Int64.bits_of_float 7.0);
+  check "residual missing source leaves second dst"
+    (f64_bits missing 101 = Int64.bits_of_float 8.0);
+  let nonfinite = fresh_state () in
+  set_int_reg nonfinite 0 100;
+  set_int_reg nonfinite 1 200;
+  set_int_reg nonfinite 2 2;
+  set_f64_values nonfinite 100 [7.0; 8.0];
+  set_f64_bits nonfinite 200 0x7ff0000000000000L;
+  set_f64_bits nonfinite 201 (Int64.bits_of_float 1.0);
+  check "residual non-finite source reverts"
+    (not (VM.run nonfinite [|VM.RESIDUAL_ADD_FP (0, 1, 2); VM.STOP|]));
+  check "residual non-finite source leaves first dst"
+    (f64_bits nonfinite 100 = Int64.bits_of_float 7.0);
+  check "residual non-finite source leaves second dst"
+    (f64_bits nonfinite 101 = Int64.bits_of_float 8.0);
+  let missing_dst = fresh_state () in
+  set_int_reg missing_dst 0 100;
+  set_int_reg missing_dst 1 200;
+  set_int_reg missing_dst 2 2;
+  set_f64_bits missing_dst 101 (Int64.bits_of_float 8.0);
+  set_f64_values missing_dst 200 [1.0; 2.0];
+  check "residual missing dst reverts"
+    (not (VM.run missing_dst [|VM.RESIDUAL_ADD_FP (0, 1, 2); VM.STOP|]));
+  check "residual missing dst leaves second dst"
+    (f64_bits missing_dst 101 = Int64.bits_of_float 8.0);
+  let nonfinite_dst = fresh_state () in
+  set_int_reg nonfinite_dst 0 100;
+  set_int_reg nonfinite_dst 1 200;
+  set_int_reg nonfinite_dst 2 2;
+  set_f64_bits nonfinite_dst 100 0x7ff0000000000000L;
+  set_f64_bits nonfinite_dst 101 (Int64.bits_of_float 8.0);
+  set_f64_values nonfinite_dst 200 [1.0; 2.0];
+  check "residual non-finite dst reverts"
+    (not (VM.run nonfinite_dst [|VM.RESIDUAL_ADD_FP (0, 1, 2); VM.STOP|]));
+  check "residual non-finite dst leaves first dst"
+    (f64_bits nonfinite_dst 100 = 0x7ff0000000000000L);
+  check "residual non-finite dst leaves second dst"
+    (f64_bits nonfinite_dst 101 = Int64.bits_of_float 8.0);
+  let overflow = fresh_state () in
+  set_int_reg overflow 0 100;
+  set_int_reg overflow 1 200;
+  set_int_reg overflow 2 2;
+  set_f64_values overflow 100 [max_float; 8.0];
+  set_f64_values overflow 200 [max_float; 2.0];
+  check "residual output overflow reverts"
+    (not (VM.run overflow [|VM.RESIDUAL_ADD_FP (0, 1, 2); VM.STOP|]));
+  check "residual output overflow leaves first dst"
+    (f64_bits overflow 100 = Int64.bits_of_float max_float);
+  check "residual output overflow leaves second dst"
+    (f64_bits overflow 101 = Int64.bits_of_float 8.0);
+  let overlap = fresh_state () in
+  set_int_reg overlap 0 100;
+  set_int_reg overlap 1 101;
+  set_int_reg overlap 2 2;
+  set_f64_values overlap 100 [1.0; 2.0; 3.0];
+  check "residual partial overlap reverts"
+    (not (VM.run overlap [|VM.RESIDUAL_ADD_FP (0, 1, 2); VM.STOP|]));
+  check "residual partial overlap leaves first"
+    (f64_bits overlap 100 = Int64.bits_of_float 1.0);
+  check "residual partial overlap leaves second"
+    (f64_bits overlap 101 = Int64.bits_of_float 2.0);
+  let exhausted = fresh_state ~limit:19 () in
+  set_int_reg exhausted 0 100;
+  set_int_reg exhausted 1 200;
+  set_int_reg exhausted 2 10;
+  set_f64_values exhausted 100 (List.init 10 float_of_int);
+  set_f64_values exhausted 200 (List.init 10 (fun _ -> 1.0));
+  check "residual effort exhaustion reverts"
+    (not (VM.run exhausted [|VM.RESIDUAL_ADD_FP (0, 1, 2); VM.STOP|]));
+  check "residual effort exhaustion leaves dst"
+    (f64_bits exhausted 100 = Int64.bits_of_float 0.0)
+
+let check_residual_effort () =
+  let exact = fresh_state ~limit:30 () in
+  set_int_reg exact 0 100;
+  set_int_reg exact 1 200;
+  set_int_reg exact 2 10;
+  set_f64_values exact 100 (List.init 10 float_of_int);
+  set_f64_values exact 200 (List.init 10 (fun _ -> 1.0));
+  check "residual exact effort succeeds"
+    (VM.run exact [|VM.RESIDUAL_ADD_FP (0, 1, 2)|]);
+  check "residual exact effort charged"
+    (exact.VM.effort_used = 30);
+  let one_under = fresh_state ~limit:29 () in
+  set_int_reg one_under 0 100;
+  set_int_reg one_under 1 200;
+  set_int_reg one_under 2 10;
+  set_f64_values one_under 100 (List.init 10 float_of_int);
+  set_f64_values one_under 200 (List.init 10 (fun _ -> 1.0));
+  check "residual one-under effort reverts"
+    (not (VM.run one_under [|VM.RESIDUAL_ADD_FP (0, 1, 2)|]));
+  check "residual one-under effort leaves dst"
+    (f64_bits one_under 100 = Int64.bits_of_float 0.0)
+
 let capability name capability_root =
   Req.{ name; root = capability_root }
 
@@ -284,6 +451,7 @@ let admission_code op =
     VM.JDEST 100;
     VM.LDI (0, VM.VInt (Z.of_int 100));
     VM.LDI (1, VM.VInt Z.one);
+    VM.LDI (2, VM.VInt Z.one);
     op;
     VM.STOP;
   |]
@@ -311,13 +479,14 @@ let check_capability_gate () =
           (name ^ " capability is named")
           (starts_with
              ("inference opcode " ^ name
-              ^ " at pc 3 requires capability tensor.strict-fp")
+              ^ " at pc 4 requires capability tensor.strict-fp")
              message)
       | _ -> failwith ("expected activation capability rejection: " ^ name))
     [
       "SIGMOID_FP", VM.SIGMOID_FP (0, 1);
       "SOFTPLUS_FP", VM.SOFTPLUS_FP (0, 1);
       "SILU_FP", VM.SILU_FP (0, 1);
+      "RESIDUAL_ADD_FP", VM.RESIDUAL_ADD_FP (0, 1, 2);
     ]
 
 let check_existing_fp_family_remains_forbidden () =
@@ -331,7 +500,6 @@ let check_existing_fp_family_remains_forbidden () =
     "ROPE_APPLY", VM.ROPE_APPLY (0, 1, 2, 3);
     "MATMUL_FP", VM.MATMUL_FP (0, 1, 2, 3, 4, 5);
     "RMSNORM_FP", VM.RMSNORM_FP (0, 1, 2);
-    "RESIDUAL_ADD_FP", VM.RESIDUAL_ADD_FP (0, 1, 2);
     "ROPE_APPLY_FP", VM.ROPE_APPLY_FP (0, 1, 2, 3);
     "LOAD_INT8_FP", VM.LOAD_INT8_FP (0, 1, 2, 3, 4);
     "VECDOT_FP", VM.VECDOT_FP (0, 1, 2, 3);
@@ -370,9 +538,10 @@ let check_generic_admission_rejection () =
       "SIGMOID_FP", VM.SIGMOID_FP (0, 1);
       "SOFTPLUS_FP", VM.SOFTPLUS_FP (0, 1);
       "SILU_FP", VM.SILU_FP (0, 1);
+      "RESIDUAL_ADD_FP", VM.RESIDUAL_ADD_FP (0, 1, 2);
     ]
 
-let compiler_contract declaration name =
+let compiler_contract declaration name args =
   let open Lang in
   let fn =
     {
@@ -384,9 +553,7 @@ let compiler_contract declaration name =
       fn_payable = false;
       fn_nonreentrant = false;
       fn_vis = Public;
-      fn_body = [
-        SExpr (ECall (name, [EInt Z.zero; EInt Z.one]));
-      ];
+      fn_body = [SExpr (ECall (name, args))];
     }
   in
   {
@@ -411,21 +578,28 @@ let code_contains predicate code =
 
 let check_compiler_surface () =
   List.iter
-    (fun (name, expected) ->
-      let program_code = Gen.generate (compiler_contract Lang.ProgramDecl name) in
+    (fun (name, args, expected) ->
+      let program_code =
+        Gen.generate (compiler_contract Lang.ProgramDecl name args)
+      in
       check
         (name ^ " compiler emits opcode in Program")
         (code_contains expected program_code);
-      match Gen.generate (compiler_contract Lang.ContractDecl name) with
+      match Gen.generate (compiler_contract Lang.ContractDecl name args) with
       | _ -> failwith (name ^ " should reject outside Program")
       | exception Gen.GenError (message, _) ->
         check
           (name ^ " compiler rejection")
           (String.equal message (name ^ " is available only in Program")))
     [
-      "sigmoid_fp", (function VM.SIGMOID_FP _ -> true | _ -> false);
-      "softplus_fp", (function VM.SOFTPLUS_FP _ -> true | _ -> false);
-      "silu_fp", (function VM.SILU_FP _ -> true | _ -> false);
+      "sigmoid_fp", [Lang.EInt Z.zero; Lang.EInt Z.one],
+      (function VM.SIGMOID_FP _ -> true | _ -> false);
+      "softplus_fp", [Lang.EInt Z.zero; Lang.EInt Z.one],
+      (function VM.SOFTPLUS_FP _ -> true | _ -> false);
+      "silu_fp", [Lang.EInt Z.zero; Lang.EInt Z.one],
+      (function VM.SILU_FP _ -> true | _ -> false);
+      "residual_add_fp", [Lang.EInt Z.zero; Lang.EInt Z.one; Lang.EInt Z.one],
+      (function VM.RESIDUAL_ADD_FP _ -> true | _ -> false);
     ]
 
 let check_wire_roundtrip () =
@@ -445,15 +619,22 @@ let check_wire_roundtrip () =
       "SIGMOID_FP r0, r1", VM.SIGMOID_FP (0, 1);
       "SOFTPLUS_FP r0, r1", VM.SOFTPLUS_FP (0, 1);
       "SILU_FP r0, r1", VM.SILU_FP (0, 1);
+      "RESIDUAL_ADD_FP r0, r1, r2", VM.RESIDUAL_ADD_FP (0, 1, 2);
     ]
 
 let check_effects () =
   let effects =
     Program_effects.names
       (Program_effects.scan
-         [|VM.SIGMOID_FP (0, 1); VM.SOFTPLUS_FP (0, 1); VM.SILU_FP (0, 1)|])
+         [|VM.SIGMOID_FP (0, 1); VM.SOFTPLUS_FP (0, 1);
+           VM.SILU_FP (0, 1); VM.RESIDUAL_ADD_FP (0, 1, 2)|])
   in
-  check "activation effects" (effects = ["memory_read"; "memory_write"])
+  check "activation effects" (effects = ["memory_read"; "memory_write"]);
+  let effects =
+    Program_effects.names
+      (Program_effects.scan [|VM.RESIDUAL_ADD_FP (0, 1, 2)|])
+  in
+  check "residual effects" (effects = ["memory_read"; "memory_write"])
 
 let () =
   check_golden "sigmoid" (VM.SIGMOID_FP (0, 1)) sigmoid_input sigmoid_output;
@@ -463,6 +644,9 @@ let () =
   check_nonfinite_reverts_atomically ();
   check_strict_operands ();
   check_invalid_shape_and_effort_reverts ();
+  check_residual_add ();
+  check_residual_reverts_atomically ();
+  check_residual_effort ();
   check_capability_gate ();
   check_existing_fp_family_remains_forbidden ();
   check_generic_admission_rejection ();

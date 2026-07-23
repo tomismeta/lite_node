@@ -313,10 +313,11 @@ Existing operations are reused only after bounds, memory authority, effort,
 non-finite, aliasing, and rollback audits. Being present in the current VM is
 not itself conformance.
 
-Proof-branch status: `ELEMWISE_MUL_FP` now has strict finite reads, checked
-large spans, exact in-place alias support, partial-overlap rejection, candidate
-writes, and a deliberate `3 * count` dynamic effort tariff. It is admitted only
-by the inference policy when `tensor.strict-fp` is present.
+Proof-branch status: `ELEMWISE_MUL_FP` and `RESIDUAL_ADD_FP` now have strict
+finite reads, checked large spans, exact in-place alias support,
+partial-overlap rejection, and candidate writes. The dynamic effort tariffs are
+`3 * count` for multiply and `2 * count` for residual add. They are admitted
+only by the inference policy when `tensor.strict-fp` is present.
 
 Primitive specifications record analytic shape scaling before effort
 coefficients are chosen. Compressed linear work scales from declared output
