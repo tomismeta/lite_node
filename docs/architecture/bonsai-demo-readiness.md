@@ -136,6 +136,11 @@ envelope and reports every visible inference opcode-policy violation as JSON,
 without admitting new opcodes or running a session. It cannot be combined with
 `--run-session`.
 
+Plain inference policy is fail-closed. The harness admits only a small
+enumerated VM scaffolding set and the capability-gated inference primitives
+listed in the execution requirement; normal VM workloads continue through the
+ordinary Program path.
+
 The requirement JSON contains:
 
 - `vm_semantics_root`;

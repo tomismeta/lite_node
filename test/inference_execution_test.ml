@@ -348,6 +348,34 @@ let check_state_surfaces_forbidden () =
       | _ -> failwith ("expected state opcode rejection: " ^ name))
     cases
 
+let check_unlisted_opcodes_forbidden () =
+  let cases = [
+    "CALLER", VM.CALLER 0;
+    "GROTH16_VERIFY_BN254", VM.GROTH16_VERIFY_BN254 (0, 1, 2, 3);
+    "CALL_INT", VM.CALL_INT (0, 0);
+    "SHA256", VM.SHA256 (0, 1);
+    "MATMUL", VM.MATMUL (0, 1, 2, 3, 4, 5);
+    "VECDOT", VM.VECDOT (0, 1, 2, 3);
+    "RELU_INPLACE", VM.RELU_INPLACE (0, 1);
+    "LOAD_INT8_BYTES_TO_MEM", VM.LOAD_INT8_BYTES_TO_MEM (0, 1, 2, 3, 4);
+    "RESIDUAL_ADD", VM.RESIDUAL_ADD (0, 1, 2);
+    "SHIFT_ROUND_INPLACE", VM.SHIFT_ROUND_INPLACE (0, 1, 2);
+  ] in
+  List.iter
+    (fun (name, op) ->
+      match
+        Admission.of_inference_code_with_requirement
+          ~support
+          ~requirement
+          [| VM.JDEST Abi.advance_label; op; VM.STOP |]
+      with
+      | Error (Admission.Unsafe_error message) ->
+        check
+          ("unlisted opcode is forbidden: " ^ name)
+          (starts_with ("inference opcode " ^ name) message)
+      | _ -> failwith ("expected unlisted opcode rejection: " ^ name))
+    cases
+
 let check_matmul_q16_forbidden () =
   let requirement =
     Req.{
@@ -425,6 +453,7 @@ let () =
   check_policy_frontier_lists_all_violations ();
   check_fhe_forbidden ();
   check_state_surfaces_forbidden ();
+  check_unlisted_opcodes_forbidden ();
   check_matmul_q16_forbidden ();
   check_data_rooted_execution ();
   check_request_rooted_execution ();

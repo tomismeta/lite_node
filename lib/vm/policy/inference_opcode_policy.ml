@@ -35,6 +35,31 @@ let has_capability name requirement =
     requirement.Execution_requirement.capabilities
 
 let opcode_class = function
+  | Contract_vm.ADD _
+  | Contract_vm.SUB _
+  | Contract_vm.MUL _
+  | Contract_vm.DIV _
+  | Contract_vm.MOD _
+  | Contract_vm.NEG _
+  | Contract_vm.ABS _
+  | Contract_vm.EQ _
+  | Contract_vm.LT _
+  | Contract_vm.GT _
+  | Contract_vm.NEQ _
+  | Contract_vm.LDI _
+  | Contract_vm.MOV _
+  | Contract_vm.MLOAD _
+  | Contract_vm.MSTORE _
+  | Contract_vm.JMP _
+  | Contract_vm.JIF _
+  | Contract_vm.JDEST _
+  | Contract_vm.STOP
+  | Contract_vm.REVERT
+  | Contract_vm.ASSERT _
+  | Contract_vm.EFFORT _
+  | Contract_vm.NOP
+  | Contract_vm.MLOADR _
+  | Contract_vm.MSTORER _ -> Allowed
   | Contract_vm.SLOAD _
   | Contract_vm.SSTORE _
   | Contract_vm.SDEL _
@@ -102,7 +127,7 @@ let opcode_class = function
   | Contract_vm.GATED_DELTA_RULE_FP _ -> Requires "sequence.delta-rule"
   | Contract_vm.MATMUL_Q16 _ -> Forbidden
   | op when Opcode_policy.uses_host_float op -> Forbidden
-  | _ -> Allowed
+  | _ -> Forbidden
 
 let violations ~requirement code =
   let violations = ref [] in
