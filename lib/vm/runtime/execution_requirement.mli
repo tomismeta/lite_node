@@ -55,5 +55,6 @@ type error =
   | Limit_exceeded of string * int * int
 
 val root : t -> string
+val capability_set_root : capability list -> string
 val check : support -> t -> (unit, error) result
 val error_message : error -> string

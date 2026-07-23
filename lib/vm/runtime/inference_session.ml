@@ -23,6 +23,7 @@ type t = {
   target_root : string;
   request_root : string;
   model_ranges_root : string;
+  model_deployment_root : string option;
   session_limit : int;
   sequence : int;
   phase : phase;
@@ -38,6 +39,7 @@ type error =
   | Target_root_mismatch of string * string
   | Request_root_mismatch of string * string
   | Model_ranges_root_mismatch of string * string
+  | Model_deployment_root_mismatch of string option * string option
   | Entrypoint_unsupported of string
   | Entrypoint_missing of int
   | Execution_error of string
@@ -52,16 +54,26 @@ let phase_name = function
   | Finalized -> "finalized"
   | Canceled -> "canceled"
 
+let optional_root_field name = function
+  | None -> []
+  | Some root -> [name, `String root]
+
 let identity_json session =
-  `Assoc [
-    "target_root", `String session.target_root;
-    "request_root", `String session.request_root;
-    "model_ranges_root", `String session.model_ranges_root;
-    "sequence", `Int session.sequence;
-    "phase", `String (phase_name session.phase);
-    "output_root", `String session.output_root;
-    "committed_effort", `Int session.committed_effort;
-  ]
+  `Assoc (
+    [
+      "target_root", `String session.target_root;
+      "request_root", `String session.request_root;
+      "model_ranges_root", `String session.model_ranges_root;
+    ]
+    @ optional_root_field
+        "model_deployment_root"
+        session.model_deployment_root
+    @ [
+      "sequence", `Int session.sequence;
+      "phase", `String (phase_name session.phase);
+      "output_root", `String session.output_root;
+      "committed_effort", `Int session.committed_effort;
+    ])
 
 let root session =
   let payload = Yojson.Safe.to_string (identity_json session) in
@@ -103,6 +115,7 @@ let check_identity ~plan session =
   let target_root = Inference_target.root (Inference_plan.target plan) in
   let request_root = Inference_request.root (Inference_plan.request plan) in
   let model_ranges_root = Inference_plan.model_ranges_root plan in
+  let model_deployment_root = Inference_plan.model_deployment_root plan in
   if not (String.equal session.target_root target_root) then
     Error (Target_root_mismatch (session.target_root, target_root))
   else if not (String.equal session.request_root request_root) then
@@ -110,6 +123,10 @@ let check_identity ~plan session =
   else if not (String.equal session.model_ranges_root model_ranges_root) then
     Error (Model_ranges_root_mismatch
              (session.model_ranges_root, model_ranges_root))
+  else if session.model_deployment_root <> model_deployment_root then
+    Error
+      (Model_deployment_root_mismatch
+         (session.model_deployment_root, model_deployment_root))
   else
     Ok ()
 
@@ -134,11 +151,13 @@ let open_session ~plan =
   let target_root = Inference_target.root (Inference_plan.target plan) in
   let request_root = Inference_request.root (Inference_plan.request plan) in
   let model_ranges_root = Inference_plan.model_ranges_root plan in
+  let model_deployment_root = Inference_plan.model_deployment_root plan in
   let limits = Inference_plan.limits plan in
   check_session_size {
     target_root;
     request_root;
     model_ranges_root;
+    model_deployment_root;
     session_limit = limits.Execution_requirement.max_session_bytes;
     sequence = 0;
     phase = Open;
@@ -220,6 +239,11 @@ let phase session = session.phase
 let output_root session = session.output_root
 let candidate_root session = session.candidate_root
 let committed_effort session = session.committed_effort
+let model_deployment_root session = session.model_deployment_root
+
+let root_option_message = function
+  | None -> "none"
+  | Some root -> root
 
 let error_message = function
   | Bad_sequence (expected, actual) ->
@@ -240,6 +264,11 @@ let error_message = function
     Printf.sprintf
       "session model ranges root mismatch: expected %s actual %s"
       expected actual
+  | Model_deployment_root_mismatch (actual, expected) ->
+    Printf.sprintf
+      "session model deployment root mismatch: actual %s expected %s"
+      (root_option_message actual)
+      (root_option_message expected)
   | Entrypoint_unsupported name ->
     Printf.sprintf "unsupported session entrypoint: %s" name
   | Entrypoint_missing label ->

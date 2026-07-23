@@ -13,6 +13,7 @@ Include at startup:
 *)
 
 module Model = Octra_vm.Inference_model
+module Deployment = Octra_vm.Inference_model_deployment
 module Plan = Octra_vm.Inference_plan
 module Receipt = Octra_vm.Inference_receipt
 module Req = Octra_vm.Execution_requirement
@@ -109,7 +110,18 @@ let model target =
     }];
   }
 
-let open_session admitted target request model =
+let deployment target =
+  Deployment.{
+    model_root = target.Target.model_root;
+    store_root = target.Target.store_root;
+    tensor_index_root = hex_root '6';
+    tokenizer_root = Some (hex_root '7');
+    numerical_profile_root = requirement.numerical_root;
+    capability_set_root = Deployment.capability_set_root requirement.capabilities;
+    default_program_root = Some target.program_root;
+  }
+
+let open_session ?deployment admitted target request model =
   let pins =
     match Store.pin ~limits ~read:(fun root ->
       if String.equal root (sha256 "session range owner")
@@ -119,7 +131,20 @@ let open_session admitted target request model =
     | Error error -> failwith (Store.error_message error)
   in
   let plan =
-    match Plan.create ~admitted ~target ~request ~model ~pins ~input:"" with
+    match
+      match deployment with
+      | None ->
+        Plan.create ~admitted ~target ~request ~model ~pins ~input:""
+      | Some deployment ->
+        Plan.create_with_deployment
+          ~deployment
+          ~admitted
+          ~target
+          ~request
+          ~model
+          ~pins
+          ~input:""
+    with
     | Ok plan -> plan
     | Error error -> failwith (Plan.error_message error)
   in
@@ -132,6 +157,7 @@ let check_vectors () =
   let target = target admitted in
   let request = request target in
   let model = model target in
+  let deployment = deployment target in
   check
     "session ABI root vector"
     (String.equal
@@ -148,6 +174,11 @@ let check_vectors () =
        (Req.root requirement)
        "50e2dd63cf246f9d30c3f383b293f6aad6ead6282b55fb183c32c1387db9f9b7");
   check
+    "capability set root vector"
+    (String.equal
+       (Req.capability_set_root requirement.capabilities)
+       "5ab5d64c9522b7124a4bbfb9f6302eed8d016b0a3f642aa0cf30dd39ce57cd3a");
+  check
     "target root vector"
     (String.equal
        (Target.root target)
@@ -158,10 +189,20 @@ let check_vectors () =
        (Request.root request)
        "0a54434081377bdfb3b5b967c60da45f7e2a314d2d610d4f54ce79ecc4793881");
   check
+    "model deployment root vector"
+    (String.equal
+       (Deployment.root deployment)
+       "2a9851bbd4b3088d6a4af958c09b8d58a7ce275d87686fb5b3e287e2eead1106");
+  check
     "session root vector"
     (String.equal
        (Session.root (open_session admitted target request model))
        "1262abf9cb4a95b07349d79b0646cca8ae09e7df7e12a484476bcbe0358f3d70");
+  check
+    "deployment-bound session root vector"
+    (String.equal
+       (Session.root (open_session ~deployment admitted target request model))
+       "7419431c2ece42cff044c5b13f20dae0583f8bbaa56ffdeab36f9e8cc431fad9");
   let receipt = Receipt.{
     target_root = "f7cfe92a4089b13cb7b6ff5eb4f28e39d7dd9c27fbfdddba71aeccd80394bc10";
     request_root = "0a54434081377bdfb3b5b967c60da45f7e2a314d2d610d4f54ce79ecc4793881";

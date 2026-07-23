@@ -60,6 +60,11 @@
  (libraries octra_vm))
 
 (test
+ (name inference_model_deployment_test)
+ (modules inference_model_deployment_test)
+ (libraries octra_vm))
+
+(test
  (name inference_store_test)
  (modules inference_store_test)
  (libraries octra_vm digestif digestif.c))

@@ -42,6 +42,8 @@ deterministic encoders. Inference adds domain tags, not a second hashing stack.
 requirement_root = H("octra:inference:requirement\0" || requirement)
 program_root     = H("octra:inference:program\0"     || admitted_program)
 target_root      = H("octra:inference:target\0"      || target)
+capability_set_root = H("octra:inference:capability-set\0" || capabilities)
+model_deployment_root = H("octra:inference:model-deployment\0" || model_deployment)
 range_root       = H("octra:inference:model-range\0" || range)
 model_ranges_root = H("octra:inference:model-ranges\0" || model_ranges)
 request_root     = H("octra:inference:request\0"     || request)
@@ -100,6 +102,35 @@ profile; the plain runner also disables FHE in its VM execution context.
 Multiple definitions may coexist during a rollout because their roots differ.
 Removing support is an operator and network activation decision recorded in
 Git and deployment policy, not an implicit decoder preference.
+
+## Model Deployment
+
+A model deployment is rooted model identity. It is not a LiteNode-owned model
+registry and it does not contain raw tensor bytes. Octra-native storage roots
+carry durable model state; LiteNode admits, executes, and proves against those
+roots.
+
+The first deployment object contains:
+
+- model root;
+- store root;
+- tensor index root;
+- optional tokenizer root;
+- numerical profile root;
+- capability set root; and
+- optional default program root.
+
+The default program root is a convenience pointer, not authority. A session may
+bind another admitted program to the same deployment if the target,
+requirement, and policy roots check out.
+
+When supplied to the local harness, the deployment descriptor must match the
+admitted target's model and store roots, the requirement's numerical profile
+root, and the canonical capability set root derived from the requirement
+capabilities. During a session run, the deployment root is included in session
+identity, so receipts commit to the descriptor. LiteNode still does not parse
+source model metadata, model-family names, tokenizer files, or publisher
+evidence.
 
 ## Target
 

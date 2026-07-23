@@ -28,6 +28,7 @@ type error =
   | Target_root_mismatch of string * string
   | Request_root_mismatch of string * string
   | Model_ranges_root_mismatch of string * string
+  | Model_deployment_root_mismatch of string option * string option
   | Entrypoint_unsupported of string
   | Entrypoint_missing of int
   | Execution_error of string
@@ -59,5 +60,6 @@ val phase : t -> phase
 val output_root : t -> string
 val candidate_root : t -> string
 val committed_effort : t -> int
+val model_deployment_root : t -> string option
 val phase_name : phase -> string
 val error_message : error -> string

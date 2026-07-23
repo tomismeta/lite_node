@@ -87,6 +87,14 @@ let capability_json capability =
     "root", `String capability.root;
   ]
 
+let capability_set_json capabilities =
+  `List (List.map capability_json (sort_capabilities capabilities))
+
+let capability_set_root capabilities =
+  let payload = Yojson.Safe.to_string (capability_set_json capabilities) in
+  Digestif.SHA256.(
+    digest_string ("octra:inference:capability-set\000" ^ payload) |> to_hex)
+
 let limits_json limits =
   `Assoc [
     "max_model_bytes", `Int limits.max_model_bytes;
@@ -102,8 +110,7 @@ let to_json requirement =
     "vm_semantics_root", `String requirement.vm_semantics_root;
     "numerical_root", `String requirement.numerical_root;
     "effort_root", `String requirement.effort_root;
-    "capabilities",
-    `List (List.map capability_json (sort_capabilities requirement.capabilities));
+    "capabilities", capability_set_json requirement.capabilities;
     "limits", limits_json requirement.limits;
   ]
 

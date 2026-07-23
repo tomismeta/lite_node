@@ -19,6 +19,7 @@ type error =
   | Target_invalid of string
   | Request_invalid of string
   | Model_invalid of string
+  | Deployment_invalid of string
   | Pin_model_root_mismatch of string * string
   | Pin_store_root_mismatch of string * string
   | Pin_ranges_root_mismatch of string * string
@@ -35,13 +36,25 @@ val create :
   input:string ->
   (t, error) result
 
+val create_with_deployment :
+  deployment:Inference_model_deployment.t ->
+  admitted:Admission.t ->
+  target:Inference_target.t ->
+  request:Inference_request.t ->
+  model:Inference_model.t ->
+  pins:Inference_store.pin_set ->
+  input:string ->
+  (t, error) result
+
 val admitted : t -> Admission.t
 val target : t -> Inference_target.t
 val request : t -> Inference_request.t
 val model : t -> Inference_model.t
+val deployment : t -> Inference_model_deployment.t option
 val pins : t -> Inference_store.pin_set
 val input : t -> string
 val model_ranges_root : t -> string
+val model_deployment_root : t -> string option
 val requirement : t -> Execution_requirement.t
 val limits : t -> Execution_requirement.limits
 val error_message : error -> string

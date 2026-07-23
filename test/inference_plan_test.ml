@@ -15,6 +15,7 @@ Include at startup:
 
 module Admission = Octra_vm.Admission
 module Model = Octra_vm.Inference_model
+module Deployment = Octra_vm.Inference_model_deployment
 module Plan = Octra_vm.Inference_plan
 module Req = Octra_vm.Execution_requirement
 module Request = Octra_vm.Inference_request
@@ -120,15 +121,37 @@ let request target =
     max_advance_effort = 16;
   }
 
-let make_plan admitted target request model =
+let deployment target =
+  Deployment.{
+    model_root = target.Target.model_root;
+    store_root = target.Target.store_root;
+    tensor_index_root = hex_root '6';
+    tokenizer_root = None;
+    numerical_profile_root = requirement.numerical_root;
+    capability_set_root = Deployment.capability_set_root requirement.capabilities;
+    default_program_root = Some target.program_root;
+  }
+
+let make_plan ?deployment admitted target request model =
   match
-    Plan.create
-      ~admitted
-      ~target
-      ~request
-      ~model
-      ~pins:(pins model)
-      ~input:""
+    match deployment with
+    | None ->
+      Plan.create
+        ~admitted
+        ~target
+        ~request
+        ~model
+        ~pins:(pins model)
+        ~input:""
+    | Some deployment ->
+      Plan.create_with_deployment
+        ~deployment
+        ~admitted
+        ~target
+        ~request
+        ~model
+        ~pins:(pins model)
+        ~input:""
   with
   | Ok plan -> plan
   | Error error -> failwith (Plan.error_message error)
@@ -168,6 +191,27 @@ let check_pin_root () =
   | Error (Plan.Pin_ranges_root_mismatch (_, _)) -> ()
   | _ -> failwith "expected model ranges root rejection"
 
+let check_deployment_root () =
+  let admitted = admitted () in
+  let target = target admitted in
+  let request = request target in
+  let model = model target "octets" in
+  let deployment =
+    Deployment.{ (deployment target) with model_root = hex_root '7' }
+  in
+  match
+    Plan.create_with_deployment
+      ~deployment
+      ~admitted
+      ~target
+      ~request
+      ~model
+      ~pins:(pins model)
+      ~input:""
+  with
+  | Error (Plan.Deployment_invalid _) -> ()
+  | _ -> failwith "expected deployment root rejection"
+
 let check_session_plan_identity () =
   let admitted = admitted () in
   let target = target admitted in
@@ -183,6 +227,25 @@ let check_session_plan_identity () =
   | Error (Session.Model_ranges_root_mismatch (_, _)) ->
     check "session remains open" (Session.sequence session = 0)
   | _ -> failwith "expected session plan identity rejection"
+
+let check_session_plan_deployment_identity () =
+  let admitted = admitted () in
+  let target = target admitted in
+  let request = request target in
+  let model = model target "octets" in
+  let first_plan =
+    make_plan ~deployment:(deployment target) admitted target request model
+  in
+  let second_plan = make_plan admitted target request model in
+  let session =
+    match Session.open_session ~plan:first_plan with
+    | Ok session -> session
+    | Error error -> failwith (Session.error_message error)
+  in
+  match Session.advance ~plan:second_plan ~expected_sequence:0 session with
+  | Error (Session.Model_deployment_root_mismatch (_, _)) ->
+    check "session remains open" (Session.sequence session = 0)
+  | _ -> failwith "expected session deployment identity rejection"
 
 let check_generic_admission_rejected () =
   match Admission.of_program [| VM.JDEST Abi.advance_label; VM.STOP |] with
@@ -206,5 +269,7 @@ let check_generic_admission_rejected () =
 let () =
   check_input_root ();
   check_pin_root ();
+  check_deployment_root ();
   check_session_plan_identity ();
+  check_session_plan_deployment_identity ();
   check_generic_admission_rejected ()

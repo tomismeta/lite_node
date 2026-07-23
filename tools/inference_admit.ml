@@ -22,6 +22,7 @@ module Inference_opcode_policy = Octra_vm.Inference_opcode_policy
 module Plan = Octra_vm.Inference_plan
 module Receipt = Octra_vm.Inference_receipt
 module Req = Octra_vm.Execution_requirement
+module Deployment = Octra_vm.Inference_model_deployment
 module Request = Octra_vm.Inference_request
 module Session = Octra_vm.Inference_session
 module Store = Octra_vm.Inference_store
@@ -35,6 +36,7 @@ type paths = {
   mutable request : string option;
   mutable input : string option;
   mutable model_ranges : string option;
+  mutable model_deployment : string option;
   mutable range_sources : (string * string) list;
   mutable run_session : bool;
   mutable scan_policy : bool;
@@ -57,6 +59,11 @@ type request_packet = {
 
 type model_packet = {
   model : Model.t;
+  declared_root : string option;
+}
+
+type deployment_packet = {
+  deployment : Deployment.t;
   declared_root : string option;
 }
 
@@ -466,6 +473,63 @@ let parse_model_ranges_json json =
         | _, _, _, Error error -> Error error))
   | _ -> Error "model ranges must be an object"
 
+let parse_model_deployment_json json =
+  match json with
+  | `Assoc fields ->
+    (match
+       check_known fields [
+         "model_root";
+         "store_root";
+         "tensor_index_root";
+         "tokenizer_root";
+         "numerical_profile_root";
+         "capability_set_root";
+         "default_program_root";
+         "model_deployment_root";
+       ]
+     with
+     | Error error -> Error error
+     | Ok () ->
+       (match
+          string_field "model_root" fields,
+          string_field "store_root" fields,
+          string_field "tensor_index_root" fields,
+          optional_nullable_string_field "tokenizer_root" fields,
+          string_field "numerical_profile_root" fields,
+          string_field "capability_set_root" fields,
+          optional_nullable_string_field "default_program_root" fields,
+          optional_string_field "model_deployment_root" fields
+        with
+        | Ok model_root,
+          Ok store_root,
+          Ok tensor_index_root,
+          Ok tokenizer_root,
+          Ok numerical_profile_root,
+          Ok capability_set_root_value,
+          Ok default_program_root,
+          Ok declared_root ->
+          Ok {
+            deployment = Deployment.{
+              model_root;
+              store_root;
+              tensor_index_root;
+              tokenizer_root;
+              numerical_profile_root;
+              capability_set_root = capability_set_root_value;
+              default_program_root;
+            };
+            declared_root;
+          }
+        | Error error, _, _, _, _, _, _, _
+        | _, Error error, _, _, _, _, _, _
+        | _, _, Error error, _, _, _, _, _
+        | _, _, _, Error error, _, _, _, _
+        | _, _, _, _, Error error, _, _, _
+        | _, _, _, _, _, Error error, _, _
+        | _, _, _, _, _, _, Error error, _
+        | _, _, _, _, _, _, _, Error error -> Error error))
+  | _ -> Error "model deployment must be an object"
+
 let parse_request_json json =
   match json with
   | `Assoc fields ->
@@ -552,6 +616,10 @@ let decode_program_code raw =
 
 let list_json values =
   `List (List.map (fun value -> `String value) values)
+
+let nullable_string_json = function
+  | None -> `Null
+  | Some value -> `String value
 
 let violation_json = function
   | Inference_opcode_policy.Missing_capability { detail; capability } ->
@@ -647,8 +715,9 @@ let read_range_source sources owner_root =
 
 let usage =
   "usage: inference_admit --program FILE --requirement FILE --target FILE \
-   --support FILE [--model-ranges FILE] [--range-source ROOT=FILE] \
-   [--request FILE] [--input FILE] [--run-session] [--scan-policy]"
+   --support FILE [--model-ranges FILE] [--model-deployment FILE] \
+   [--range-source ROOT=FILE] [--request FILE] [--input FILE] \
+   [--run-session] [--scan-policy]"
 
 let () =
   let paths =
@@ -660,6 +729,7 @@ let () =
       request = None;
       input = None;
       model_ranges = None;
+      model_deployment = None;
       range_sources = [];
       run_session = false;
       scan_policy = false;
@@ -672,6 +742,9 @@ let () =
   let set_request value = paths.request <- Some value in
   let set_input value = paths.input <- Some value in
   let set_model_ranges value = paths.model_ranges <- Some value in
+  let set_model_deployment value =
+    paths.model_deployment <- Some value
+  in
   let add_range_source value =
     let owner_root, path =
       split_pair value "--range-source requires <owner-root=file>"
@@ -691,6 +764,9 @@ let () =
       "--model-ranges",
       Arg.String set_model_ranges,
       "optional immutable model ranges JSON";
+      "--model-deployment",
+      Arg.String set_model_deployment,
+      "optional rooted model deployment JSON";
       "--range-source",
       Arg.String add_range_source,
       "authenticated local owner bytes, as owner-root=file";
@@ -724,6 +800,11 @@ let () =
     Option.map
       (fun path -> json_file path parse_model_ranges_json)
       paths.model_ranges
+  in
+  let deployment_packet =
+    Option.map
+      (fun path -> json_file path parse_model_deployment_json)
+      paths.model_deployment
   in
   let request_packet =
     Option.map
@@ -762,6 +843,46 @@ let () =
         | Error error, _
         | _, Error error -> fail error
         | Ok (), Ok () ->
+          let deployment_fields =
+            match deployment_packet with
+            | None -> []
+            | Some packet ->
+              (match
+                 Deployment.check
+                   ~target:target_packet.target
+                   ~requirement
+                   packet.deployment
+               with
+               | Error error -> fail (Deployment.error_message error)
+               | Ok () ->
+                 let model_deployment_root =
+                   Deployment.root packet.deployment
+                 in
+                 match
+                   check_declared_root
+                     "declared model deployment root"
+                     packet.declared_root
+                     model_deployment_root
+                 with
+                 | Error error -> fail error
+                 | Ok () ->
+                   [
+                     "model_deployment_root",
+                     `String model_deployment_root;
+                     "tensor_index_root",
+                     `String
+                       packet.deployment.Deployment.tensor_index_root;
+                     "capability_set_root",
+                     `String
+                       packet.deployment.Deployment.capability_set_root;
+                     "tokenizer_root",
+                     nullable_string_json
+                       packet.deployment.Deployment.tokenizer_root;
+                     "default_program_root",
+                     nullable_string_json
+                       packet.deployment.Deployment.default_program_root;
+                   ])
+          in
           let model_fields =
             match model_packet with
             | None -> []
@@ -837,14 +958,30 @@ let () =
                      (match input with
                       | None -> fail "--run-session requires --input"
                       | Some input ->
+                        let deployment =
+                          Option.map
+                            (fun packet -> packet.deployment)
+                            deployment_packet
+                        in
                         (match
-                           Plan.create
-                             ~admitted
-                             ~target:target_packet.target
-                             ~request:request_packet.request
-                             ~model:model_packet.model
-                             ~pins
-                             ~input
+                           match deployment with
+                           | None ->
+                             Plan.create
+                               ~admitted
+                               ~target:target_packet.target
+                               ~request:request_packet.request
+                               ~model:model_packet.model
+                               ~pins
+                               ~input
+                           | Some deployment ->
+                             Plan.create_with_deployment
+                               ~deployment
+                               ~admitted
+                               ~target:target_packet.target
+                               ~request:request_packet.request
+                               ~model:model_packet.model
+                               ~pins
+                               ~input
                          with
                          | Error error -> fail (Plan.error_message error)
                          | Ok plan ->
@@ -913,6 +1050,7 @@ let () =
                 `Bool false;
                 "entrypoints", entrypoints_json target_packet.target;
               ]
+              @ deployment_fields
               @ model_fields
               @ request_field
               @ session_fields)

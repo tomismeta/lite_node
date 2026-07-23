@@ -34,6 +34,7 @@ network admission, or publisher endorsement.
 | PVAC boundary | External backend remains the encrypted-workload boundary | No plain inference path invokes PVAC |
 | Opcode policy | Centralized classification | New opcodes enter through one policy |
 | Requirement admission | Exact root and limit matching | `octra-inference` emits matching roots |
+| Model deployment | Rooted model identity added as an optional admission packet | `octra-inference` emits canonical deployment and session bundles |
 | Target admission | Root binding module added | Wire target descriptor into a harness |
 | Request admission | Target and limit checks added | Feed runtime proof from admitted roots |
 | Immutable ranges | Local authenticated pinning and plan binding added | Back with resident reader |
@@ -182,6 +183,13 @@ semantic-inventory milestone.
 should be present and should bind the target's `model_root` and `store_root`
 to concrete immutable owner ranges before any runtime execution proof is
 claimed.
+`--model-deployment` is optional during the transition. When present it binds
+the target's model and store roots to a deployment descriptor containing
+tensor-index, numerical-profile, capability-set, tokenizer, and default-program
+roots. During `--run-session`, the deployment root is part of session identity.
+The metadata roots are committed, not interpreted. The default program root is
+reported as a convenience pointer only; the admitted target program remains the
+execution authority.
 `--range-source` supplies local owner bytes for the harness. The harness hashes
 those bytes, checks them against `owner_root`, slices the admitted immutable
 range, and pins it for the optional local session run. Target-owned programs
