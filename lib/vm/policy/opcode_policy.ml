@@ -149,6 +149,7 @@ let opcode_name = function
   | VM.SHIFT_ROUND_INPLACE _ -> "SHIFT_ROUND_INPLACE"
   | VM.MATMUL_FP _ -> "MATMUL_FP"
   | VM.RMSNORM_FP _ -> "RMSNORM_FP"
+  | VM.RMSNORM_FP_EPS _ -> "RMSNORM_FP_EPS"
   | VM.SILU_FP _ -> "SILU_FP"
   | VM.ELEMWISE_MUL_FP _ -> "ELEMWISE_MUL_FP"
   | VM.RESIDUAL_ADD_FP _ -> "RESIDUAL_ADD_FP"
@@ -169,6 +170,7 @@ let admission_class = function
   | VM.ROPE_APPLY _
   | VM.MATMUL_FP _
   | VM.RMSNORM_FP _
+  | VM.RMSNORM_FP_EPS _
   | VM.SILU_FP _
   | VM.ELEMWISE_MUL_FP _
   | VM.RESIDUAL_ADD_FP _

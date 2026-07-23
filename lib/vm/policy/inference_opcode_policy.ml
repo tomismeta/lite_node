@@ -93,7 +93,9 @@ let opcode_class = function
   | Contract_vm.LINEAR_Q1_G128_FP _ -> Requires "tensor.q1-g128"
   | Contract_vm.SIGMOID_FP _
   | Contract_vm.SOFTPLUS_FP _
-  | Contract_vm.SILU_FP _ -> Requires "tensor.strict-fp"
+  | Contract_vm.SILU_FP _
+  | Contract_vm.RMSNORM_FP_EPS _
+  | Contract_vm.ELEMWISE_MUL_FP _ -> Requires "tensor.strict-fp"
   | Contract_vm.CAUSAL_DEPTHWISE_CONV1D_FP _ ->
     Requires "sequence.causal-convolution"
   | Contract_vm.GATED_DELTA_RULE_FP _ -> Requires "sequence.delta-rule"

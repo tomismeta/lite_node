@@ -140,13 +140,18 @@ Generic Program admission still rejects it as inference-only.
 
 Legacy label: `rmsnorm_fp_eps`.
 
-Disposition: **primitive**, or a compatible extension of the existing
-`RMSNORM_FP` semantics if wire compatibility permits.
+Disposition: **primitive**.
 
 The existing fixed epsilon is insufficient for generated targets that declare
 a different numerical contract. Epsilon is therefore explicit and governed by
-the active numerical profile. Row-batched normalization is the same semantic
-family when it applies one gamma vector independently to bounded rows.
+the active numerical profile. The existing `RMSNORM_FP` is not a substitute:
+it bakes in a different epsilon and a different multiplication order, so it
+remains forbidden in plain inference even under `tensor.strict-fp`.
+
+Proof-branch status: `RMSNORM_FP_EPS` is a four-register in-place vector
+operation: address, count, gamma address, and an integer register carrying the
+binary64 epsilon bits. Row batching stays in generated target code by invoking
+the same vector primitive per row.
 
 ### L2 normalization
 
@@ -307,6 +312,11 @@ separate scheduler or RPC sampling policy to unrooted logits.
 Existing operations are reused only after bounds, memory authority, effort,
 non-finite, aliasing, and rollback audits. Being present in the current VM is
 not itself conformance.
+
+Proof-branch status: `ELEMWISE_MUL_FP` now has strict finite reads, checked
+large spans, exact in-place alias support, partial-overlap rejection, candidate
+writes, and a deliberate `3 * count` dynamic effort tariff. It is admitted only
+by the inference policy when `tensor.strict-fp` is present.
 
 Primitive specifications record analytic shape scaling before effort
 coefficients are chosen. Compressed linear work scales from declared output

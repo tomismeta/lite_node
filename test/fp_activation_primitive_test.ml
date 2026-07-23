@@ -331,7 +331,6 @@ let check_existing_fp_family_remains_forbidden () =
     "ROPE_APPLY", VM.ROPE_APPLY (0, 1, 2, 3);
     "MATMUL_FP", VM.MATMUL_FP (0, 1, 2, 3, 4, 5);
     "RMSNORM_FP", VM.RMSNORM_FP (0, 1, 2);
-    "ELEMWISE_MUL_FP", VM.ELEMWISE_MUL_FP (0, 1, 2);
     "RESIDUAL_ADD_FP", VM.RESIDUAL_ADD_FP (0, 1, 2);
     "ROPE_APPLY_FP", VM.ROPE_APPLY_FP (0, 1, 2, 3);
     "LOAD_INT8_FP", VM.LOAD_INT8_FP (0, 1, 2, 3, 4);

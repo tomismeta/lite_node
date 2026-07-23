@@ -69,6 +69,7 @@ let host_float_cases = [
   ("rope", "ROPE_APPLY", VM.ROPE_APPLY (0, 1, 2, 3));
   ("matmul-fp", "MATMUL_FP", VM.MATMUL_FP (0, 1, 2, 3, 4, 5));
   ("rmsnorm-fp", "RMSNORM_FP", VM.RMSNORM_FP (0, 1, 2));
+  ("rmsnorm-fp-eps", "RMSNORM_FP_EPS", VM.RMSNORM_FP_EPS (0, 1, 2, 3));
   ("silu-fp", "SILU_FP", VM.SILU_FP (0, 1));
   ("mul-fp", "ELEMWISE_MUL_FP", VM.ELEMWISE_MUL_FP (0, 1, 2));
   ("residual-fp", "RESIDUAL_ADD_FP", VM.RESIDUAL_ADD_FP (0, 1, 2));

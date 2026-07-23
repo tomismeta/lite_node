@@ -19,6 +19,11 @@
  (libraries octra_vm))
 
 (test
+ (name fp_normalization_primitive_test)
+ (modules fp_normalization_primitive_test)
+ (libraries octra_vm digestif digestif.c))
+
+(test
  (name causal_depthwise_conv_primitive_test)
  (modules causal_depthwise_conv_primitive_test)
  (libraries octra_vm inference_test_support digestif digestif.c))

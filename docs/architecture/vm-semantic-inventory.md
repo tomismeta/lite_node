@@ -130,7 +130,7 @@ instruction type or execution loop.
 
 ## Current Compute Matrix
 
-The current inference-adjacent surface contains two blob instructions and 45
+The current inference-adjacent surface contains two blob instructions and 46
 compute instructions. The labels below describe present admission behavior, not
 the intended future numerical profiles.
 
@@ -145,8 +145,9 @@ the intended future numerical profiles.
 | Strict-FP activation proof | 3 | Rejected as host/profiled float | Accepted by type flow |
 | Causal depthwise proof | 1 | Rejected as host/profiled float | Accepted by type flow |
 | Delta-rule proof | 1 | Rejected as host/profiled float | Accepted by type flow |
+| Strict-FP normalization/multiply proof | 2 | Rejected as host/profiled float | Accepted by type flow |
 | Unclassified Q16 | 2 | Allowed | Unsupported by type flow |
-| FP | 10 | Rejected as host float | Rejected as host float |
+| FP | 9 | Rejected as host float | Rejected as host float |
 
 The groups contain:
 
@@ -165,33 +166,39 @@ The groups contain:
 - Strict-FP activation proof: `SIGMOID_FP`, `SOFTPLUS_FP`, and `SILU_FP`.
 - Causal depthwise proof: `CAUSAL_DEPTHWISE_CONV1D_FP`.
 - Delta-rule proof: `GATED_DELTA_RULE_FP`.
+- Strict-FP normalization/multiply proof: `RMSNORM_FP_EPS` and
+  `ELEMWISE_MUL_FP`.
 - Unclassified Q16: `MATMUL_Q16` and `SHIFT_ROUND_INPLACE`.
-- FP: `MATMUL_FP`, `RMSNORM_FP`, `ELEMWISE_MUL_FP`, `RESIDUAL_ADD_FP`,
-  `ROPE_APPLY_FP`, `LOAD_INT8_FP`, `VECDOT_FP`, `ARGMAX_FP`,
-  `ATTENTION_KV_FP`, and `APPEND_VEC_FP`.
+- FP: `MATMUL_FP`, `RMSNORM_FP`, `RESIDUAL_ADD_FP`, `ROPE_APPLY_FP`,
+  `LOAD_INT8_FP`, `VECDOT_FP`, `ARGMAX_FP`, `ATTENTION_KV_FP`, and
+  `APPEND_VEC_FP`.
 
 "Allowed" means the current opcode policy does not reject the instruction. The
 normal verifier and execution checks still apply.
 
 The supporting surfaces have different coverage:
 
-- bytecode encoding, decoding, and register verification cover all 47
+- bytecode encoding, decoding, and register verification cover all 48
   inference-adjacent instructions;
-- `oct_gen.ml` can lower builtins to all 47 instructions;
-- the assembler renderer covers all 47, while its parser covers blobs, the
+- `oct_gen.ml` can lower builtins to all 48 instructions;
+- the assembler renderer covers all 48, while its parser covers blobs, the
   13 Typed Q16 instructions, Q1-G128 proof opcode, F32 ingress proof opcode,
   the three strict-FP activation proof opcodes, the causal depthwise proof
-  opcode, and the delta-rule proof opcode;
+  opcode, the delta-rule proof opcode, and the strict-FP
+  normalization/multiply proof opcodes;
 - strict runtime operand checking covers the Typed Q16 group, the Q1-G128 proof
   opcode, the F32 ingress proof opcode, the strict-FP activation proof opcodes,
-  the causal depthwise proof opcode, the delta-rule proof opcode, and selected
-  data loaders, but not the complete compute surface;
+  the causal depthwise proof opcode, the delta-rule proof opcode, the strict-FP
+  normalization/multiply proof opcodes, and selected data loaders, but not the
+  complete compute surface;
 - Program type flow covers the 13 Typed Q16 instructions, the Q1-G128 proof
   opcode, the F32 ingress proof opcode, the strict-FP activation proof opcodes,
-  the causal depthwise proof opcode, and the delta-rule proof opcode; and
+  the causal depthwise proof opcode, the delta-rule proof opcode, and the
+  strict-FP normalization/multiply proof opcodes; and
 - the effect scan assigns memory read/write to the Q1-G128 proof opcode and
   strict-FP activation proof opcodes, memory read/write to the causal depthwise
-  proof opcode and delta-rule proof opcode, and memory write to the F32 ingress
+  proof opcode, delta-rule proof opcode, and strict-FP
+  normalization/multiply proof opcodes, and memory write to the F32 ingress
   proof opcode, but still assigns no memory or blob effect to the older tensor
   instructions.
 

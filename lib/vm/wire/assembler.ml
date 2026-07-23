@@ -162,6 +162,10 @@ let parse_line line =
       Contract_vm.GATED_DELTA_RULE_FP
         (r 0, r 1, r 2, r 3, r 4, r 5, r 6, r 7, r 8, r 9, r 10, r 11,
          r 12, r 13)
+    | "RMSNORM_FP_EPS", [_;_;_;_] ->
+      Contract_vm.RMSNORM_FP_EPS (r 0, r 1, r 2, r 3)
+    | "ELEMWISE_MUL_FP", [_;_;_] ->
+      Contract_vm.ELEMWISE_MUL_FP (r 0, r 1, r 2)
     | "FHE_LOAD_PK", [_;_] -> Contract_vm.FHE_LOAD_PK (r 0, r 1)
     | "FHE_ADD", [_;_;_;_] -> Contract_vm.FHE_ADD (r 0, r 1, r 2, r 3)
     | "FHE_SUB", [_;_;_;_] -> Contract_vm.FHE_SUB (r 0, r 1, r 2, r 3)
@@ -361,6 +365,7 @@ let emit_instr = function
   | Contract_vm.SHIFT_ROUND_INPLACE (a,n,b) -> Printf.sprintf "SHIFT_ROUND_INPLACE %s, %s, %s" (emit_reg a) (emit_reg n) (emit_reg b)
   | Contract_vm.MATMUL_FP (d,l,r,m,k,n) -> Printf.sprintf "MATMUL_FP %s, %s, %s, %s, %s, %s" (emit_reg d) (emit_reg l) (emit_reg r) (emit_reg m) (emit_reg k) (emit_reg n)
   | Contract_vm.RMSNORM_FP (a,n,g) -> Printf.sprintf "RMSNORM_FP %s, %s, %s" (emit_reg a) (emit_reg n) (emit_reg g)
+  | Contract_vm.RMSNORM_FP_EPS (a,n,g,e) -> Printf.sprintf "RMSNORM_FP_EPS %s, %s, %s, %s" (emit_reg a) (emit_reg n) (emit_reg g) (emit_reg e)
   | Contract_vm.SILU_FP (a,n) -> Printf.sprintf "SILU_FP %s, %s" (emit_reg a) (emit_reg n)
   | Contract_vm.ELEMWISE_MUL_FP (d,s,n) -> Printf.sprintf "ELEMWISE_MUL_FP %s, %s, %s" (emit_reg d) (emit_reg s) (emit_reg n)
   | Contract_vm.RESIDUAL_ADD_FP (d,s,n) -> Printf.sprintf "RESIDUAL_ADD_FP %s, %s, %s" (emit_reg d) (emit_reg s) (emit_reg n)

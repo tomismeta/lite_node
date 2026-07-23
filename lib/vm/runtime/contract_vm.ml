@@ -148,6 +148,7 @@ type instr =
   | SHIFT_ROUND_INPLACE of reg * reg * reg
   | MATMUL_FP of reg * reg * reg * reg * reg * reg
   | RMSNORM_FP of reg * reg * reg
+  | RMSNORM_FP_EPS of reg * reg * reg * reg
   | SILU_FP of reg * reg
   | ELEMWISE_MUL_FP of reg * reg * reg
   | RESIDUAL_ADD_FP of reg * reg * reg
@@ -347,6 +348,7 @@ let effort_cost = function
   | SHIFT_ROUND_INPLACE _ -> 5
   | MATMUL_FP _ -> 200
   | RMSNORM_FP _ -> 50
+  | RMSNORM_FP_EPS _ -> 50
   | SILU_FP _ -> 20
   | ELEMWISE_MUL_FP _ -> 10
   | RESIDUAL_ADD_FP _ -> 10
@@ -911,6 +913,13 @@ let strict_operands st = function
   | SOFTPLUS_FP (addr, count)
   | SILU_FP (addr, count) ->
     is_numeric (getr st addr) && is_numeric (getr st count)
+  | RMSNORM_FP_EPS (addr, count, gamma, epsilon) ->
+    is_numeric (getr st addr)
+    && is_numeric (getr st count)
+    && is_numeric (getr st gamma)
+    && (match getr st epsilon with VInt z -> Z.fits_int64 z | _ -> false)
+  | ELEMWISE_MUL_FP (dst, source, count) ->
+    List.for_all (fun reg -> is_numeric (getr st reg)) [dst; source; count]
   | CAUSAL_DEPTHWISE_CONV1D_FP (dst, input, kernel, timesteps, channels, width) ->
     List.for_all (fun reg -> is_numeric (getr st reg))
       [dst; input; kernel; timesteps; channels; width]
@@ -968,6 +977,13 @@ let read_fp64_array mem addr n =
   let values = Array.init n (fun i -> mem_read_fp64 mem (addr + i)) in
   if Array.for_all Option.is_some values then Some (Array.map Option.get values)
   else None
+
+let read_fp64_reg st reg =
+  match getr st reg with
+  | VInt z when Z.fits_int64 z ->
+    let value = Int64.float_of_bits (Z.to_int64 z) in
+    if finite_fp64 value then Some value else None
+  | _ -> None
 
 let gated_delta_rule_effort timesteps v_heads value_dim key_dim =
   let scale_product factors scale =
@@ -2517,6 +2533,46 @@ let exec_one st op =
         true
       end
     end
+  | RMSNORM_FP_EPS (rs_addr, rs_n, rs_gamma, rs_epsilon) ->
+    (match read_int st rs_addr, read_int st rs_n, read_int st rs_gamma,
+           read_fp64_reg st rs_epsilon with
+     | Some addr, Some n, Some gamma, Some epsilon
+       when n > 0 && epsilon > 0.0 ->
+       if not
+            (List.for_all
+               (fun (addr, n) -> valid_large_mem_span addr n)
+               [addr, n; gamma, n])
+          || ranges_overlap addr n gamma n then
+         revert st
+       else if not (add_dyn_product st [n; 4] 1) then
+         revert st
+       else
+         (match read_fp64_array st.memory.data addr n,
+                read_fp64_array st.memory.data gamma n with
+          | Some input_values, Some gamma_values ->
+            let sum_sq =
+              Array.fold_left
+                (fun acc value -> acc +. (value *. value))
+                0.0
+                input_values
+            in
+            let mean_sq = sum_sq /. float_of_int n in
+            let inv_rms = 1.0 /. sqrt (mean_sq +. epsilon) in
+            let output =
+              Array.init n (fun i ->
+                input_values.(i) *. inv_rms *. gamma_values.(i))
+            in
+            if not (finite_fp64 sum_sq && finite_fp64 inv_rms)
+               || not (Array.for_all finite_fp64 output) then
+              revert st
+            else begin
+              for i = 0 to n - 1 do
+                mem_set_fp64 st.memory.data (addr + i) output.(i)
+              done;
+              true
+            end
+          | _ -> revert st)
+     | _ -> revert st)
   | SILU_FP (rs_addr, rs_n) ->
     (match read_int st rs_addr, read_int st rs_n with
      | Some addr, Some n ->
@@ -2524,21 +2580,32 @@ let exec_one st op =
          x *. (1.0 /. (1.0 +. exp (-. x))))
      | _ -> revert st)
   | ELEMWISE_MUL_FP (rs_dst, rs_src, rs_n) ->
-    let dst = Z.to_int (to_z (getr st rs_dst)) in
-    let src = Z.to_int (to_z (getr st rs_src)) in
-    let n = Z.to_int (to_z (getr st rs_n)) in
-    if n <= 0 || n > 1_048_576 then revert st
-    else begin
-      if not (add_dyn_effort st n) then revert st
-      else begin
-        for i = 0 to n - 1 do
-          let a = mem_get_fp64 st.memory.data (dst + i) in
-          let b = mem_get_fp64 st.memory.data (src + i) in
-          mem_set_fp64 st.memory.data (dst + i) (a *. b)
-        done;
-        true
-      end
-    end
+    (match read_int st rs_dst, read_int st rs_src, read_int st rs_n with
+     | Some dst, Some src, Some n when n > 0 ->
+       if not
+            (List.for_all
+               (fun (addr, n) -> valid_large_mem_span addr n)
+               [dst, n; src, n])
+          || (ranges_overlap dst n src n && not (same_range dst n src n)) then
+         revert st
+       else if not (add_dyn_product st [n; 3] 1) then
+         revert st
+       else
+         (match read_fp64_array st.memory.data dst n,
+                read_fp64_array st.memory.data src n with
+          | Some dst_values, Some src_values ->
+            let output =
+              Array.init n (fun i -> dst_values.(i) *. src_values.(i))
+            in
+            if not (Array.for_all finite_fp64 output) then revert st
+            else begin
+              for i = 0 to n - 1 do
+                mem_set_fp64 st.memory.data (dst + i) output.(i)
+              done;
+              true
+            end
+          | _ -> revert st)
+     | _ -> revert st)
   | RESIDUAL_ADD_FP (rs_dst, rs_src, rs_n) ->
     let dst = Z.to_int (to_z (getr st rs_dst)) in
     let src = Z.to_int (to_z (getr st rs_src)) in
@@ -3408,6 +3475,7 @@ module Verifier = struct
             | SHIFT_ROUND_INPLACE (a,n,b) -> check_regs pc [a;n;b]
             | MATMUL_FP (d,l,r,m,k,n) -> check_regs pc [d;l;r;m;k;n]
             | RMSNORM_FP (a,n,g) -> check_regs pc [a;n;g]
+            | RMSNORM_FP_EPS (a,n,g,e) -> check_regs pc [a;n;g;e]
             | SILU_FP (a,n) -> check_regs pc [a;n]
             | ELEMWISE_MUL_FP (d,s,n) -> check_regs pc [d;s;n]
             | RESIDUAL_ADD_FP (d,s,n) -> check_regs pc [d;s;n]

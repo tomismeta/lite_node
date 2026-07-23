@@ -185,7 +185,8 @@ The accepted LiteNode rerun is recorded beside the original artifact as
 The same proof branch now exposes the standalone activation frontier as
 `SIGMOID_FP`, `SOFTPLUS_FP`, and `SILU_FP`, gated in plain inference by explicit
 `tensor.strict-fp`. The gate is enumerated opcode-by-opcode; it does not
-authorize `RMSNORM_FP` or the rest of the older host-floating-point family.
+authorize fixed-epsilon `RMSNORM_FP` or the rest of the older
+host-floating-point family.
 
 ## Schedule Frontier Bundle
 
@@ -398,18 +399,18 @@ smoke proof, reference-output canary, generic-`MATMUL_FP` primitive canary,
 standalone Q1 fixture package, direct Q1 canary, order-3 frontier canary, or
 order-4 scalar evidence package. Those now exist.
 
-The next useful artifact is an executable order-4 canary that emits
-`GATED_DELTA_RULE_FP` directly, requests `sequence.delta-rule`, runs
-`--scan-policy`, then runs `--run-session` when admitted. It should compare the
-VM recurrent output and next-state bytes to the existing order-4 evidence roots
-and keep all Bonsai/Qwen/tokenizer details in sidecars. It should also clean up
-the stale `model_binding_pending` frontier metadata noted in the first evidence
-package.
+The next useful artifact is the refreshed order-5 canary bundle. It should emit
+`RMSNORM_FP_EPS` for explicit-epsilon RMSNorm and `ELEMWISE_MUL_FP` for the
+gated multiply path, request `tensor.strict-fp`, run `--scan-policy`, then run
+`--run-session` when admitted. It should compose row-batched RMSNorm by calling
+the four-register vector primitive once per row, compare roots against the
+current order-5 evidence package, and keep all Bonsai/Qwen/tokenizer details in
+sidecars.
 
 Preserve the same model-neutral packet boundary, keep Bonsai/Qwen/tokenizer
 details in sidecars, and classify every failure as a packet, admission-policy,
 missing-primitive, data-binding, effort/limit, determinism, or harness-only gap.
-Only after the executable order-4 canary fails for a classified LiteNode reason
+Only after the executable order-5 canary fails for a classified LiteNode reason
 should the VM add or revise the primitive.
 
 ## Rebuild Acceptance Bar

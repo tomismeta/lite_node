@@ -245,21 +245,17 @@ failures as packet, admission-policy, missing-primitive, data-binding,
 effort/limit, determinism, or harness-only.
 
 Current LiteNode proof branch includes `LOAD_F32_LE_FP`, `SIGMOID_FP`,
-`SOFTPLUS_FP`, `SILU_FP`, and `CAUSAL_DEPTHWISE_CONV1D_FP`. The order-3
-Bonsai frontier has been re-emitted against LiteNode `d9aa419`; all four
-canaries were accepted, ran, and matched roots. The next frontier bundle should
-derive the next generated Bonsai schedule frontier after order `3`, emit
-independent canaries per generic operation family, and keep using
-`--scan-policy` before `--run-session`.
+`SOFTPLUS_FP`, `SILU_FP`, `CAUSAL_DEPTHWISE_CONV1D_FP`,
+`GATED_DELTA_RULE_FP`, `RMSNORM_FP_EPS`, and `ELEMWISE_MUL_FP`.
 
-The first frontier after order `3` is order-4 `gated_delta_net_fp`. Its scalar
-evidence package now defines the reusable delta-rule transition and the LiteNode
-side implements `GATED_DELTA_RULE_FP` behind the `sequence.delta-rule`
-capability. The next `octra-inference` artifact should emit a real order-4
-canary using that opcode, run `--scan-policy`, run `--run-session` when
-admitted, and compare recurrent output plus next-state roots against the
-existing evidence package. Keep Q/K normalization, projection outputs,
-tokenizer, and Bonsai/Qwen metadata in sidecars, not `target.json`.
+The next `octra-inference` artifact should refresh the order-5 frontier against
+this LiteNode branch. Emit real canaries for explicit-epsilon RMSNorm and
+elementwise multiply, request `tensor.strict-fp`, run `--scan-policy`, run
+`--run-session` when admitted, and compare roots against the existing order-5
+evidence package. Compose row-batched RMSNorm by calling
+`rmsnorm_fp_eps(addr, n, gamma, epsilon_bits)` once per row. Keep Q/K
+normalization, projection outputs, tokenizer, and Bonsai/Qwen metadata in
+sidecars, not `target.json`.
 
 ## Current Interop Check
 

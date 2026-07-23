@@ -38,7 +38,7 @@ network admission, or publisher endorsement.
 | Request admission | Target and limit checks added | Feed runtime proof from admitted roots |
 | Immutable ranges | Local authenticated pinning and plan binding added | Back with resident reader |
 | Ontology guard | Runtime source scan added | No model-family names enter VM code |
-| Tensor substrate | Direct Q1-G128, order-3 frontier, and local order-4 delta-rule primitive accepted in LiteNode tests | Re-emit the order-4 canary from `octra-inference` and run it end-to-end |
+| Tensor substrate | Direct Q1-G128, order-3 frontier, order-4 delta rule, and local order-5 RMSNorm/multiply primitives accepted in LiteNode tests | Re-emit the order-5 canaries from `octra-inference` and run them end-to-end |
 | Sessions | Plan-bound local candidate runner added | Add node residency and scheduler |
 | Receipts | Output and candidate roots added locally | Add full diagnostics object |
 
@@ -80,8 +80,11 @@ evidence remain outside LiteNode.
    consumes prepared q/k/v/log-decay/beta/state tensors, requires
    `sequence.delta-rule`, matches five scalar golden fixtures, and matches the
    Bonsai layer-0 recurrent output and next-state hashes against the VPS
-   evidence bundle. **Next evidence gate:** `octra-inference` must re-emit the
-   order-4 canary with the real opcode and run the same scan/session loop.
+   evidence bundle. **Complete locally for order-5 implementation:**
+   `RMSNORM_FP_EPS` carries explicit binary64 epsilon bits and
+   `ELEMWISE_MUL_FP` is hardened for strict finite, candidate-write execution.
+   **Next evidence gate:** `octra-inference` must re-emit the order-5 canaries
+   with the real opcodes and run the same scan/session loop.
 5. Add the minimum local session runner: open, one advance, status, finalize,
    and cancel with candidate rollback. **Complete locally:** the runner now
    consumes one validated execution plan and emits output and candidate roots.
@@ -203,8 +206,9 @@ When `--run-session` is present, successful output also includes:
 The current local session fixtures prove plan validation, authenticated input
 and range binding, candidate isolation, lifecycle transitions, output roots, and
 diagnostic candidate roots. They now include VM-native Q1-G128, order-3 Bonsai
-frontier canaries, and LiteNode-side order-4 delta-rule evidence. They do not
-yet claim full Bonsai graph execution or resident model state.
+frontier canaries, LiteNode-side order-4 delta-rule evidence, and local
+order-5 RMSNorm/multiply evidence. They do not yet claim full Bonsai graph
+execution or resident model state.
 
 The root fixture test locks the current canonical encodings for the
 requirement, admitted program, target, request, session, and receipt objects.

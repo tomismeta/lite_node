@@ -23,6 +23,8 @@ let of_instr = function
   | Contract_vm.SIGMOID_FP _
   | Contract_vm.SOFTPLUS_FP _
   | Contract_vm.SILU_FP _
+  | Contract_vm.RMSNORM_FP_EPS _
+  | Contract_vm.ELEMWISE_MUL_FP _
   | Contract_vm.CAUSAL_DEPTHWISE_CONV1D_FP _
   | Contract_vm.GATED_DELTA_RULE_FP _ -> [Memory_read; Memory_write]
   | Contract_vm.SLOAD _
