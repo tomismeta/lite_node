@@ -47,13 +47,18 @@ network admission, or publisher endorsement.
 `octra-inference` produced a prompt-token candidate bundle:
 
 ```text
-/home/exedev/evidence/octra-inference/bonsai-prompt-token-demo-bundle-6fe1a88-20260723-052433/prompt-token-demo-bundle.cjson
+/home/exedev/evidence/octra-inference/bonsai-prompt-token-demo-bundle-d400fa6-20260723-073100/prompt-token-demo-bundle.cjson
 ```
 
 The prompt was `In a hidden network, the model whispered`. The reference path
 generated token id `310`, decoded as ` to`. The bundle binds that prompt-token
 reference to the matched VM-native order-6 prefix proof; it does not claim a
 devnet consensus receipt or full LiteNode-owned sampling.
+
+The bundle was emitted from clean `octra-inference` commit
+`5759d926cb715c968071f48195a5da71b6a8f7b7` and uses LiteNode `d400fa6` with
+inference harness SHA-256
+`0ab7061fc43405f2f2623b71376ff56ae0eb00fc16aaa04578830354b1ce9fbc`.
 
 The final VM session output root was:
 
