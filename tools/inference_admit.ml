@@ -1016,6 +1016,9 @@ let () =
                                       `String (Receipt.root final_receipt);
                                       "output_root",
                                       `String (Session.output_root finalized);
+                                      "output_prefix_root",
+                                      `String
+                                        (Session.output_prefix_root finalized);
                                       "candidate_root",
                                       `String (Session.candidate_root finalized);
                                       "effort_delta",

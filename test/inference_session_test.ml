@@ -40,8 +40,8 @@ let limits =
   Req.{
     max_model_bytes = 64;
     max_view_bytes = 64;
-    max_session_bytes = 512;
-    max_scratch_bytes = 0;
+    max_session_bytes = 768;
+    max_scratch_bytes = 128;
     max_output_bytes = 32;
     max_advance_effort = 16;
   }
@@ -141,10 +141,22 @@ let check_lifecycle () =
   let model = model target in
   let plan, session = open_session admitted target request model in
   check "initial sequence" (Session.sequence session = 0);
+  check "initial position" (Session.logical_position session = 0);
+  check
+    "no committed target state"
+    (Session.committed_target_state_root session = None);
+  let open_output_prefix_root = Session.output_prefix_root session in
   match Session.advance ~plan ~expected_sequence:0 session with
   | Error error -> failwith (Session.error_message error)
   | Ok (advanced, receipt) ->
     check "advanced sequence" (Session.sequence advanced = 1);
+    check "advanced position" (Session.logical_position advanced = 1);
+    check
+      "output prefix changed"
+      (not
+         (String.equal
+            (Session.output_prefix_root advanced)
+            open_output_prefix_root));
     check "effort committed" (Session.committed_effort advanced > 0);
     check "advance effort delta" (receipt.Receipt.effort_delta > 0);
     check "receipt root" (String.length (Receipt.root receipt) = 64);
@@ -235,18 +247,18 @@ let check_session_open_limit () =
   | _ -> failwith "expected open session limit rejection"
 
 let check_session_advance_limit () =
-  let plan = limited_plan 381 in
+  let plan = limited_plan 525 in
   let session =
     match Session.open_session ~plan with
     | Ok session -> session
     | Error error -> failwith (Session.error_message error)
   in
   match Session.advance ~plan ~expected_sequence:0 session with
-  | Error (Session.Session_limit_exceeded (_, 381)) -> ()
+  | Error (Session.Session_limit_exceeded (_, 525)) -> ()
   | _ -> failwith "expected advance session limit rejection"
 
 let check_session_finalize_limit () =
-  let plan = limited_plan 385 in
+  let plan = limited_plan 529 in
   let session =
     match Session.open_session ~plan with
     | Ok session -> session
@@ -258,18 +270,18 @@ let check_session_finalize_limit () =
     | Error error -> failwith (Session.error_message error)
   in
   match Session.finalize ~expected_sequence:1 advanced with
-  | Error (Session.Session_limit_exceeded (_, 385)) -> ()
+  | Error (Session.Session_limit_exceeded (_, 529)) -> ()
   | _ -> failwith "expected finalize session limit rejection"
 
 let check_session_cancel_limit () =
-  let plan = limited_plan 381 in
+  let plan = limited_plan 525 in
   let session =
     match Session.open_session ~plan with
     | Ok session -> session
     | Error error -> failwith (Session.error_message error)
   in
   match Session.cancel ~expected_sequence:0 session with
-  | Error (Session.Session_limit_exceeded (_, 381)) -> ()
+  | Error (Session.Session_limit_exceeded (_, 525)) -> ()
   | _ -> failwith "expected cancel session limit rejection"
 
 let () =

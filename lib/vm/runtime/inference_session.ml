@@ -27,7 +27,10 @@ type t = {
   session_limit : int;
   sequence : int;
   phase : phase;
+  logical_position : int;
+  committed_target_state_root : string option;
   output_root : string;
+  output_prefix_root : string;
   candidate_root : string;
   committed_effort : int;
 }
@@ -71,7 +74,13 @@ let identity_json session =
     @ [
       "sequence", `Int session.sequence;
       "phase", `String (phase_name session.phase);
+      "logical_position", `Int session.logical_position;
+      "committed_target_state_root",
+      (match session.committed_target_state_root with
+       | None -> `Null
+       | Some root -> `String root);
       "output_root", `String session.output_root;
+      "output_prefix_root", `String session.output_prefix_root;
       "committed_effort", `Int session.committed_effort;
     ])
 
@@ -89,6 +98,25 @@ let check_session_size session =
     Error (Session_limit_exceeded (length, session.session_limit))
   else
     Ok session
+
+let initial_output_prefix_root request_root =
+  Digestif.SHA256.(
+    digest_string
+      ("octra:inference:output-prefix\000" ^ request_root ^ "\000open")
+    |> to_hex)
+
+let output_prefix_step_json ~prior_root ~output_root =
+  `Assoc [
+    "prior_root", `String prior_root;
+    "output_root", `String output_root;
+  ]
+
+let append_output_prefix ~prior_root ~output_root =
+  let payload =
+    Yojson.Safe.to_string (output_prefix_step_json ~prior_root ~output_root)
+  in
+  Digestif.SHA256.(
+    digest_string ("octra:inference:output-prefix\000" ^ payload) |> to_hex)
 
 let initial_output_root request_root =
   Digestif.SHA256.(
@@ -161,7 +189,10 @@ let open_session ~plan =
     session_limit = limits.Execution_requirement.max_session_bytes;
     sequence = 0;
     phase = Open;
+    logical_position = 0;
+    committed_target_state_root = None;
     output_root = initial_output_root request_root;
+    output_prefix_root = initial_output_prefix_root request_root;
     candidate_root = initial_candidate_root ~request_root ~model_ranges_root;
     committed_effort = 0;
   }
@@ -197,7 +228,12 @@ let advance ~plan ~expected_sequence session =
                session with
                sequence = session.sequence + 1;
                phase = Advanced;
+               logical_position = session.logical_position + 1;
                output_root = execution.output_root;
+               output_prefix_root =
+                 append_output_prefix
+                   ~prior_root:session.output_prefix_root
+                   ~output_root:execution.output_root;
                candidate_root = execution.candidate_root;
                committed_effort;
              } in
@@ -236,6 +272,9 @@ let cancel ~expected_sequence session =
 
 let sequence session = session.sequence
 let phase session = session.phase
+let logical_position session = session.logical_position
+let committed_target_state_root session = session.committed_target_state_root
+let output_prefix_root session = session.output_prefix_root
 let output_root session = session.output_root
 let candidate_root session = session.candidate_root
 let committed_effort session = session.committed_effort

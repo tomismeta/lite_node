@@ -41,7 +41,7 @@ let limits =
   Req.{
     max_model_bytes = 64;
     max_view_bytes = 16;
-    max_session_bytes = 512;
+    max_session_bytes = 768;
     max_scratch_bytes = 0;
     max_output_bytes = 32;
     max_advance_effort = 16;

@@ -49,6 +49,7 @@ model_ranges_root = H("octra:inference:model-ranges\0" || model_ranges)
 request_root     = H("octra:inference:request\0"     || request)
 session_abi_root = H("octra:inference:session-abi\0" || session_abi)
 session_root     = H("octra:inference:session\0"     || session)
+output_prefix_root = H("octra:inference:output-prefix\0" || output_prefix)
 checkpoint_root  = H("octra:inference:checkpoint\0"  || checkpoint)
 receipt_root     = H("octra:inference:receipt\0"     || receipt)
 ```
@@ -225,6 +226,7 @@ A canonical session contains only logical progress:
 - target root;
 - request root;
 - model-ranges root;
+- optional model-deployment root;
 - sequence counter;
 - phase and logical position;
 - append-only output-prefix root;
@@ -251,15 +253,34 @@ ordinary KV or recurrent caches.
 When committed target state exists, its payload is durable canonical session
 data. It is not stored only in an optional checkpoint.
 
-The first local runner accepts at most one successful advance. Its candidate
-root is the canonical VM memory payload retained at the transition boundary for
-diagnostics. It is not committed target state and not part of the session root.
-Multi-advance execution requires a canonical position and either replayable
-target progress or explicitly committed target state.
+The first local runner accepts at most one successful advance. Its logical
+position starts at zero and increments after that committed transition. Its
+candidate root is the canonical VM memory payload retained at the transition
+boundary for diagnostics. It is not committed target state and not part of the
+session root. Multi-advance execution requires the target ABI to consume prior
+canonical progress or explicitly committed target state.
 
-The output prefix is append-only and hash-chained. A successful advance may
-append output, replace logical phase or position, increase cumulative effort,
-and increment the sequence exactly once.
+The output prefix is append-only and hash-chained from target-owned output
+roots. A successful advance may append output, replace logical phase or
+position, increase cumulative effort, and increment the sequence exactly once.
+Generated tokens are target outputs under this prefix, not a separate
+model-specific session field. Receipts chain through their prior and next
+session roots; there is no separate receipt-chain root in session identity.
+The initial prefix is:
+
+```text
+H("octra:inference:output-prefix\0" || request_root || "\0open")
+```
+
+Each committed output appends:
+
+```json
+{"prior_root":"<previous output prefix root>","output_root":"<transition output root>"}
+```
+
+under the same `octra:inference:output-prefix` domain. The transition
+`output_root` itself remains the fixed output ABI root and is reported
+separately from `output_prefix_root`.
 
 Receipts expose `effort_delta`, the effort consumed by that transition. The
 session retains cumulative committed effort for admission and accounting; it

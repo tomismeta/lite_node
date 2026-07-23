@@ -40,8 +40,8 @@ let limits =
   Req.{
     max_model_bytes = 64;
     max_view_bytes = 64;
-    max_session_bytes = 512;
-    max_scratch_bytes = 0;
+    max_session_bytes = 768;
+    max_scratch_bytes = 128;
     max_output_bytes = 32;
     max_advance_effort = 16;
   }
@@ -152,6 +152,24 @@ let open_session ?deployment admitted target request model =
   | Ok session -> session
   | Error error -> failwith (Session.error_message error)
 
+let advance_session session admitted target request model =
+  let pins =
+    match Store.pin ~limits ~read:(fun root ->
+      if String.equal root (sha256 "session range owner")
+      then Some "session range owner"
+      else None) model with
+    | Ok pins -> pins
+    | Error error -> failwith (Store.error_message error)
+  in
+  let plan =
+    match Plan.create ~admitted ~target ~request ~model ~pins ~input:"" with
+    | Ok plan -> plan
+    | Error error -> failwith (Plan.error_message error)
+  in
+  match Session.advance ~plan ~expected_sequence:0 session with
+  | Ok value -> value
+  | Error error -> failwith (Session.error_message error)
+
 let check_vectors () =
   let admitted = admitted () in
   let target = target admitted in
@@ -172,7 +190,7 @@ let check_vectors () =
     "requirement root vector"
     (String.equal
        (Req.root requirement)
-       "50e2dd63cf246f9d30c3f383b293f6aad6ead6282b55fb183c32c1387db9f9b7");
+       "fd73c1d4bca4d2277a2cef004b24951f3573b2fdfa3be0da39d156c7f524831d");
   check
     "capability set root vector"
     (String.equal
@@ -182,12 +200,12 @@ let check_vectors () =
     "target root vector"
     (String.equal
        (Target.root target)
-       "f7cfe92a4089b13cb7b6ff5eb4f28e39d7dd9c27fbfdddba71aeccd80394bc10");
+       "b6a6431942fbb39d6fb6f604e7e0e3f538a8aecc079df729dc206bd5038aa5d2");
   check
     "request root vector"
     (String.equal
        (Request.root request)
-       "0a54434081377bdfb3b5b967c60da45f7e2a314d2d610d4f54ce79ecc4793881");
+       "6bf2ad8f48b0d6b96b598690c5a843b66d004f1e60e504092571493fb37417e3");
   check
     "model deployment root vector"
     (String.equal
@@ -197,12 +215,46 @@ let check_vectors () =
     "session root vector"
     (String.equal
        (Session.root (open_session admitted target request model))
-       "1262abf9cb4a95b07349d79b0646cca8ae09e7df7e12a484476bcbe0358f3d70");
+       "b3ec62bbd56fbce177675b4ac7f7b7df7d555f9db1bb2fdbdfb772c1c35b2a3a");
   check
     "deployment-bound session root vector"
     (String.equal
        (Session.root (open_session ~deployment admitted target request model))
-       "7419431c2ece42cff044c5b13f20dae0583f8bbaa56ffdeab36f9e8cc431fad9");
+       "dcb00397858745b916e4d6e460c2bd5b02c591d92cd2caec0b2c7f33b5f2f7db");
+  let session = open_session admitted target request model in
+  check
+    "initial output root vector"
+    (String.equal
+       (Session.output_root session)
+       "49041bfd69f0317c64f68481ede5d2b49089dd733c7ea28a5d75b2651f81a90d");
+  check
+    "initial output prefix root vector"
+    (String.equal
+       (Session.output_prefix_root session)
+       "b6f9a0aeb15d85732bf6efb815a1c9aeda2a7bbd90246c5d8e967b2ef89864b2");
+  let advanced, advance_receipt =
+    advance_session session admitted target request model
+  in
+  check
+    "advanced output root vector"
+    (String.equal
+       (Session.output_root advanced)
+       "0578719e90075bd22092cb17d8645febc8317e67809e716a60b2fbbe10c0da99");
+  check
+    "advanced output prefix root vector"
+    (String.equal
+       (Session.output_prefix_root advanced)
+       "b9cc7d335190d0b445061e07022f6193fa4a3585507702aab42b70ebaaf0bddb");
+  check
+    "advanced session root vector"
+    (String.equal
+       (Session.root advanced)
+       "e811d07885985659e56fe9b41c2a5c056500528f33a9dbf226cac0b2c26f9e60");
+  check
+    "advance receipt root vector"
+    (String.equal
+       (Receipt.root advance_receipt)
+       "50af739708a3360c31ce3ba8b138c64c8de5b19a66d57c4da17b51da3f4bab79");
   let receipt = Receipt.{
     target_root = "f7cfe92a4089b13cb7b6ff5eb4f28e39d7dd9c27fbfdddba71aeccd80394bc10";
     request_root = "0a54434081377bdfb3b5b967c60da45f7e2a314d2d610d4f54ce79ecc4793881";
