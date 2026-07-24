@@ -244,8 +244,8 @@ Every frontier canary should preserve the five demo files above, keep
 failures as packet, admission-policy, missing-primitive, data-binding,
 effort/limit, determinism, or harness-only.
 
-Current LiteNode proof branch includes `LOAD_F32_LE_FP`, `SIGMOID_FP`,
-`SOFTPLUS_FP`, `SILU_FP`, `CAUSAL_DEPTHWISE_CONV1D_FP`,
+Current LiteNode proof branch includes `LOAD_F32_LE_FP`, `LOAD_F64_LE_FP`,
+`SIGMOID_FP`, `SOFTPLUS_FP`, `SILU_FP`, `CAUSAL_DEPTHWISE_CONV1D_FP`,
 `GATED_DELTA_RULE_FP`, `RMSNORM_FP_EPS`, `L2NORM_FP`, and
 `ELEMWISE_MUL_FP`.
 

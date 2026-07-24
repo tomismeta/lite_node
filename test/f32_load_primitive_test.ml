@@ -48,9 +48,28 @@ let put_u32le buffer offset value =
       (Char.chr ((value lsr (byte * 8)) land 0xff))
   done
 
+let put_i64le buffer offset value =
+  for byte = 0 to 7 do
+    Bytes.set
+      buffer
+      (offset + byte)
+      (Char.chr
+         (Int64.to_int
+            (Int64.logand
+               (Int64.shift_right_logical value (byte * 8))
+               0xffL)))
+  done
+
 let f32_bytes values =
   let buffer = Bytes.create (List.length values * 4) in
   List.iteri (fun index value -> put_u32le buffer (index * 4) value) values;
+  Bytes.to_string buffer
+
+let f64_bytes values =
+  let buffer = Bytes.create (List.length values * 8) in
+  List.iteri
+    (fun index value -> put_i64le buffer (index * 8) value)
+    values;
   Bytes.to_string buffer
 
 let output_payload base count state =
@@ -102,6 +121,12 @@ let f32_code =
     VM.STOP;
   |]
 
+let f64_code =
+  [|
+    VM.LOAD_F64_LE_FP (0, 1, 2, 3);
+    VM.STOP;
+  |]
+
 let run ?(dst = 100) ?(offset = 0) ?(count = 4) ?(limit = 1_000_000) data =
   let state =
     VM.create_state
@@ -118,6 +143,23 @@ let run ?(dst = 100) ?(offset = 0) ?(count = 4) ?(limit = 1_000_000) data =
   set_int_reg state 2 offset;
   set_int_reg state 3 count;
   state, VM.run state f32_code
+
+let run_f64 ?(dst = 100) ?(offset = 0) ?(count = 4) ?(limit = 1_000_000) data =
+  let state =
+    VM.create_state
+      ~limit
+      ~caller:"caller"
+      ~origin:"origin"
+      ~address:"contract"
+      ~value:Z.zero
+      ~storage:(Hashtbl.create 0)
+      ()
+  in
+  set_int_reg state 0 dst;
+  state.VM.regs.(1) <- VM.VString data;
+  set_int_reg state 2 offset;
+  set_int_reg state 3 count;
+  state, VM.run state f64_code
 
 let check_golden_decode () =
   let data = f32_bytes [0x3f800000; 0xc0200000; 0x3f000000; 0x3fc00000] in
@@ -155,10 +197,66 @@ let check_offset_decode () =
   check "offset cell 0" (f64_cell state 100 = -2.5);
   check "offset cell 1" (f64_cell state 101 = 0.5)
 
+let check_f64_golden_decode () =
+  let bits =
+    [
+      Int64.bits_of_float 1.0;
+      Int64.bits_of_float (-2.5);
+      Int64.bits_of_float 0.5;
+      Int64.bits_of_float 1.5;
+    ]
+  in
+  let state, ok = run_f64 (f64_bytes bits) in
+  check "load f64 succeeds" ok;
+  List.iteri
+    (fun index bits ->
+      check
+        ("f64 cell " ^ string_of_int index)
+        (f64_bits state (100 + index) = bits))
+    bits
+
+let check_f64_edge_decode () =
+  let bits =
+    [
+      Int64.bits_of_float 0.0;
+      Int64.bits_of_float (-0.0);
+      Int64.bits_of_float (2.0 ** -1074.0);
+      Int64.bits_of_float (2.0 ** -1022.0);
+      Int64.bits_of_float max_float;
+    ]
+  in
+  let state, ok = run_f64 ~count:5 (f64_bytes bits) in
+  check "edge f64 load succeeds" ok;
+  List.iteri
+    (fun index bits ->
+      check
+        ("edge f64 cell " ^ string_of_int index)
+        (f64_bits state (100 + index) = bits))
+    bits
+
+let check_f64_offset_decode () =
+  let bits =
+    [
+      Int64.bits_of_float 1.0;
+      Int64.bits_of_float (-2.5);
+      Int64.bits_of_float 0.5;
+    ]
+  in
+  let state, ok = run_f64 ~offset:8 ~count:2 (f64_bytes bits) in
+  check "offset f64 load succeeds" ok;
+  check "offset f64 cell 0"
+    (f64_bits state 100 = Int64.bits_of_float (-2.5));
+  check "offset f64 cell 1"
+    (f64_bits state 101 = Int64.bits_of_float 0.5)
+
 let check_malformed_reverts () =
   let state, ok = run ~count:1 "\000\000\128" in
   check "truncated f32 reverts" (not ok);
   check "truncated load leaves output empty"
+    (not (Hashtbl.mem state.VM.memory.data 100));
+  let state, ok = run_f64 ~count:1 "\000\000\000\000\000\000\240" in
+  check "truncated f64 reverts" (not ok);
+  check "truncated f64 load leaves output empty"
     (not (Hashtbl.mem state.VM.memory.data 100))
 
 let check_nonfinite_reverts_atomically () =
@@ -193,6 +291,17 @@ let check_nonfinite_cases () =
       "positive infinity", 0x7f800000;
       "negative infinity", 0xff800000;
       "nan", 0x7fc00000;
+    ];
+  List.iter
+    (fun (name, bits) ->
+      let state, ok = run_f64 ~count:1 (f64_bytes [bits]) in
+      check (name ^ " f64 reverts") (not ok);
+      check (name ^ " f64 leaves output empty")
+        (not (Hashtbl.mem state.VM.memory.data 100)))
+    [
+      "positive infinity", 0x7ff0000000000000L;
+      "negative infinity", Int64.bits_of_float neg_infinity;
+      "nan", 0x7ff8000000000000L;
     ]
 
 let check_invalid_shape_and_effort_reverts () =
@@ -213,6 +322,29 @@ let check_invalid_shape_and_effort_reverts () =
   let state, ok = run ~limit:29 (f32_bytes [0x3f800000]) in
   check "effort exhaustion reverts" (not ok);
   check "effort exhaustion leaves output empty"
+    (not (Hashtbl.mem state.VM.memory.data 100));
+  let state, ok =
+    run_f64
+      ~dst:131_071
+      ~count:1
+      (f64_bytes [Int64.bits_of_float 1.0])
+  in
+  check "max-span f64 load succeeds" ok;
+  check "max-span f64 output"
+    (f64_bits state 131_071 = Int64.bits_of_float 1.0);
+  let state, ok =
+    run_f64
+      ~count:131_073
+      (f64_bytes [Int64.bits_of_float 1.0])
+  in
+  check "oversized f64 span rejects" (not ok);
+  check "oversized f64 span leaves output empty"
+    (not (Hashtbl.mem state.VM.memory.data 100));
+  let state, ok =
+    run_f64 ~limit:30 (f64_bytes [Int64.bits_of_float 1.0])
+  in
+  check "f64 effort exhaustion reverts" (not ok);
+  check "f64 effort exhaustion leaves output empty"
     (not (Hashtbl.mem state.VM.memory.data 100))
 
 let capability name capability_root =
@@ -257,55 +389,85 @@ let admission_code =
     VM.STOP;
   |]
 
+let f64_admission_code =
+  [|
+    VM.JDEST 100;
+    VM.LDI (0, VM.VInt Z.zero);
+    VM.LDI (1, VM.VString (f64_bytes [Int64.bits_of_float 1.0]));
+    VM.LDI (2, VM.VInt Z.zero);
+    VM.LDI (3, VM.VInt Z.one);
+    VM.LOAD_F64_LE_FP (0, 1, 2, 3);
+    VM.STOP;
+  |]
+
 let check_capability_gate () =
   let cap = capability "storage.authenticated-range" (hex_root 'd') in
-  (match
-     Admission.of_inference_code_with_requirement
-       ~support:(support [cap])
-       ~requirement:(requirement [cap])
-       admission_code
-   with
-   | Ok _ -> ()
-   | Error error -> failwith (Admission.error_message error));
-  match
-    Admission.of_inference_code_with_requirement
-      ~support:(support [])
-      ~requirement:(requirement [])
-      admission_code
-  with
-  | Error (Admission.Unsafe_error message) ->
-    check
-      "storage capability is named"
-      (starts_with
-         "inference opcode LOAD_F32_LE_FP at pc 5 requires capability storage.authenticated-range"
-         message)
-  | _ -> failwith "expected f32 load capability rejection"
+  List.iter
+    (fun (name, code) ->
+      (match
+         Admission.of_inference_code_with_requirement
+           ~support:(support [cap])
+           ~requirement:(requirement [cap])
+           code
+       with
+       | Ok _ -> ()
+       | Error error -> failwith (Admission.error_message error));
+      match
+        Admission.of_inference_code_with_requirement
+          ~support:(support [])
+          ~requirement:(requirement [])
+          code
+      with
+      | Error (Admission.Unsafe_error message) ->
+        check
+          (name ^ " storage capability is named")
+          (starts_with
+             ("inference opcode " ^ name
+              ^ " at pc 5 requires capability storage.authenticated-range")
+             message)
+      | _ -> failwith ("expected load capability rejection: " ^ name))
+    [
+      "LOAD_F32_LE_FP", admission_code;
+      "LOAD_F64_LE_FP", f64_admission_code;
+    ]
 
 let check_generic_admission_rejection () =
-  match Admission.of_program admission_code with
-  | Error (Admission.Unsafe_error message) ->
-    check
-      "generic Program rejects f32 load"
-      (starts_with "consensus unsafe opcode LOAD_F32_LE_FP" message)
-  | _ -> failwith "expected generic f32 load rejection"
+  List.iter
+    (fun (name, code) ->
+      match Admission.of_program code with
+      | Error (Admission.Unsafe_error message) ->
+        check
+          ("generic Program rejects " ^ name)
+          (starts_with ("consensus unsafe opcode " ^ name) message)
+      | _ -> failwith ("expected generic load rejection: " ^ name))
+    [
+      "LOAD_F32_LE_FP", admission_code;
+      "LOAD_F64_LE_FP", f64_admission_code;
+    ]
 
 let check_wire_roundtrip () =
-  let op = VM.LOAD_F32_LE_FP (0, 1, 2, 3) in
-  let raw = Bytecode.encode [| op; VM.STOP |] in
-  (match Bytecode.decode raw with
-   | Ok [| decoded; VM.STOP |] ->
-     check "bytecode roundtrip" (decoded = op)
-  | Ok _ -> failwith "unexpected decoded f32 code"
-  | Error error -> failwith error);
-  let asm = "LOAD_F32_LE_FP r0, r1, r2, r3\nSTOP" in
-  check "assembler parse" (Assembler.parse asm = [| op; VM.STOP |]);
-  check "assembler emit"
-    (String.equal (Assembler.emit [| op; VM.STOP |]) asm)
+  List.iter
+    (fun (name, op) ->
+      let raw = Bytecode.encode [| op; VM.STOP |] in
+      (match Bytecode.decode raw with
+       | Ok [| decoded; VM.STOP |] ->
+         check (name ^ " bytecode roundtrip") (decoded = op)
+       | Ok _ -> failwith ("unexpected decoded " ^ name ^ " code")
+       | Error error -> failwith error);
+      let asm = name ^ " r0, r1, r2, r3\nSTOP" in
+      check (name ^ " assembler parse")
+        (Assembler.parse asm = [| op; VM.STOP |]);
+      check (name ^ " assembler emit")
+        (String.equal (Assembler.emit [| op; VM.STOP |]) asm))
+    [
+      "LOAD_F32_LE_FP", VM.LOAD_F32_LE_FP (0, 1, 2, 3);
+      "LOAD_F64_LE_FP", VM.LOAD_F64_LE_FP (0, 1, 2, 3);
+    ]
 
 let check_effects () =
   check
-    "load f32 writes memory"
-    (Program_effects.names (Program_effects.scan f32_code)
+    "loads write memory"
+    (Program_effects.names (Program_effects.scan [|f32_code.(0); f64_code.(0)|])
      = ["memory_write"])
 
 let fload_program range_root =
@@ -317,6 +479,20 @@ let fload_program range_root =
     VM.LDI (2, VM.VInt Z.zero);
     VM.LDI (3, VM.VInt (Z.of_int 2));
     VM.LOAD_F32_LE_FP (0, 1, 2, 3);
+    VM.LDI (0, VM.VInt (Z.of_int 100));
+    VM.LDI (1, VM.VInt (Z.of_int 2));
+    VM.STOP;
+  |]
+
+let fload_f64_program range_root =
+  [|
+    VM.JDEST Abi.advance_label;
+    VM.LDI (4, VM.VString range_root);
+    VM.FLOAD (1, 4);
+    VM.LDI (0, VM.VInt (Z.of_int 100));
+    VM.LDI (2, VM.VInt Z.zero);
+    VM.LDI (3, VM.VInt (Z.of_int 2));
+    VM.LOAD_F64_LE_FP (0, 1, 2, 3);
     VM.LDI (0, VM.VInt (Z.of_int 100));
     VM.LDI (1, VM.VInt (Z.of_int 2));
     VM.STOP;
@@ -402,10 +578,136 @@ let check_fload_session () =
     check "fload f32 session root" (String.equal result.Execution.output_root expected)
   | Error error -> failwith (Execution.error_message error)
 
+let check_fload_f64_session () =
+  let owner =
+    f64_bytes [Int64.bits_of_float 1.0; Int64.bits_of_float (-2.5)]
+  in
+  let owner_root = sha256 owner in
+  let range =
+    Model.{
+      owner_root;
+      offset = 0;
+      length = String.length owner;
+      encoding = "tensor.f64le";
+      shape_root = None;
+    }
+  in
+  let range_root = Model.range_root range in
+  let cap = capability "storage.authenticated-range" (hex_root 'd') in
+  let requirement = requirement [cap] in
+  let support = support [cap] in
+  let code = fload_f64_program range_root in
+  let admitted =
+    Inference_cert.admit ~support ~requirement code
+  in
+  let target =
+    Target.{
+      program_root = Target.program_root admitted;
+      requirement_root = Req.root requirement;
+      model_root = hex_root 'f';
+      execution_descriptor_root = hex_root '1';
+      store_root = hex_root '2';
+      session_abi_root = Abi.v1_root;
+      entrypoints = [{
+        entry_name = Abi.advance_entrypoint;
+        entry_label = Abi.advance_label;
+      }];
+    }
+  in
+  let request =
+    Request.{
+      schema = Abi.request_schema;
+      target_root = Target.root target;
+      entrypoint = Abi.advance_entrypoint;
+      input_root = sha256 "";
+      request_nonce = hex_root '5';
+      max_output_bytes = 128;
+      max_advance_effort = 10000;
+    }
+  in
+  let model =
+    Model.{
+      model_root = target.model_root;
+      store_root = target.store_root;
+      ranges = [range];
+    }
+  in
+  let pins =
+    match
+      Store.pin
+        ~limits:requirement.limits
+        ~read:(fun root -> if String.equal root owner_root then Some owner else None)
+        model
+    with
+    | Ok pins -> pins
+    | Error error -> failwith (Store.error_message error)
+  in
+  let plan =
+    match Plan.create ~admitted ~target ~request ~model ~pins ~input:"" with
+    | Ok plan -> plan
+    | Error error -> failwith (Plan.error_message error)
+  in
+  match Execution.run ~plan () with
+  | Ok result ->
+    let state, ok = run_f64 ~count:2 owner in
+    check "expected local f64 decode succeeds" ok;
+    let expected =
+      output_root
+        ~target_root:(Target.root target)
+        ~session_abi_root:Abi.v1_root
+        (output_payload 100 2 state)
+    in
+    check "fload f64 session root" (String.equal result.Execution.output_root expected)
+  | Error error -> failwith (Execution.error_message error)
+
+let check_f64_chunk_composition () =
+  let bits =
+    [
+      Int64.bits_of_float 1.0;
+      Int64.bits_of_float (-2.0);
+      Int64.bits_of_float 3.0;
+      Int64.bits_of_float (-4.0);
+    ]
+  in
+  let data = f64_bytes bits in
+  let state =
+    VM.create_state
+      ~limit:1_000_000
+      ~caller:"caller"
+      ~origin:"origin"
+      ~address:"contract"
+      ~value:Z.zero
+      ~storage:(Hashtbl.create 0)
+      ()
+  in
+  set_int_reg state 0 100;
+  state.VM.regs.(1) <- VM.VString data;
+  set_int_reg state 2 0;
+  set_int_reg state 3 2;
+  check
+    "chunked f64 load succeeds"
+    (VM.run state
+       [|
+         VM.LOAD_F64_LE_FP (0, 1, 2, 3);
+         VM.LDI (0, VM.VInt (Z.of_int 102));
+         VM.LDI (2, VM.VInt (Z.of_int 16));
+         VM.LDI (3, VM.VInt (Z.of_int 2));
+         VM.LOAD_F64_LE_FP (0, 1, 2, 3);
+       |]);
+  List.iteri
+    (fun index bits ->
+      check
+        ("chunked f64 cell " ^ string_of_int index)
+        (f64_bits state (100 + index) = bits))
+    bits
+
 let () =
   check_golden_decode ();
   check_edge_decode ();
   check_offset_decode ();
+  check_f64_golden_decode ();
+  check_f64_edge_decode ();
+  check_f64_offset_decode ();
   check_malformed_reverts ();
   check_nonfinite_reverts_atomically ();
   check_nonfinite_cases ();
@@ -414,4 +716,6 @@ let () =
   check_generic_admission_rejection ();
   check_wire_roundtrip ();
   check_effects ();
-  check_fload_session ()
+  check_fload_session ();
+  check_fload_f64_session ();
+  check_f64_chunk_composition ()

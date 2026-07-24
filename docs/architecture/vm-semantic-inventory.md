@@ -162,7 +162,7 @@ The groups contain:
   `ATTENTION_KV_Q16`, `VECDOT_Q16`, `ELEMWISE_MUL_Q16`,
   `RESIDUAL_ADD_Q16`, `LOAD_INT8_Q16`, `APPEND_VEC_Q16`, and `ARGMAX_Q16`.
 - Q1-G128 proof: `LINEAR_Q1_G128_FP`.
-- F32 ingress proof: `LOAD_F32_LE_FP`.
+- Range ingress proof: `LOAD_F32_LE_FP` and `LOAD_F64_LE_FP`.
 - Strict-FP activation proof: `SIGMOID_FP`, `SOFTPLUS_FP`, and `SILU_FP`.
 - Causal depthwise proof: `CAUSAL_DEPTHWISE_CONV1D_FP`.
 - Delta-rule proof: `GATED_DELTA_RULE_FP`.

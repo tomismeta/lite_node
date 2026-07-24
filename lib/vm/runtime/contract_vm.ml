@@ -140,6 +140,7 @@ type instr =
   | MATMUL_Q16 of reg * reg * reg * reg * reg * reg
   | LINEAR_Q1_G128_FP of reg * reg * reg * reg * reg * reg * reg
   | LOAD_F32_LE_FP of reg * reg * reg * reg
+  | LOAD_F64_LE_FP of reg * reg * reg * reg
   | SIGMOID_FP of reg * reg
   | SOFTPLUS_FP of reg * reg
   | CAUSAL_DEPTHWISE_CONV1D_FP of reg * reg * reg * reg * reg * reg
@@ -342,6 +343,7 @@ let effort_cost = function
   | MATMUL_Q16 _ -> 100
   | LINEAR_Q1_G128_FP _ -> 200
   | LOAD_F32_LE_FP _ -> 30
+  | LOAD_F64_LE_FP _ -> 30
   | SIGMOID_FP _ -> 20
   | SOFTPLUS_FP _ -> 20
   | CAUSAL_DEPTHWISE_CONV1D_FP _ -> 100
@@ -569,6 +571,19 @@ let f32_le_to_fp64 data offset =
         sign *. ldexp significand (exponent - 127)
     in
     Some value
+
+let f64_le_to_fp64 data offset =
+  let bits = ref 0L in
+  for i = 0 to 7 do
+    bits :=
+      Int64.logor
+        !bits
+        (Int64.shift_left
+           (Int64.of_int (Char.code data.[offset + i]))
+           (i * 8))
+  done;
+  let value = Int64.float_of_bits !bits in
+  if finite_fp64 value then Some value else None
 
 let fp16_le_to_fp64 data offset =
   let bits =
@@ -909,6 +924,9 @@ let strict_operands st = function
     && is_numeric (getr st rows) && is_numeric (getr st inner)
     && is_numeric (getr st cols)
   | LOAD_F32_LE_FP (dst, source, offset, length) ->
+    is_numeric (getr st dst) && is_text (getr st source)
+    && is_numeric (getr st offset) && is_numeric (getr st length)
+  | LOAD_F64_LE_FP (dst, source, offset, length) ->
     is_numeric (getr st dst) && is_text (getr st source)
     && is_numeric (getr st offset) && is_numeric (getr st length)
   | SIGMOID_FP (addr, count)
@@ -2287,6 +2305,30 @@ let exec_one st op =
            true
        end
      | _ -> revert st)
+  | LOAD_F64_LE_FP (rs_dst, rs_src, rs_off, rs_n) ->
+    (match read_int st rs_dst, to_bytes (getr st rs_src),
+           read_int st rs_off, read_int st rs_n with
+     | Some dst, Some src, Some off, Some n
+       when off >= 0 && valid_mem_span dst n
+            && off <= String.length src
+            && n <= (String.length src - off) / 8 ->
+       if not (add_dyn_effort st n) then revert st
+       else
+         let decoded = Array.make n 0.0 in
+         let ok = ref true in
+         for i = 0 to n - 1 do
+           match f64_le_to_fp64 src (off + (i * 8)) with
+           | None -> ok := false
+           | Some value -> decoded.(i) <- value
+         done;
+         if not !ok then revert st
+         else begin
+           for i = 0 to n - 1 do
+             mem_set_fp64 st.memory.data (dst + i) decoded.(i)
+           done;
+           true
+       end
+     | _ -> revert st)
   | SIGMOID_FP (rs_addr, rs_n) ->
     (match read_int st rs_addr, read_int st rs_n with
      | Some addr, Some n ->
@@ -3511,6 +3553,7 @@ module Verifier = struct
             | MATMUL_Q16 (d,l,r,m,k,n) -> check_regs pc [d;l;r;m;k;n]
             | LINEAR_Q1_G128_FP (d,l,q,o,m,k,n) -> check_regs pc [d;l;q;o;m;k;n]
             | LOAD_F32_LE_FP (d,s,o,n) -> check_regs pc [d;s;o;n]
+            | LOAD_F64_LE_FP (d,s,o,n) -> check_regs pc [d;s;o;n]
             | SIGMOID_FP (a,n) -> check_regs pc [a;n]
             | SOFTPLUS_FP (a,n) -> check_regs pc [a;n]
             | CAUSAL_DEPTHWISE_CONV1D_FP (d,i,k,t,c,w) -> check_regs pc [d;i;k;t;c;w]

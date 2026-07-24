@@ -94,6 +94,7 @@ let host_float_cases = [
 
 let profiled_cases = [
   ("load-f32-le", "LOAD_F32_LE_FP", VM.LOAD_F32_LE_FP (0, 1, 2, 3));
+  ("load-f64-le", "LOAD_F64_LE_FP", VM.LOAD_F64_LE_FP (0, 1, 2, 3));
 ]
 
 let program_only_cases = [

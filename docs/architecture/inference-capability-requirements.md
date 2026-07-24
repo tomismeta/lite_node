@@ -116,9 +116,9 @@ is a coherent semantic family, not necessarily one opcode.
 
 ## Typed Data Ingress
 
-### Little-endian F32 load
+### Little-endian FP load
 
-Legacy label: `load_f32_le_fp`.
+Legacy labels: `load_f32_le_fp`, `load_f64_le_fp`.
 
 Disposition: **primitive**.
 
@@ -131,9 +131,11 @@ Filesystem paths, model tensor names, and store transport never cross this
 boundary.
 
 Proof-branch status: `LOAD_F32_LE_FP` decodes bounded little-endian f32 owner
-bytes into VM f64 cells, rejects malformed spans and non-finite values before
-writing, and remains gated by `storage.authenticated-range` in plain inference.
-Generic Program admission still rejects it as inference-only.
+bytes into VM f64 cells. `LOAD_F64_LE_FP` decodes little-endian binary64 owner
+bytes losslessly into VM f64 cells for targets that cannot narrow reference
+operands to f32. Both reject malformed spans and non-finite values before
+writing, and remain gated by `storage.authenticated-range` in plain inference.
+Generic Program admission still rejects them as inference-only.
 
 ## Normalization And Activation
 
