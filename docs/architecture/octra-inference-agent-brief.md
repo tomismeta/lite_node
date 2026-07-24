@@ -246,7 +246,8 @@ effort/limit, determinism, or harness-only.
 
 Current LiteNode proof branch includes `LOAD_F32_LE_FP`, `SIGMOID_FP`,
 `SOFTPLUS_FP`, `SILU_FP`, `CAUSAL_DEPTHWISE_CONV1D_FP`,
-`GATED_DELTA_RULE_FP`, `RMSNORM_FP_EPS`, and `ELEMWISE_MUL_FP`.
+`GATED_DELTA_RULE_FP`, `RMSNORM_FP_EPS`, `L2NORM_FP`, and
+`ELEMWISE_MUL_FP`.
 
 The next `octra-inference` artifact should refresh the order-5 frontier against
 this LiteNode branch. Emit real canaries for explicit-epsilon RMSNorm and

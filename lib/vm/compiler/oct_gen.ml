@@ -1585,15 +1585,22 @@ and gen_builtin env name args =
    | "rmsnorm_fp" ->
      emit env (Contract_vm.RMSNORM_FP (nth 0, nth 1, nth 2));
      emit env (Contract_vm.LDI (rd, VBool true))
-   | "rmsnorm_fp_eps" ->
-     if env.declaration <> ProgramDecl then
-       gerr env.line "rmsnorm_fp_eps is available only in Program"
-     else begin
-       emit env (Contract_vm.RMSNORM_FP_EPS
+  | "rmsnorm_fp_eps" ->
+    if env.declaration <> ProgramDecl then
+      gerr env.line "rmsnorm_fp_eps is available only in Program"
+    else begin
+      emit env (Contract_vm.RMSNORM_FP_EPS
                    (nth 0, nth 1, nth 2, nth 3));
-       emit env (Contract_vm.LDI (rd, VBool true))
-     end
-   | "sigmoid_fp" ->
+      emit env (Contract_vm.LDI (rd, VBool true))
+    end
+  | "l2norm_fp" ->
+    if env.declaration <> ProgramDecl then
+      gerr env.line "l2norm_fp is available only in Program"
+    else begin
+      emit env (Contract_vm.L2NORM_FP (nth 0, nth 1, nth 2));
+      emit env (Contract_vm.LDI (rd, VBool true))
+    end
+  | "sigmoid_fp" ->
      if env.declaration <> ProgramDecl then
        gerr env.line "sigmoid_fp is available only in Program"
      else begin

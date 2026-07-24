@@ -149,6 +149,7 @@ type instr =
   | MATMUL_FP of reg * reg * reg * reg * reg * reg
   | RMSNORM_FP of reg * reg * reg
   | RMSNORM_FP_EPS of reg * reg * reg * reg
+  | L2NORM_FP of reg * reg * reg
   | SILU_FP of reg * reg
   | ELEMWISE_MUL_FP of reg * reg * reg
   | RESIDUAL_ADD_FP of reg * reg * reg
@@ -349,6 +350,7 @@ let effort_cost = function
   | MATMUL_FP _ -> 200
   | RMSNORM_FP _ -> 50
   | RMSNORM_FP_EPS _ -> 50
+  | L2NORM_FP _ -> 40
   | SILU_FP _ -> 20
   | ELEMWISE_MUL_FP _ -> 10
   | RESIDUAL_ADD_FP _ -> 10
@@ -917,6 +919,10 @@ let strict_operands st = function
     is_numeric (getr st addr)
     && is_numeric (getr st count)
     && is_numeric (getr st gamma)
+    && (match getr st epsilon with VInt z -> Z.fits_int64 z | _ -> false)
+  | L2NORM_FP (addr, count, epsilon) ->
+    is_numeric (getr st addr)
+    && is_numeric (getr st count)
     && (match getr st epsilon with VInt z -> Z.fits_int64 z | _ -> false)
   | ELEMWISE_MUL_FP (dst, source, count)
   | RESIDUAL_ADD_FP (dst, source, count) ->
@@ -2575,6 +2581,37 @@ let exec_one st op =
             end
           | _ -> revert st)
      | _ -> revert st)
+  | L2NORM_FP (rs_addr, rs_n, rs_epsilon) ->
+    (match read_int st rs_addr, read_int st rs_n, read_fp64_reg st rs_epsilon with
+     | Some addr, Some n, Some epsilon when n > 0 && epsilon > 0.0 ->
+       if not (valid_large_mem_span addr n) then
+         revert st
+       else if not (add_dyn_product st [n; 3] 1) then
+         revert st
+       else
+         (match read_fp64_array st.memory.data addr n with
+          | Some input_values ->
+            let sum_sq =
+              Array.fold_left
+                (fun acc value -> acc +. (value *. value))
+                0.0
+                input_values
+            in
+            let inv_norm = 1.0 /. sqrt (sum_sq +. epsilon) in
+            let output =
+              Array.init n (fun i -> input_values.(i) *. inv_norm)
+            in
+            if not (finite_fp64 sum_sq && finite_fp64 inv_norm)
+               || not (Array.for_all finite_fp64 output) then
+              revert st
+            else begin
+              for i = 0 to n - 1 do
+                mem_set_fp64 st.memory.data (addr + i) output.(i)
+              done;
+              true
+            end
+          | _ -> revert st)
+     | _ -> revert st)
   | SILU_FP (rs_addr, rs_n) ->
     (match read_int st rs_addr, read_int st rs_n with
      | Some addr, Some n ->
@@ -3484,6 +3521,7 @@ module Verifier = struct
             | MATMUL_FP (d,l,r,m,k,n) -> check_regs pc [d;l;r;m;k;n]
             | RMSNORM_FP (a,n,g) -> check_regs pc [a;n;g]
             | RMSNORM_FP_EPS (a,n,g,e) -> check_regs pc [a;n;g;e]
+            | L2NORM_FP (a,n,e) -> check_regs pc [a;n;e]
             | SILU_FP (a,n) -> check_regs pc [a;n]
             | ELEMWISE_MUL_FP (d,s,n) -> check_regs pc [d;s;n]
             | RESIDUAL_ADD_FP (d,s,n) -> check_regs pc [d;s;n]

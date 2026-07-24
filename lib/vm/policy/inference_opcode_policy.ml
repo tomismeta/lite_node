@@ -120,6 +120,7 @@ let opcode_class = function
   | Contract_vm.SOFTPLUS_FP _
   | Contract_vm.SILU_FP _
   | Contract_vm.RMSNORM_FP_EPS _
+  | Contract_vm.L2NORM_FP _
   | Contract_vm.ELEMWISE_MUL_FP _
   | Contract_vm.RESIDUAL_ADD_FP _ -> Requires "tensor.strict-fp"
   | Contract_vm.ARGMAX_FP _ -> Requires "tensor.argmax"

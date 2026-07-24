@@ -166,7 +166,7 @@ The groups contain:
 - Strict-FP activation proof: `SIGMOID_FP`, `SOFTPLUS_FP`, and `SILU_FP`.
 - Causal depthwise proof: `CAUSAL_DEPTHWISE_CONV1D_FP`.
 - Delta-rule proof: `GATED_DELTA_RULE_FP`.
-- Strict-FP normalization/vector proof: `RMSNORM_FP_EPS`,
+- Strict-FP normalization/vector proof: `RMSNORM_FP_EPS`, `L2NORM_FP`,
   `ELEMWISE_MUL_FP`, and `RESIDUAL_ADD_FP`.
 - Selection proof: `ARGMAX_FP`.
 - Unclassified Q16: `MATMUL_Q16` and `SHIFT_ROUND_INPLACE`.

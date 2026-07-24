@@ -164,6 +164,11 @@ L2 normalization is not substituted with RMS normalization. Its axis, epsilon
 placement, zero-vector behavior, operation order, and row-batched form are
 explicit.
 
+Proof-branch status: `L2NORM_FP` is a three-register in-place vector operation:
+address, count, and an integer register carrying the binary64 epsilon bits. It
+normalizes one contiguous vector by `sqrt(sum(x^2) + epsilon)` and leaves
+per-head row batching in generated target code.
+
 ### Sigmoid
 
 Legacy label: `sigmoid_fp`.

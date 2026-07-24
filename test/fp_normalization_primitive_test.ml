@@ -162,6 +162,24 @@ let single_expected_epsilon_1e_5 =
   bytes_of_hex
     "289c3e41965ec73f1ef5eeb0f086f1bf1ef5eeb0f086f1bf289c3e41965e07c0"
 
+let l2_single_input =
+  bytes_of_hex
+    "0000000000000840000000000000104000000000000000000000000000000000"
+
+let l2_single_expected_model_epsilon =
+  bytes_of_hex
+    "bfeec12c3333e33fa99302919999e93f00000000000000000000000000000000"
+
+let l2_row_batched_input =
+  bytes_of_hex
+    "0000000000000840000000000000104000000000000000000000000000000000\
+     000000000000f03f000000000000004000000000000000400000000000000000"
+
+let l2_row_batched_expected_model_epsilon =
+  bytes_of_hex
+    "bfeec12c3333e33fa99302919999e93f00000000000000000000000000000000\
+     8d0073415555d53f8d0073415555e53f8d0073415555e53f0000000000000000"
+
 type rms_fixture = {
   name : string;
   count : int;
@@ -364,6 +382,153 @@ let check_rms_strict_operands () =
   state.VM.regs.(2) <- VM.VString "not-gamma-address";
   check "rms strict operands reject" (not (VM.run state rms_code))
 
+type l2_fixture = {
+  l2_name : string;
+  l2_count : int;
+  l2_epsilon_bits : int64;
+  l2_input : string;
+  l2_expected : string;
+}
+
+let l2_single_model_epsilon = {
+  l2_name = "single vector l2 model epsilon";
+  l2_count = 4;
+  l2_epsilon_bits = model_epsilon_bits;
+  l2_input = l2_single_input;
+  l2_expected = l2_single_expected_model_epsilon;
+}
+
+let l2_op =
+  VM.L2NORM_FP (0, 1, 2)
+
+let l2_code = [|l2_op; VM.STOP|]
+let l2_op_only = [|l2_op|]
+
+let make_l2_state ?(limit = 1_000_000) ?(strict_values = false) ?(addr = 100)
+    fixture =
+  let state =
+    VM.create_state
+      ~limit
+      ~strict_values
+      ~caller:"caller"
+      ~origin:"origin"
+      ~address:"contract"
+      ~value:Z.zero
+      ~storage:(Hashtbl.create 0)
+      ()
+  in
+  set_int_reg state 0 addr;
+  set_int_reg state 1 fixture.l2_count;
+  set_i64_reg state 2 fixture.l2_epsilon_bits;
+  set_fixture state addr fixture.l2_input;
+  state
+
+let check_l2_golden () =
+  let state = make_l2_state l2_single_model_epsilon in
+  check "l2 succeeds" (VM.run state l2_code);
+  check_cells
+    l2_single_model_epsilon.l2_name
+    state
+    100
+    (fixture_bits l2_single_model_epsilon.l2_expected)
+
+let check_l2_row_composition () =
+  let state =
+    make_l2_state
+      {
+        l2_single_model_epsilon with
+        l2_name = "l2 row composed";
+        l2_input = l2_row_batched_input;
+      }
+  in
+  let code =
+    [|
+      VM.LDI (0, VM.VInt (Z.of_int 100));
+      l2_op;
+      VM.LDI (0, VM.VInt (Z.of_int 104));
+      l2_op;
+      VM.STOP;
+    |]
+  in
+  check "l2 row composition succeeds" (VM.run state code);
+  check_cells
+    "l2 row composition"
+    state
+    100
+    (fixture_bits l2_row_batched_expected_model_epsilon)
+
+let check_l2_missing_nonfinite_and_invalid_epsilon () =
+  let original = fixture_bits l2_single_input in
+  let state = make_l2_state l2_single_model_epsilon in
+  Hashtbl.remove state.VM.memory.data 101;
+  check "l2 missing input rejects" (not (VM.run state l2_code));
+  check "l2 missing input keeps first cell"
+    (f64_bits state 100 = List.hd original);
+  let state = make_l2_state l2_single_model_epsilon in
+  set_f64_bits state 100 0x7ff0000000000000L;
+  check "l2 nonfinite input rejects" (not (VM.run state l2_code));
+  check "l2 nonfinite input keeps input"
+    (f64_bits state 100 = 0x7ff0000000000000L);
+  List.iter
+    (fun (name, set_epsilon) ->
+      let state = make_l2_state l2_single_model_epsilon in
+      set_epsilon state;
+      check (name ^ " rejects") (not (VM.run state l2_code));
+      check_cells (name ^ " keeps input") state 100 original)
+    [
+      "l2 zero epsilon",
+      (fun state -> set_i64_reg state 2 (Int64.bits_of_float 0.0));
+      "l2 negative epsilon",
+      (fun state -> set_i64_reg state 2 (Int64.bits_of_float (-1.0)));
+      "l2 infinite epsilon", (fun state -> set_i64_reg state 2 0x7ff0000000000000L);
+      "l2 nan epsilon", (fun state -> set_i64_reg state 2 0x7ff8000000000000L);
+      "l2 missing epsilon",
+      (fun state -> state.VM.regs.(2) <- VM.VString "missing-epsilon");
+    ]
+
+let check_l2_invalid_shape_and_effort () =
+  let original = fixture_bits l2_single_input in
+  List.iter
+    (fun (name, update) ->
+      let state = make_l2_state l2_single_model_epsilon in
+      update state;
+      check (name ^ " rejects") (not (VM.run state l2_code));
+      check_cells (name ^ " keeps input") state 100 original)
+    [
+      "l2 zero count", (fun state -> set_int_reg state 1 0);
+      "l2 oversized count", (fun state -> set_int_reg state 1 1_048_577);
+      "l2 address overflow", (fun state -> set_int_reg state 0 max_int);
+    ];
+  let exact_effort = 40 + (l2_single_model_epsilon.l2_count * 3) in
+  let state = make_l2_state ~limit:(exact_effort - 1) l2_single_model_epsilon in
+  check "one-under l2 effort rejects" (not (VM.run state l2_op_only));
+  check_cells "one-under l2 effort keeps input" state 100 original;
+  let state = make_l2_state ~limit:exact_effort l2_single_model_epsilon in
+  check "exact l2 effort succeeds" (VM.run state l2_op_only);
+  check_cells
+    "exact l2 effort"
+    state
+    100
+    (fixture_bits l2_single_model_epsilon.l2_expected)
+
+let check_l2_overflow_reverts () =
+  let fixture = {
+    l2_single_model_epsilon with
+    l2_input = f64_bytes [max_float; max_float; 0.0; 0.0];
+  } in
+  let state = make_l2_state fixture in
+  check "l2 sum overflow rejects" (not (VM.run state l2_code));
+  check_cells
+    "l2 sum overflow keeps input"
+    state
+    100
+    (fixture_bits fixture.l2_input)
+
+let check_l2_strict_operands () =
+  let state = make_l2_state ~strict_values:true l2_single_model_epsilon in
+  state.VM.regs.(2) <- VM.VU64 (Z.of_int64 model_epsilon_bits);
+  check "l2 strict operands reject" (not (VM.run state l2_code))
+
 let mul_op =
   VM.ELEMWISE_MUL_FP (0, 1, 2)
 
@@ -525,6 +690,16 @@ let mul_admission_code =
     VM.STOP;
   |]
 
+let l2_admission_code =
+  [|
+    VM.JDEST 100;
+    VM.LDI (0, VM.VInt (Z.of_int 100));
+    VM.LDI (1, VM.VInt (Z.of_int 4));
+    VM.LDI (2, VM.VInt (Z.of_int64 model_epsilon_bits));
+    l2_op;
+    VM.STOP;
+  |]
+
 let check_capability_gate () =
   let cap = capability "tensor.strict-fp" (hex_root 'd') in
   List.iter
@@ -553,6 +728,7 @@ let check_capability_gate () =
       | _ -> failwith ("expected strict-fp capability rejection: " ^ name))
     [
       "RMSNORM_FP_EPS", 5, rms_admission_code;
+      "L2NORM_FP", 4, l2_admission_code;
       "ELEMWISE_MUL_FP", 4, mul_admission_code;
     ];
   match
@@ -584,7 +760,24 @@ let check_epsilon_type_flow () =
       (starts_with
          "Program type flow: expected int in r3 at pc 5, got u64"
          message)
-  | _ -> failwith "expected epsilon type-flow rejection"
+  | _ -> failwith "expected epsilon type-flow rejection";
+  let code =
+    Array.copy l2_admission_code
+  in
+  code.(3) <- VM.LDI (2, VM.VU64 (Z.of_int64 model_epsilon_bits));
+  match
+    Admission.of_inference_code_with_requirement
+      ~support:(support [cap])
+      ~requirement:(requirement [cap])
+      code
+  with
+  | Error (Admission.Verify_error message) ->
+    check
+      "l2 unsigned epsilon carrier rejected by type flow"
+      (starts_with
+         "Program type flow: expected int in r2 at pc 4, got u64"
+         message)
+  | _ -> failwith "expected l2 epsilon type-flow rejection"
 
 let check_generic_admission_rejection () =
   let check_rejection name label = function
@@ -600,6 +793,7 @@ let check_generic_admission_rejection () =
       check_rejection name ("program rejects " ^ name) (Admission.of_program code))
     [
       "RMSNORM_FP_EPS", rms_admission_code;
+      "L2NORM_FP", l2_admission_code;
       "ELEMWISE_MUL_FP", mul_admission_code;
     ]
 
@@ -659,6 +853,7 @@ let check_compiler_surface () =
           (String.equal message (name ^ " is available only in Program")))
     [
       "rmsnorm_fp_eps", 4, (function VM.RMSNORM_FP_EPS _ -> true | _ -> false);
+      "l2norm_fp", 3, (function VM.L2NORM_FP _ -> true | _ -> false);
       "elemwise_mul_fp", 3, (function VM.ELEMWISE_MUL_FP _ -> true | _ -> false);
     ]
 
@@ -677,13 +872,14 @@ let check_wire_roundtrip () =
         (String.equal (Assembler.emit [|op; VM.STOP|]) (asm ^ "\nSTOP")))
     [
       "RMSNORM_FP_EPS r0, r1, r2, r3", rms_op;
+      "L2NORM_FP r0, r1, r2", l2_op;
       "ELEMWISE_MUL_FP r0, r1, r2", mul_op;
     ]
 
 let check_effects () =
   let effects =
     Program_effects.names
-      (Program_effects.scan [|rms_op; mul_op|])
+      (Program_effects.scan [|rms_op; l2_op; mul_op|])
   in
   check "normalization effects" (effects = ["memory_read"; "memory_write"])
 
@@ -731,6 +927,12 @@ let () =
   check_rms_invalid_shape_alias_and_effort ();
   check_rms_overflow_reverts ();
   check_rms_strict_operands ();
+  check_l2_golden ();
+  check_l2_row_composition ();
+  check_l2_missing_nonfinite_and_invalid_epsilon ();
+  check_l2_invalid_shape_and_effort ();
+  check_l2_overflow_reverts ();
+  check_l2_strict_operands ();
   check_mul_golden ();
   check_mul_in_place_alias ();
   check_mul_rejections ();

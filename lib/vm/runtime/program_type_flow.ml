@@ -442,6 +442,13 @@ let step facts pc env = function
        (match expect pc env epsilon (( = ) Int) "int" with
         | Error error -> Error error
         | Ok _ -> Ok env))
+  | Contract_vm.L2NORM_FP (addr, count, epsilon) ->
+    (match expect_nums pc env [addr; count] with
+     | Error error -> Error error
+     | Ok _ ->
+       (match expect pc env epsilon (( = ) Int) "int" with
+        | Error error -> Error error
+        | Ok _ -> Ok env))
   | Contract_vm.SIGMOID_FP (addr, count)
   | Contract_vm.SOFTPLUS_FP (addr, count)
   | Contract_vm.SILU_FP (addr, count) ->
