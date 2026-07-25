@@ -80,6 +80,8 @@ let host_float_cases = [
   ("load-int8-fp", "LOAD_INT8_FP", VM.LOAD_INT8_FP (0, 1, 2, 3, 4));
   ("vecdot-fp", "VECDOT_FP", VM.VECDOT_FP (0, 1, 2, 3));
   ("argmax-fp", "ARGMAX_FP", VM.ARGMAX_FP (0, 1, 2));
+  ("attention-scores-fp", "ATTENTION_SCORES_FP",
+   VM.ATTENTION_SCORES_FP (0, 1, 2, 3, 4));
   ("attention-fp", "ATTENTION_KV_FP",
    VM.ATTENTION_KV_FP (0, 1, 2, 3, 4, 5, 6, 7));
   ("append-fp", "APPEND_VEC_FP", VM.APPEND_VEC_FP (0, 1, 2, 3));

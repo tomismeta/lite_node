@@ -160,6 +160,7 @@ let opcode_name = function
   | VM.LOAD_INT8_FP _ -> "LOAD_INT8_FP"
   | VM.VECDOT_FP _ -> "VECDOT_FP"
   | VM.ARGMAX_FP _ -> "ARGMAX_FP"
+  | VM.ATTENTION_SCORES_FP _ -> "ATTENTION_SCORES_FP"
   | VM.ATTENTION_KV_FP _ -> "ATTENTION_KV_FP"
   | VM.ATTENTION_KV_Q16 _ -> "ATTENTION_KV_Q16"
   | VM.APPEND_VEC_FP _ -> "APPEND_VEC_FP"
@@ -183,6 +184,7 @@ let admission_class = function
   | VM.LOAD_INT8_FP _
   | VM.VECDOT_FP _
   | VM.ARGMAX_FP _
+  | VM.ATTENTION_SCORES_FP _
   | VM.ATTENTION_KV_FP _
   | VM.APPEND_VEC_FP _
   | VM.LINEAR_Q1_G128_FP _

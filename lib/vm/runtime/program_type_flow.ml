@@ -486,6 +486,9 @@ let step facts pc env = function
     (match expect_nums pc env [addr; count] with
      | Error error -> Error error
      | Ok _ -> write pc env dest Int)
+  | Contract_vm.ATTENTION_SCORES_FP
+      (dest, query, key, key_count, head_dim) ->
+    expect_nums pc env [dest; query; key; key_count; head_dim]
   | Contract_vm.ATTENTION_KV_FP
       (query, key, value, context, total, query_heads, key_heads, head_dim) ->
     expect_nums pc env

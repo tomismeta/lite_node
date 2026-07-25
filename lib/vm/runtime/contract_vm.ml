@@ -159,6 +159,7 @@ type instr =
   | LOAD_INT8_FP of reg * reg * reg * reg * reg
   | VECDOT_FP of reg * reg * reg * reg
   | ARGMAX_FP of reg * reg * reg
+  | ATTENTION_SCORES_FP of reg * reg * reg * reg * reg
   | ATTENTION_KV_FP of reg * reg * reg * reg * reg * reg * reg * reg
   | ATTENTION_KV_Q16 of reg * reg * reg * reg * reg * reg * reg * reg
   | APPEND_VEC_FP of reg * reg * reg * reg
@@ -362,6 +363,7 @@ let effort_cost = function
   | LOAD_INT8_FP _ -> 30
   | VECDOT_FP _ -> 20
   | ARGMAX_FP _ -> 5
+  | ATTENTION_SCORES_FP _ -> 100
   | ATTENTION_KV_FP _ -> 200
   | ATTENTION_KV_Q16 _ -> 200
   | APPEND_VEC_FP _ -> 5
@@ -967,6 +969,10 @@ let strict_operands st = function
   | ARGMAX_Q16 (dest, addr, length)
   | ARGMAX_FP (dest, addr, length) ->
     is_numeric (getr st dest) && is_numeric (getr st addr) && is_numeric (getr st length)
+  | ATTENTION_SCORES_FP (dest, query, key, key_count, head_dim) ->
+    List.for_all
+      (fun reg -> is_numeric (getr st reg))
+      [dest; query; key; key_count; head_dim]
   | _ -> true
 
 let strict_ok st op = not st.strict_values || strict_operands st op
@@ -2895,6 +2901,53 @@ let exec_one st op =
         true
       end
     end
+  | ATTENTION_SCORES_FP (rs_dst, rs_q, rs_k, rs_key_count, rs_head_dim) ->
+    (match read_int st rs_dst, read_int st rs_q, read_int st rs_k,
+           read_int st rs_key_count, read_int st rs_head_dim with
+     | Some dst, Some query, Some key, Some key_count, Some head_dim
+       when key_count > 0 && key_count <= 8192
+            && head_dim > 0 && head_dim <= 1024 ->
+       (match checked_product key_count head_dim with
+        | Some key_cells
+          when valid_large_mem_span dst key_count
+               && valid_large_mem_span query head_dim
+               && valid_large_mem_span key key_cells
+               && not (ranges_overlap dst key_count query head_dim)
+               && not (ranges_overlap dst key_count key key_cells) ->
+          if not (add_dyn_product st [key_count; head_dim; 4] 1) then
+            revert st
+          else
+            (match read_fp64_array st.memory.data query head_dim,
+                   read_fp64_array st.memory.data key key_cells with
+             | Some query_values, Some key_values ->
+               let output = Array.make key_count 0.0 in
+               let scale = 1.0 /. sqrt (float_of_int head_dim) in
+               let ok = ref (finite_fp64 scale) in
+               for key_index = 0 to key_count - 1 do
+                 let acc = ref 0.0 in
+                 let key_base = key_index * head_dim in
+                 for dim = 0 to head_dim - 1 do
+                   acc :=
+                     !acc
+                     +. (Array.unsafe_get query_values dim
+                         *. Array.unsafe_get key_values (key_base + dim))
+                 done;
+                 let score = !acc *. scale in
+                 Array.unsafe_set output key_index score;
+                 if not (finite_fp64 !acc && finite_fp64 score) then
+                   ok := false
+               done;
+               if not !ok then
+                 revert st
+               else begin
+                 for index = 0 to key_count - 1 do
+                   mem_set_fp64 st.memory.data (dst + index) output.(index)
+                 done;
+                 true
+               end
+             | _ -> revert st)
+        | _ -> revert st)
+     | _ -> revert st)
   | ATTENTION_KV_FP (rs_q, rs_k, rs_v, rs_ctx, rs_T, rs_n_q_heads, rs_n_kv_heads, rs_head_dim) ->
     let q_addr = Z.to_int (to_z (getr st rs_q)) in
     let k_addr = Z.to_int (to_z (getr st rs_k)) in
@@ -3659,6 +3712,7 @@ module Verifier = struct
             | LOAD_INT8_FP (d,s,o,n,sc) -> check_regs pc [d;s;o;n;sc]
             | VECDOT_FP (d,a,b,n) -> check_regs pc [d;a;b;n]
             | ARGMAX_FP (d,a,n) -> check_regs pc [d;a;n]
+            | ATTENTION_SCORES_FP (d,q,k,t,h) -> check_regs pc [d;q;k;t;h]
             | ATTENTION_KV_FP (q,k,v,c,t,nq,nk,hd) -> check_regs pc [q;k;v;c;t;nq;nk;hd]
             | ATTENTION_KV_Q16 (q,k,v,c,t,nq,nk,hd) -> check_regs pc [q;k;v;c;t;nq;nk;hd]
             | APPEND_VEC_FP (d,p,s,n) -> check_regs pc [d;p;s;n]
