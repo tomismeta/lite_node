@@ -156,6 +156,7 @@ let opcode_name = function
   | VM.ELEMWISE_MUL_FP _ -> "ELEMWISE_MUL_FP"
   | VM.RESIDUAL_ADD_FP _ -> "RESIDUAL_ADD_FP"
   | VM.ROPE_APPLY_FP _ -> "ROPE_APPLY_FP"
+  | VM.ROPE_APPLY_INDEXED_FP _ -> "ROPE_APPLY_INDEXED_FP"
   | VM.LOAD_INT8_FP _ -> "LOAD_INT8_FP"
   | VM.VECDOT_FP _ -> "VECDOT_FP"
   | VM.ARGMAX_FP _ -> "ARGMAX_FP"
@@ -178,6 +179,7 @@ let admission_class = function
   | VM.ELEMWISE_MUL_FP _
   | VM.RESIDUAL_ADD_FP _
   | VM.ROPE_APPLY_FP _
+  | VM.ROPE_APPLY_INDEXED_FP _
   | VM.LOAD_INT8_FP _
   | VM.VECDOT_FP _
   | VM.ARGMAX_FP _

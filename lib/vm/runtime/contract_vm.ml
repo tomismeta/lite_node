@@ -155,6 +155,7 @@ type instr =
   | ELEMWISE_MUL_FP of reg * reg * reg
   | RESIDUAL_ADD_FP of reg * reg * reg
   | ROPE_APPLY_FP of reg * reg * reg * reg
+  | ROPE_APPLY_INDEXED_FP of reg * reg * reg * reg * reg * reg
   | LOAD_INT8_FP of reg * reg * reg * reg * reg
   | VECDOT_FP of reg * reg * reg * reg
   | ARGMAX_FP of reg * reg * reg
@@ -357,6 +358,7 @@ let effort_cost = function
   | ELEMWISE_MUL_FP _ -> 10
   | RESIDUAL_ADD_FP _ -> 10
   | ROPE_APPLY_FP _ -> 100
+  | ROPE_APPLY_INDEXED_FP _ -> 100
   | LOAD_INT8_FP _ -> 30
   | VECDOT_FP _ -> 20
   | ARGMAX_FP _ -> 5
@@ -929,6 +931,11 @@ let strict_operands st = function
   | LOAD_F64_LE_FP (dst, source, offset, length) ->
     is_numeric (getr st dst) && is_text (getr st source)
     && is_numeric (getr st offset) && is_numeric (getr st length)
+  | ROPE_APPLY_INDEXED_FP
+      (addr, count, head_dim, rot_dim, positions, base) ->
+    List.for_all
+      (fun reg -> is_numeric (getr st reg))
+      [addr; count; head_dim; rot_dim; positions; base]
   | SIGMOID_FP (addr, count)
   | SOFTPLUS_FP (addr, count)
   | SILU_FP (addr, count) ->
@@ -1001,6 +1008,21 @@ let same_range left left_n right right_n =
 
 let read_fp64_array mem addr n =
   let values = Array.init n (fun i -> mem_read_fp64 mem (addr + i)) in
+  if Array.for_all Option.is_some values then Some (Array.map Option.get values)
+  else None
+
+let max_exact_fp64_int =
+  Z.of_int64 9_007_199_254_740_991L
+
+let read_position_array mem addr n =
+  let values =
+    Array.init n (fun i ->
+      match Hashtbl.find_opt mem (addr + i) with
+      | Some (VInt z)
+        when Z.fits_int64 z && Z.leq (Z.abs z) max_exact_fp64_int ->
+        Some (Z.to_int64 z)
+      | _ -> None)
+  in
   if Array.for_all Option.is_some values then Some (Array.map Option.get values)
   else None
 
@@ -2742,6 +2764,69 @@ let exec_one st op =
         true
       end
     end
+  | ROPE_APPLY_INDEXED_FP
+      (rs_addr, rs_count, rs_head_dim, rs_rot_dim, rs_positions, rs_base) ->
+    (match read_int st rs_addr, read_int st rs_count,
+           read_int st rs_head_dim, read_int st rs_rot_dim,
+           read_int st rs_positions,
+           read_fp64_reg st rs_base with
+     | Some addr, Some count, Some head_dim, Some rot_dim,
+       Some positions_addr, Some base
+       when count > 0 && head_dim > 0 && rot_dim > 0
+            && rot_dim <= head_dim && rot_dim land 1 = 0
+            && finite_fp64 base && base > 1.0
+            && count mod head_dim = 0 ->
+       let pairs = rot_dim / 2 in
+       if not
+            (valid_large_mem_span addr count
+             && valid_large_mem_span positions_addr pairs)
+          || ranges_overlap addr count positions_addr pairs then
+         revert st
+       else
+         let heads = count / head_dim in
+         if not (add_dyn_effort st count) then
+           revert st
+         else if not (add_dyn_product st [heads; pairs; 8] 1) then
+           revert st
+         else
+           (match read_fp64_array st.memory.data addr count,
+                  read_position_array st.memory.data positions_addr pairs with
+            | Some input_values, Some positions ->
+              let output = Array.copy input_values in
+              let ok = ref true in
+              let nf = float_of_int rot_dim in
+              for head = 0 to heads - 1 do
+                let base_addr = head * head_dim in
+                for i = 0 to pairs - 1 do
+                  let pf = Int64.to_float positions.(i) in
+                  let theta =
+                    pf
+                    /. (base ** ((2.0 *. float_of_int i) /. nf))
+                  in
+                  let c = cos theta in
+                  let s = sin theta in
+                  let left_index = base_addr + i in
+                  let right_index = base_addr + i + pairs in
+                  let left = Array.unsafe_get input_values left_index in
+                  let right = Array.unsafe_get input_values right_index in
+                  Array.unsafe_set output left_index
+                    (left *. c -. right *. s);
+                  Array.unsafe_set output right_index
+                    (left *. s +. right *. c);
+                  if not (finite_fp64 theta && finite_fp64 c && finite_fp64 s)
+                  then ok := false
+                done
+              done;
+              if not !ok || not (Array.for_all finite_fp64 output) then
+                revert st
+              else begin
+                for i = 0 to count - 1 do
+                  mem_set_fp64 st.memory.data (addr + i) output.(i)
+                done;
+                true
+              end
+            | _ -> revert st)
+     | _ -> revert st)
   | LOAD_INT8_FP (rs_dst, rs_src, rs_off, rs_n, rs_scale) ->
     let dst = Z.to_int (to_z (getr st rs_dst)) in
     let src_b64 = to_string (getr st rs_src) in
@@ -3569,6 +3654,8 @@ module Verifier = struct
             | ELEMWISE_MUL_FP (d,s,n) -> check_regs pc [d;s;n]
             | RESIDUAL_ADD_FP (d,s,n) -> check_regs pc [d;s;n]
             | ROPE_APPLY_FP (a,n,p,b) -> check_regs pc [a;n;p;b]
+            | ROPE_APPLY_INDEXED_FP (a,n,h,r,p,b) ->
+              check_regs pc [a;n;h;r;p;b]
             | LOAD_INT8_FP (d,s,o,n,sc) -> check_regs pc [d;s;o;n;sc]
             | VECDOT_FP (d,a,b,n) -> check_regs pc [d;a;b;n]
             | ARGMAX_FP (d,a,n) -> check_regs pc [d;a;n]

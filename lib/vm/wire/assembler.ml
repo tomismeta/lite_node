@@ -155,6 +155,9 @@ let parse_line line =
       Contract_vm.LOAD_F32_LE_FP (r 0, r 1, r 2, r 3)
     | "LOAD_F64_LE_FP", [_;_;_;_] ->
       Contract_vm.LOAD_F64_LE_FP (r 0, r 1, r 2, r 3)
+    | "ROPE_APPLY_INDEXED_FP", [_;_;_;_;_;_] ->
+      Contract_vm.ROPE_APPLY_INDEXED_FP
+        (r 0, r 1, r 2, r 3, r 4, r 5)
     | "SIGMOID_FP", [_;_] -> Contract_vm.SIGMOID_FP (r 0, r 1)
     | "SOFTPLUS_FP", [_;_] -> Contract_vm.SOFTPLUS_FP (r 0, r 1)
     | "SILU_FP", [_;_] -> Contract_vm.SILU_FP (r 0, r 1)
@@ -391,6 +394,11 @@ let emit_instr = function
   | Contract_vm.LINEAR_Q1_G128_FP (d,l,q,o,m,k,n) -> Printf.sprintf "LINEAR_Q1_G128_FP %s, %s, %s, %s, %s, %s, %s" (emit_reg d) (emit_reg l) (emit_reg q) (emit_reg o) (emit_reg m) (emit_reg k) (emit_reg n)
   | Contract_vm.LOAD_F32_LE_FP (d,s,o,n) -> Printf.sprintf "LOAD_F32_LE_FP %s, %s, %s, %s" (emit_reg d) (emit_reg s) (emit_reg o) (emit_reg n)
   | Contract_vm.LOAD_F64_LE_FP (d,s,o,n) -> Printf.sprintf "LOAD_F64_LE_FP %s, %s, %s, %s" (emit_reg d) (emit_reg s) (emit_reg o) (emit_reg n)
+  | Contract_vm.ROPE_APPLY_INDEXED_FP (a,n,h,r,p,b) ->
+    Printf.sprintf
+      "ROPE_APPLY_INDEXED_FP %s, %s, %s, %s, %s, %s"
+      (emit_reg a) (emit_reg n) (emit_reg h) (emit_reg r)
+      (emit_reg p) (emit_reg b)
   | Contract_vm.SIGMOID_FP (a,n) -> Printf.sprintf "SIGMOID_FP %s, %s" (emit_reg a) (emit_reg n)
   | Contract_vm.SOFTPLUS_FP (a,n) -> Printf.sprintf "SOFTPLUS_FP %s, %s" (emit_reg a) (emit_reg n)
   | Contract_vm.CAUSAL_DEPTHWISE_CONV1D_FP (d,i,k,t,c,w) -> Printf.sprintf "CAUSAL_DEPTHWISE_CONV1D_FP %s, %s, %s, %s, %s, %s" (emit_reg d) (emit_reg i) (emit_reg k) (emit_reg t) (emit_reg c) (emit_reg w)

@@ -24,6 +24,11 @@
  (libraries octra_vm digestif digestif.c))
 
 (test
+ (name rope_indexed_primitive_test)
+ (modules rope_indexed_primitive_test)
+ (libraries octra_vm))
+
+(test
  (name causal_depthwise_conv_primitive_test)
  (modules causal_depthwise_conv_primitive_test)
  (libraries octra_vm inference_test_support digestif digestif.c))

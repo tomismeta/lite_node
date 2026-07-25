@@ -75,6 +75,8 @@ let host_float_cases = [
   ("mul-fp", "ELEMWISE_MUL_FP", VM.ELEMWISE_MUL_FP (0, 1, 2));
   ("residual-fp", "RESIDUAL_ADD_FP", VM.RESIDUAL_ADD_FP (0, 1, 2));
   ("rope-fp", "ROPE_APPLY_FP", VM.ROPE_APPLY_FP (0, 1, 2, 3));
+  ("rope-indexed-fp", "ROPE_APPLY_INDEXED_FP",
+   VM.ROPE_APPLY_INDEXED_FP (0, 1, 2, 3, 4, 5));
   ("load-int8-fp", "LOAD_INT8_FP", VM.LOAD_INT8_FP (0, 1, 2, 3, 4));
   ("vecdot-fp", "VECDOT_FP", VM.VECDOT_FP (0, 1, 2, 3));
   ("argmax-fp", "ARGMAX_FP", VM.ARGMAX_FP (0, 1, 2));

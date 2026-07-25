@@ -471,6 +471,9 @@ let step facts pc env = function
     expect_nums pc env [dest; source; count]
   | Contract_vm.ROPE_APPLY_FP (addr, count, position, base) ->
     expect_nums pc env [addr; count; position; base]
+  | Contract_vm.ROPE_APPLY_INDEXED_FP
+      (addr, count, head_dim, rot_dim, positions, base) ->
+    expect_nums pc env [addr; count; head_dim; rot_dim; positions; base]
   | Contract_vm.LOAD_INT8_FP (dest, source, offset, count, scale) ->
     (match expect_text pc env source with
      | Error error -> Error error

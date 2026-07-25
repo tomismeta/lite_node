@@ -891,7 +891,8 @@ let rec typ_of_expr env = function
      | "load_f64_le_fp" | "shift_round"
      | "matmul_fp" | "rmsnorm_fp" | "rmsnorm_fp_eps" | "sigmoid_fp" | "softplus_fp" | "silu_fp"
      | "causal_depthwise_conv1d_fp" | "gated_delta_rule_fp" | "elemwise_mul_fp"
-     | "residual_add_fp" | "rope_apply_fp" | "load_int8_fp"
+     | "residual_add_fp" | "rope_apply_fp" | "rope_apply_indexed_fp"
+     | "load_int8_fp"
      | "attention_kv_fp" | "attention_kv_q16" | "append_vec_fp"
      | "load_int8_q16" | "append_vec_q16" -> TBool
      | "call" -> TString
@@ -1663,6 +1664,14 @@ and gen_builtin env name args =
    | "rope_apply_fp" ->
      emit env (Contract_vm.ROPE_APPLY_FP (nth 0, nth 1, nth 2, nth 3));
      emit env (Contract_vm.LDI (rd, VBool true))
+   | "rope_apply_indexed_fp" ->
+     if env.declaration <> ProgramDecl then
+       gerr env.line "rope_apply_indexed_fp is available only in Program"
+     else begin
+       emit env (Contract_vm.ROPE_APPLY_INDEXED_FP
+                   (nth 0, nth 1, nth 2, nth 3, nth 4, nth 5));
+       emit env (Contract_vm.LDI (rd, VBool true))
+     end
    | "load_int8_fp" ->
      emit env (Contract_vm.LOAD_INT8_FP (nth 0, nth 1, nth 2, nth 3, nth 4));
      emit env (Contract_vm.LDI (rd, VBool true))

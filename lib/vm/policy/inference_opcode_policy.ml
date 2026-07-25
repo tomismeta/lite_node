@@ -125,6 +125,7 @@ let opcode_class = function
   | Contract_vm.ELEMWISE_MUL_FP _
   | Contract_vm.RESIDUAL_ADD_FP _ -> Requires "tensor.strict-fp"
   | Contract_vm.ARGMAX_FP _ -> Requires "tensor.argmax"
+  | Contract_vm.ROPE_APPLY_INDEXED_FP _ -> Requires "tensor.rope-indexed"
   | Contract_vm.CAUSAL_DEPTHWISE_CONV1D_FP _ ->
     Requires "sequence.causal-convolution"
   | Contract_vm.GATED_DELTA_RULE_FP _ -> Requires "sequence.delta-rule"
