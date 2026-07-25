@@ -177,6 +177,10 @@ let parse_line line =
     | "ARGMAX_FP", [_;_;_] -> Contract_vm.ARGMAX_FP (r 0, r 1, r 2)
     | "ATTENTION_SCORES_FP", [_;_;_;_;_] ->
       Contract_vm.ATTENTION_SCORES_FP (r 0, r 1, r 2, r 3, r 4)
+    | "SOFTMAX_FP", [_;_;_] ->
+      Contract_vm.SOFTMAX_FP (r 0, r 1, r 2)
+    | "ATTENTION_WEIGHTED_SUM_FP", [_;_;_;_;_] ->
+      Contract_vm.ATTENTION_WEIGHTED_SUM_FP (r 0, r 1, r 2, r 3, r 4)
     | "FHE_LOAD_PK", [_;_] -> Contract_vm.FHE_LOAD_PK (r 0, r 1)
     | "FHE_ADD", [_;_;_;_] -> Contract_vm.FHE_ADD (r 0, r 1, r 2, r 3)
     | "FHE_SUB", [_;_;_;_] -> Contract_vm.FHE_SUB (r 0, r 1, r 2, r 3)
@@ -389,6 +393,14 @@ let emit_instr = function
     Printf.sprintf
       "ATTENTION_SCORES_FP %s, %s, %s, %s, %s"
       (emit_reg d) (emit_reg q) (emit_reg k) (emit_reg t) (emit_reg h)
+  | Contract_vm.SOFTMAX_FP (d,s,n) ->
+    Printf.sprintf
+      "SOFTMAX_FP %s, %s, %s"
+      (emit_reg d) (emit_reg s) (emit_reg n)
+  | Contract_vm.ATTENTION_WEIGHTED_SUM_FP (d,p,v,t,h) ->
+    Printf.sprintf
+      "ATTENTION_WEIGHTED_SUM_FP %s, %s, %s, %s, %s"
+      (emit_reg d) (emit_reg p) (emit_reg v) (emit_reg t) (emit_reg h)
   | Contract_vm.ATTENTION_KV_FP (q,k,v,c,t,nq,nk,hd) -> Printf.sprintf "ATTENTION_KV_FP %s, %s, %s, %s, %s, %s, %s, %s" (emit_reg q) (emit_reg k) (emit_reg v) (emit_reg c) (emit_reg t) (emit_reg nq) (emit_reg nk) (emit_reg hd)
   | Contract_vm.ATTENTION_KV_Q16 (q,k,v,c,t,nq,nk,hd) -> Printf.sprintf "ATTENTION_KV_Q16 %s, %s, %s, %s, %s, %s, %s, %s" (emit_reg q) (emit_reg k) (emit_reg v) (emit_reg c) (emit_reg t) (emit_reg nq) (emit_reg nk) (emit_reg hd)
   | Contract_vm.VECDOT_Q16 (d,a,b,n) -> Printf.sprintf "VECDOT_Q16 %s, %s, %s, %s" (emit_reg d) (emit_reg a) (emit_reg b) (emit_reg n)

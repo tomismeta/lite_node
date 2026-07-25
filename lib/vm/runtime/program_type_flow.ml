@@ -489,6 +489,11 @@ let step facts pc env = function
   | Contract_vm.ATTENTION_SCORES_FP
       (dest, query, key, key_count, head_dim) ->
     expect_nums pc env [dest; query; key; key_count; head_dim]
+  | Contract_vm.SOFTMAX_FP (dest, scores, count) ->
+    expect_nums pc env [dest; scores; count]
+  | Contract_vm.ATTENTION_WEIGHTED_SUM_FP
+      (dest, probs, value, key_count, head_dim) ->
+    expect_nums pc env [dest; probs; value; key_count; head_dim]
   | Contract_vm.ATTENTION_KV_FP
       (query, key, value, context, total, query_heads, key_heads, head_dim) ->
     expect_nums pc env

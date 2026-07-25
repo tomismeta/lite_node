@@ -893,7 +893,8 @@ let rec typ_of_expr env = function
      | "causal_depthwise_conv1d_fp" | "gated_delta_rule_fp" | "elemwise_mul_fp"
      | "residual_add_fp" | "rope_apply_fp" | "rope_apply_indexed_fp"
      | "load_int8_fp"
-     | "attention_scores_fp" | "attention_kv_fp" | "attention_kv_q16" | "append_vec_fp"
+     | "attention_scores_fp" | "softmax_fp"
+     | "attention_weighted_sum_fp" | "attention_kv_fp" | "attention_kv_q16" | "append_vec_fp"
      | "load_int8_q16" | "append_vec_q16" -> TBool
      | "call" -> TString
      | "deploy" | "circle_spawn" -> TAddress
@@ -1690,6 +1691,22 @@ and gen_builtin env name args =
        gerr env.line "attention_scores_fp is available only in Program"
      else begin
        emit env (Contract_vm.ATTENTION_SCORES_FP
+                   (nth 0, nth 1, nth 2, nth 3, nth 4));
+       emit env (Contract_vm.LDI (rd, VBool true))
+     end
+   | "softmax_fp" ->
+     if env.declaration <> ProgramDecl then
+       gerr env.line "softmax_fp is available only in Program"
+     else begin
+       emit env (Contract_vm.SOFTMAX_FP
+                   (nth 0, nth 1, nth 2));
+       emit env (Contract_vm.LDI (rd, VBool true))
+     end
+   | "attention_weighted_sum_fp" ->
+     if env.declaration <> ProgramDecl then
+       gerr env.line "attention_weighted_sum_fp is available only in Program"
+     else begin
+       emit env (Contract_vm.ATTENTION_WEIGHTED_SUM_FP
                    (nth 0, nth 1, nth 2, nth 3, nth 4));
        emit env (Contract_vm.LDI (rd, VBool true))
      end

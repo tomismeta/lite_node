@@ -30,6 +30,8 @@ let of_instr = function
   | Contract_vm.RESIDUAL_ADD_FP _
   | Contract_vm.ROPE_APPLY_INDEXED_FP _
   | Contract_vm.ATTENTION_SCORES_FP _
+  | Contract_vm.SOFTMAX_FP _
+  | Contract_vm.ATTENTION_WEIGHTED_SUM_FP _
   | Contract_vm.CAUSAL_DEPTHWISE_CONV1D_FP _
   | Contract_vm.GATED_DELTA_RULE_FP _ -> [Memory_read; Memory_write]
   | Contract_vm.ARGMAX_FP _ -> [Memory_read]

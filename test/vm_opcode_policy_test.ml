@@ -82,6 +82,9 @@ let host_float_cases = [
   ("argmax-fp", "ARGMAX_FP", VM.ARGMAX_FP (0, 1, 2));
   ("attention-scores-fp", "ATTENTION_SCORES_FP",
    VM.ATTENTION_SCORES_FP (0, 1, 2, 3, 4));
+  ("softmax-fp", "SOFTMAX_FP", VM.SOFTMAX_FP (0, 1, 2));
+  ("attention-weighted-sum-fp", "ATTENTION_WEIGHTED_SUM_FP",
+   VM.ATTENTION_WEIGHTED_SUM_FP (0, 1, 2, 3, 4));
   ("attention-fp", "ATTENTION_KV_FP",
    VM.ATTENTION_KV_FP (0, 1, 2, 3, 4, 5, 6, 7));
   ("append-fp", "APPEND_VEC_FP", VM.APPEND_VEC_FP (0, 1, 2, 3));

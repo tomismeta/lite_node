@@ -160,6 +160,8 @@ type instr =
   | VECDOT_FP of reg * reg * reg * reg
   | ARGMAX_FP of reg * reg * reg
   | ATTENTION_SCORES_FP of reg * reg * reg * reg * reg
+  | SOFTMAX_FP of reg * reg * reg
+  | ATTENTION_WEIGHTED_SUM_FP of reg * reg * reg * reg * reg
   | ATTENTION_KV_FP of reg * reg * reg * reg * reg * reg * reg * reg
   | ATTENTION_KV_Q16 of reg * reg * reg * reg * reg * reg * reg * reg
   | APPEND_VEC_FP of reg * reg * reg * reg
@@ -364,6 +366,8 @@ let effort_cost = function
   | VECDOT_FP _ -> 20
   | ARGMAX_FP _ -> 5
   | ATTENTION_SCORES_FP _ -> 100
+  | SOFTMAX_FP _ -> 100
+  | ATTENTION_WEIGHTED_SUM_FP _ -> 100
   | ATTENTION_KV_FP _ -> 200
   | ATTENTION_KV_Q16 _ -> 200
   | APPEND_VEC_FP _ -> 5
@@ -973,6 +977,14 @@ let strict_operands st = function
     List.for_all
       (fun reg -> is_numeric (getr st reg))
       [dest; query; key; key_count; head_dim]
+  | SOFTMAX_FP (dest, scores, count) ->
+    List.for_all
+      (fun reg -> is_numeric (getr st reg))
+      [dest; scores; count]
+  | ATTENTION_WEIGHTED_SUM_FP (dest, probs, value, key_count, head_dim) ->
+    List.for_all
+      (fun reg -> is_numeric (getr st reg))
+      [dest; probs; value; key_count; head_dim]
   | _ -> true
 
 let strict_ok st op = not st.strict_values || strict_operands st op
@@ -2948,6 +2960,110 @@ let exec_one st op =
              | _ -> revert st)
         | _ -> revert st)
      | _ -> revert st)
+  | SOFTMAX_FP (rs_dst, rs_scores, rs_count) ->
+    (match read_int st rs_dst, read_int st rs_scores, read_int st rs_count with
+     | Some dst, Some scores, Some count
+       when count > 0 && count <= 8192
+            && valid_large_mem_span dst count
+            && valid_large_mem_span scores count
+            && (not (ranges_overlap dst count scores count)
+                || same_range dst count scores count) ->
+       if not (add_dyn_product st [count; 8] 1) then
+         revert st
+       else
+         (match read_fp64_array st.memory.data scores count with
+         | Some score_values ->
+            let max_score = ref (Array.unsafe_get score_values 0) in
+            for index = 1 to count - 1 do
+              let value = Array.unsafe_get score_values index in
+              if value > !max_score then max_score := value
+            done;
+            let exps = Array.make count 0.0 in
+            let sum_exp = ref 0.0 in
+            let ok = ref true in
+            for index = 0 to count - 1 do
+              let shifted =
+                Array.unsafe_get score_values index -. !max_score
+              in
+              let value = exp shifted in
+              Array.unsafe_set exps index value;
+              sum_exp := !sum_exp +. value;
+              if not
+                   (finite_fp64 shifted
+                    && finite_fp64 value
+                    && finite_fp64 !sum_exp)
+              then
+                ok := false
+            done;
+            if (not !ok) || !sum_exp <= 0.0 then
+              revert st
+            else begin
+              let output = Array.make count 0.0 in
+              for index = 0 to count - 1 do
+                let value = Array.unsafe_get exps index /. !sum_exp in
+                Array.unsafe_set output index value;
+                if not (finite_fp64 value) then ok := false
+              done;
+              if not !ok then
+                revert st
+              else begin
+                for index = 0 to count - 1 do
+                  mem_set_fp64 st.memory.data (dst + index) output.(index)
+                done;
+                true
+              end
+            end
+          | None -> revert st)
+     | _ -> revert st)
+  | ATTENTION_WEIGHTED_SUM_FP (rs_dst, rs_probs, rs_value, rs_key_count, rs_head_dim) ->
+    (match read_int st rs_dst, read_int st rs_probs, read_int st rs_value,
+           read_int st rs_key_count, read_int st rs_head_dim with
+     | Some dst, Some probs, Some value, Some key_count, Some head_dim
+       when key_count > 0 && key_count <= 8192
+            && head_dim > 0 && head_dim <= 1024 ->
+       (match checked_product key_count head_dim with
+        | Some value_cells
+          when valid_large_mem_span dst head_dim
+               && valid_large_mem_span probs key_count
+               && valid_large_mem_span value value_cells
+               && not (ranges_overlap dst head_dim probs key_count)
+               && not (ranges_overlap dst head_dim value value_cells) ->
+          if not (add_dyn_product st [key_count; head_dim; 4] 1) then
+            revert st
+          else
+            (match read_fp64_array st.memory.data probs key_count,
+                   read_fp64_array st.memory.data value value_cells with
+             | Some prob_values, Some value_values ->
+              let output = Array.make head_dim 0.0 in
+              let ok = ref true in
+              for dim = 0 to head_dim - 1 do
+                let acc = ref 0.0 in
+                for key_index = 0 to key_count - 1 do
+                  let product =
+                    Array.unsafe_get prob_values key_index
+                    *. Array.unsafe_get value_values
+                         ((key_index * head_dim) + dim)
+                  in
+                  acc :=
+                    !acc
+                     +. product;
+                  if not (finite_fp64 product && finite_fp64 !acc) then
+                    ok := false
+                done;
+                Array.unsafe_set output dim !acc;
+                if not (finite_fp64 !acc) then ok := false
+               done;
+               if not !ok then
+                 revert st
+               else begin
+                 for index = 0 to head_dim - 1 do
+                   mem_set_fp64 st.memory.data (dst + index) output.(index)
+                 done;
+                 true
+               end
+             | _ -> revert st)
+        | _ -> revert st)
+     | _ -> revert st)
   | ATTENTION_KV_FP (rs_q, rs_k, rs_v, rs_ctx, rs_T, rs_n_q_heads, rs_n_kv_heads, rs_head_dim) ->
     let q_addr = Z.to_int (to_z (getr st rs_q)) in
     let k_addr = Z.to_int (to_z (getr st rs_k)) in
@@ -3713,6 +3829,9 @@ module Verifier = struct
             | VECDOT_FP (d,a,b,n) -> check_regs pc [d;a;b;n]
             | ARGMAX_FP (d,a,n) -> check_regs pc [d;a;n]
             | ATTENTION_SCORES_FP (d,q,k,t,h) -> check_regs pc [d;q;k;t;h]
+            | SOFTMAX_FP (d,s,n) -> check_regs pc [d;s;n]
+            | ATTENTION_WEIGHTED_SUM_FP (d,p,v,t,h) ->
+              check_regs pc [d;p;v;t;h]
             | ATTENTION_KV_FP (q,k,v,c,t,nq,nk,hd) -> check_regs pc [q;k;v;c;t;nq;nk;hd]
             | ATTENTION_KV_Q16 (q,k,v,c,t,nq,nk,hd) -> check_regs pc [q;k;v;c;t;nq;nk;hd]
             | APPEND_VEC_FP (d,p,s,n) -> check_regs pc [d;p;s;n]

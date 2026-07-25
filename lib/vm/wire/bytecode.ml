@@ -180,6 +180,8 @@ let op_tag = function
   | Contract_vm.LOAD_F64_LE_FP _ -> 0x91
   | Contract_vm.ROPE_APPLY_INDEXED_FP _ -> 0x92
   | Contract_vm.ATTENTION_SCORES_FP _ -> 0x93
+  | Contract_vm.SOFTMAX_FP _ -> 0x94
+  | Contract_vm.ATTENTION_WEIGHTED_SUM_FP _ -> 0x95
   | Contract_vm.SILU_INPLACE _ -> 0x67
   | Contract_vm.ELEMWISE_MUL_INPLACE _ -> 0x68
   | Contract_vm.LOAD_INT8_BYTES_TO_MEM _ -> 0x69
@@ -409,6 +411,10 @@ let encode_instr buf pool instr =
     put_u8 buf d; put_u8 buf a; put_u8 buf n
   | Contract_vm.ATTENTION_SCORES_FP (d,q,k,t,h) ->
     put_u8 buf d; put_u8 buf q; put_u8 buf k; put_u8 buf t; put_u8 buf h
+  | Contract_vm.SOFTMAX_FP (d,s,n) ->
+    put_u8 buf d; put_u8 buf s; put_u8 buf n
+  | Contract_vm.ATTENTION_WEIGHTED_SUM_FP (d,p,v,t,h) ->
+    put_u8 buf d; put_u8 buf p; put_u8 buf v; put_u8 buf t; put_u8 buf h
   | Contract_vm.ATTENTION_KV_FP (q,k,v,c,t,nq,nk,hd) ->
     put_u8 buf q; put_u8 buf k; put_u8 buf v; put_u8 buf c;
     put_u8 buf t; put_u8 buf nq; put_u8 buf nk; put_u8 buf hd
@@ -644,6 +650,15 @@ let decode_instr s pos consts =
      p+6)
   | 0x93 ->
     (Contract_vm.ATTENTION_SCORES_FP
+       (get_u8 s p, get_u8 s (p+1), get_u8 s (p+2), get_u8 s (p+3),
+        get_u8 s (p+4)),
+     p+5)
+  | 0x94 ->
+    (Contract_vm.SOFTMAX_FP
+       (get_u8 s p, get_u8 s (p+1), get_u8 s (p+2)),
+     p+3)
+  | 0x95 ->
+    (Contract_vm.ATTENTION_WEIGHTED_SUM_FP
        (get_u8 s p, get_u8 s (p+1), get_u8 s (p+2), get_u8 s (p+3),
         get_u8 s (p+4)),
      p+5)

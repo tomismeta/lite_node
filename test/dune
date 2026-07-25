@@ -34,6 +34,11 @@
  (libraries octra_vm))
 
 (test
+ (name attention_tail_primitive_test)
+ (modules attention_tail_primitive_test)
+ (libraries octra_vm))
+
+(test
  (name causal_depthwise_conv_primitive_test)
  (modules causal_depthwise_conv_primitive_test)
  (libraries octra_vm inference_test_support digestif digestif.c))
