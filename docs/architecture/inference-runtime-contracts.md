@@ -94,6 +94,14 @@ consensus-safe admission path until a numerical profile defines and enforces
 their semantics. A capability declaration never turns an otherwise unsafe
 instruction into a consensus-safe one.
 
+The local inference harness may admit selected proof opcodes under explicit
+capabilities while their deterministic semantics are being qualified. That is
+candidate execution, not validator readiness. A proof opcode becomes
+validator-grade only when its semantic root is backed by the determinism
+contract, scalar oracle, edge-case vectors, cross-platform conformance, and
+failure atomicity tests described in
+[`inference-determinism-hardening.md`](inference-determinism-hardening.md).
+
 Plain inference forbids `FHE_*` opcodes, storage/object-state reads and writes,
 blob writes, external calls, deploys, transfers, events, and journal operations.
 It also does not advertise `MATMUL_Q16` until Program type-flow supports that

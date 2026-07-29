@@ -16,6 +16,10 @@ Baseline: `octra-labs/lite_node` `main` at
   local batch/session performance path that follows from the proven runtime
   contracts. It cannot override canonical roots, session identity, admission,
   or receipt semantics.
+- [`inference-determinism-hardening.md`](inference-determinism-hardening.md)
+  owns the gap between local inference execution and validator-grade
+  deterministic math. It cannot expand the execution surface; it defines the
+  conformance bar for accepting that surface.
 - [`inference-capability-requirements.md`](inference-capability-requirements.md)
   is the non-normative working inventory of model-driven compute needs.
 - [`vm-semantic-inventory.md`](vm-semantic-inventory.md) is the observational
@@ -24,10 +28,11 @@ Baseline: `octra-labs/lite_node` `main` at
   local demo path and is not a protocol authority.
 
 On conflict, contracts override this document for roots, identity, effort,
-sessions, cancellation, and receipts. The capability inventory cannot override
-either document. After Phase 0, roots, canonical advances, effort, rollback,
-and the one-VM boundary are closed unless implementation reveals a factual
-contradiction.
+sessions, cancellation, and receipts. The determinism hardening plan overrides
+capability notes for numerical readiness. The capability inventory cannot
+override either document. After Phase 0, roots, canonical advances, effort,
+rollback, and the one-VM boundary are closed unless implementation reveals a
+factual contradiction.
 
 Bonsai 27B is the first qualification model. It is not part of the VM
 contract.
