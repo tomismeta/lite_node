@@ -49,6 +49,18 @@ val advance :
   t ->
   (t * Inference_receipt.t, error) result
 
+val advance_profiled :
+  profile:Inference_execution.profile_config ->
+  plan:Inference_plan.t ->
+  expected_sequence:int ->
+  t ->
+  ( t
+    * Inference_receipt.t
+    * Inference_execution.execution_profile list
+    * Contract_vm.opcode_profile list,
+    error )
+  result
+
 val finalize :
   expected_sequence:int ->
   t ->

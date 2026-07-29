@@ -197,7 +197,7 @@ let open_session ~plan =
     committed_effort = 0;
   }
 
-let advance ~plan ~expected_sequence session =
+let advance_with_profile ?profile ~plan ~expected_sequence session =
   match check_sequence expected_sequence session with
   | Error error -> Error error
   | Ok () ->
@@ -208,14 +208,29 @@ let advance ~plan ~expected_sequence session =
       match check_identity ~plan session with
       | Error error -> Error error
       | Ok () ->
-        (match Inference_execution.run ~plan () with
+        let execution_result =
+          match profile with
+          | None ->
+            (match Inference_execution.run ~plan () with
+             | Ok execution -> Ok (execution, [], [])
+             | Error error -> Error error)
+          | Some profile ->
+            (match Inference_execution.run_profiled ~profile ~plan () with
+             | Ok profiled ->
+               Ok
+                 ( profiled.Inference_execution.result,
+                   profiled.profile.execution_profile,
+                   profiled.profile.opcode_profile )
+             | Error error -> Error error)
+        in
+        (match execution_result with
          | Error (Inference_execution.Entrypoint_unsupported name) ->
            Error (Entrypoint_unsupported name)
          | Error (Inference_execution.Entrypoint_missing label) ->
            Error (Entrypoint_missing label)
          | Error error ->
            Error (Execution_error (Inference_execution.error_message error))
-         | Ok execution ->
+         | Ok (execution, execution_profile, opcode_profile) ->
            let effort = execution.Inference_execution.effort_used in
            let request = Inference_plan.request plan in
            if effort > request.max_advance_effort then
@@ -239,7 +254,20 @@ let advance ~plan ~expected_sequence session =
              } in
              (match check_session_size next with
               | Error error -> Error error
-              | Ok next -> Ok (next, receipt ~status:"advanced" session next)))
+              | Ok next ->
+                Ok
+                  ( next,
+                    receipt ~status:"advanced" session next,
+                    execution_profile,
+                    opcode_profile )))
+
+let advance ~plan ~expected_sequence session =
+  match advance_with_profile ~plan ~expected_sequence session with
+  | Error error -> Error error
+  | Ok (next, receipt, _, _) -> Ok (next, receipt)
+
+let advance_profiled ~profile ~plan ~expected_sequence session =
+  advance_with_profile ~profile ~plan ~expected_sequence session
 
 let finalize ~expected_sequence session =
   match check_sequence expected_sequence session with

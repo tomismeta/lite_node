@@ -13,8 +13,8 @@ Include at startup:
 *)
 
 
-module VM = Contract_vm
-module Policy = Opcode_policy
+module VM = Octra_vm.Contract_vm
+module Policy = Octra_vm.Opcode_policy
 
 let check label condition =
   if not condition then failwith label

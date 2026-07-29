@@ -19,6 +19,41 @@ type result = {
   candidate_root : string;
 }
 
+type execution_profile = {
+  phase : string;
+  microseconds : int;
+}
+
+type profile_config = {
+  clock : unit -> float;
+  opcode_name : Contract_vm.instr -> string;
+}
+
+type profile = {
+  execution_profile : execution_profile list;
+  opcode_profile : Contract_vm.opcode_profile list;
+}
+
+type profiled_result = {
+  result : result;
+  profile : profile;
+}
+
+let profile_microseconds started stopped =
+  int_of_float ((stopped -. started) *. 1_000_000.0)
+
+let profile_phase profile phases phase f =
+  match profile with
+  | None -> f ()
+  | Some config ->
+    let started = config.clock () in
+    let result = f () in
+    let stopped = config.clock () in
+    phases :=
+      { phase; microseconds = profile_microseconds started stopped }
+      :: !phases;
+    result
+
 type error =
   | Entrypoint_unsupported of string
   | Entrypoint_missing of int
@@ -165,13 +200,10 @@ let bind_request_input state request input =
     request.Inference_request.input_root
     input
 
-let check_scratch_limit state ~max_bytes =
-  match memory_payload state with
-  | Error error -> Error error
-  | Ok payload ->
-    let length = String.length payload in
-    if length > max_bytes then Error (Scratch_limit_exceeded (length, max_bytes))
-    else Ok ()
+let check_scratch_payload payload ~max_bytes =
+  let length = String.length payload in
+  if length > max_bytes then Error (Scratch_limit_exceeded (length, max_bytes))
+  else Ok ()
 
 let plain_ctx =
   {
@@ -179,7 +211,7 @@ let plain_ctx =
     allow_fhe_capability = (fun _ -> false);
   }
 
-let run ~plan () =
+let run_internal ?profile ~plan () =
   let admitted = Inference_plan.admitted plan in
   let target = Inference_plan.target plan in
   let request = Inference_plan.request plan in
@@ -208,41 +240,86 @@ let run ~plan () =
            ~storage:(Hashtbl.create 16)
            ()
        in
-       add_pins state pins;
-       bind_request_input state request (Inference_plan.input plan);
-       let fixed = Contract.fix_jumps (Admission.code admitted) in
+       let execution_profile = ref [] in
+       profile_phase profile execution_profile "add_pins" (fun () ->
+         add_pins state pins);
+       profile_phase profile execution_profile "bind_request_input" (fun () ->
+         bind_request_input state request (Inference_plan.input plan));
+       let fixed =
+         profile_phase profile execution_profile "fix_jumps" (fun () ->
+           Contract.fix_jumps (Admission.code admitted))
+       in
        state.Contract_vm.pc <- pc;
-       if not (Contract_vm.run state fixed) || state.Contract_vm.reverted then
+       let success, opcode_profile =
+         profile_phase profile execution_profile "vm_run" (fun () ->
+           match profile with
+           | None -> Contract_vm.run state fixed, []
+           | Some config ->
+             Contract_vm.run_profiled
+               ~clock:config.clock
+               ~opcode_name:config.opcode_name
+               state
+               fixed)
+       in
+       if not success || state.Contract_vm.reverted then
          Error Execution_failed
        else
          (match
-            check_scratch_limit
-              state
-              ~max_bytes:requirement.Execution_requirement.limits.max_scratch_bytes
-          with
+            profile_phase profile execution_profile "candidate_payload" (fun () ->
+              candidate_payload state)
+         with
           | Error error -> Error error
-          | Ok () ->
+          | Ok candidate ->
             (match
-               output_payload
-                 state
-                 ~max_bytes:request.Inference_request.max_output_bytes,
-               candidate_payload state
+               profile_phase profile execution_profile "scratch_check" (fun () ->
+                 check_scratch_payload
+                   candidate
+                   ~max_bytes:
+                     requirement.Execution_requirement.limits.max_scratch_bytes)
              with
-             | Ok output, Ok candidate ->
-               Ok {
-                 effort_used = state.Contract_vm.effort_used;
-                 output_root =
-                   output_root
-                     ~target_root:(Inference_target.root target)
-                     ~session_abi_root:target.Inference_target.session_abi_root
-                     output;
-                 candidate_root =
-                   candidate_root
-                     ~target_root:(Inference_target.root target)
-                     candidate;
-               }
-             | Error error, _
-             | _, Error error -> Error error)))
+             | Error error -> Error error
+             | Ok () ->
+               (match
+                  profile_phase profile execution_profile "output_payload" (fun () ->
+                    output_payload
+                      state
+                      ~max_bytes:request.Inference_request.max_output_bytes)
+                with
+                | Ok output ->
+                  let output_root =
+                    profile_phase profile execution_profile "output_root" (fun () ->
+                      output_root
+                        ~target_root:(Inference_target.root target)
+                        ~session_abi_root:target.Inference_target.session_abi_root
+                        output)
+                  in
+                  let candidate_root =
+                    profile_phase profile execution_profile "candidate_root" (fun () ->
+                      candidate_root
+                        ~target_root:(Inference_target.root target)
+                        candidate)
+                  in
+               Ok
+                 ( {
+                     effort_used = state.Contract_vm.effort_used;
+                     output_root;
+                     candidate_root;
+                   },
+                   {
+                     execution_profile = List.rev !execution_profile;
+                     opcode_profile;
+                   } )
+                | Error error -> Error error))))
+
+let run ~plan () =
+  match run_internal ~plan () with
+  | Ok (result, _) -> Ok result
+  | Error error -> Error error
+
+let run_profiled ~profile ~plan () =
+  match run_internal ~profile ~plan () with
+  | Ok (result, profile) -> Ok { result; profile }
+  | Error error -> Error error
 
 let error_message = function
   | Entrypoint_unsupported name ->

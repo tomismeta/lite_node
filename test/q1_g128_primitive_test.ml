@@ -179,6 +179,31 @@ let check_golden_fixture () =
        (sha256 output)
        "43411283d083bd6e959bca6aa7edbebc55d8ad251510d992bd52046ac71d9d22")
 
+let check_profiled_run_equivalence () =
+  let state, dst, _ = q1_state () in
+  let profiled, profile =
+    VM.run_profiled
+      ~clock:(fun () -> 0.0)
+      ~opcode_name:(function
+        | VM.LINEAR_Q1_G128_FP _ -> "LINEAR_Q1_G128_FP"
+        | VM.STOP -> "STOP"
+        | _ -> "other")
+      state
+      q1_code
+  in
+  check "profiled q1 run succeeds" profiled;
+  check
+    "profiled q1 output bytes"
+    (output_bytes state dst 6 = expected_output);
+  check
+    "profiled q1 records opcode"
+    (List.exists
+       (fun (row : VM.opcode_profile) ->
+         String.equal row.opcode "LINEAR_Q1_G128_FP"
+         && row.count = 1
+         && row.effort_used > 0)
+       profile)
+
 let check_invalid_input_reverts () =
   let state, dst, lhs = q1_state () in
   set_output_cell state dst 42.0;
@@ -495,6 +520,7 @@ let check_fload_session () =
 
 let () =
   check_golden_fixture ();
+  check_profiled_run_equivalence ();
   check_invalid_input_reverts ();
   check_bad_q1_reverts ();
   check_shape_and_effort_revert ();

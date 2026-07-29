@@ -1029,6 +1029,18 @@ let read_fp64_array mem addr n =
   if Array.for_all Option.is_some values then Some (Array.map Option.get values)
   else None
 
+let decode_q1_g128_scales q1 off blocks =
+  let block_bytes = 18 in
+  let scales = Array.make blocks 0.0 in
+  let ok = ref true in
+  for block = 0 to blocks - 1 do
+    let block_offset = off + (block * block_bytes) in
+    match fp16_le_to_fp64 q1 block_offset with
+    | None -> ok := false
+    | Some scale -> scales.(block) <- scale
+  done;
+  if !ok then Some scales else None
+
 let max_exact_fp64_int =
   Z.of_int64 9_007_199_254_740_991L
 
@@ -2280,44 +2292,47 @@ let exec_one st op =
                if not (Array.for_all Option.is_some lhs_values) then revert st
                else
                  let lhs_values = Array.map Option.get lhs_values in
-                 let output = Array.make dst_n 0.0 in
-                 let ok = ref true in
-                 for row = 0 to m - 1 do
-                   for col = 0 to n - 1 do
-                     let acc = ref 0.0 in
-                     for block = 0 to blocks_per_output - 1 do
-                       let block_offset =
-                         off + (((col * blocks_per_output) + block) * block_bytes)
-                       in
-                       match fp16_le_to_fp64 q1 block_offset with
-                       | None -> ok := false
-                       | Some scale ->
-                         for item = 0 to group - 1 do
-                           let sign_byte =
-                             Char.code q1.[block_offset + 2 + (item lsr 3)]
-                           in
-                           let sign =
-                             if (sign_byte lsr (item land 7)) land 1 = 1 then
-                               1.0
-                             else
-                               -1.0
-                           in
-                           let lhs_value =
-                             lhs_values.((row * k) + (block * group) + item)
-                           in
-                           acc := !acc +. (lhs_value *. sign *. scale)
-                         done
-                     done;
-                     output.((row * n) + col) <- !acc
-                   done
-                 done;
-                 if not !ok || not (Array.for_all finite_fp64 output) then revert st
-                 else begin
-                   for i = 0 to dst_n - 1 do
-                     mem_set_fp64 st.memory.data (dst + i) output.(i)
-                   done;
-                   true
-                 end
+                 (match decode_q1_g128_scales q1 off blocks with
+                  | None -> revert st
+                  | Some scales ->
+                    let output = Array.make dst_n 0.0 in
+                    for row = 0 to m - 1 do
+                      for col = 0 to n - 1 do
+                        let acc = ref 0.0 in
+                        for block = 0 to blocks_per_output - 1 do
+                          let q1_block = (col * blocks_per_output) + block in
+                          let scale = Array.unsafe_get scales q1_block in
+                          let block_offset = off + (q1_block * block_bytes) in
+                          for item = 0 to group - 1 do
+                            let sign_byte =
+                              Char.code q1.[block_offset + 2 + (item lsr 3)]
+                            in
+                            let sign =
+                              if (sign_byte lsr (item land 7)) land 1 = 1 then
+                                1.0
+                              else
+                                -1.0
+                            in
+                            let lhs_value =
+                              Array.unsafe_get
+                                lhs_values
+                                ((row * k) + (block * group) + item)
+                            in
+                            acc := !acc +. (lhs_value *. sign *. scale)
+                          done
+                        done;
+                        Array.unsafe_set output ((row * n) + col) !acc
+                      done
+                    done;
+                    if not (Array.for_all finite_fp64 output) then revert st
+                    else begin
+                      for i = 0 to dst_n - 1 do
+                        mem_set_fp64 st.memory.data
+                          (dst + i)
+                          (Array.unsafe_get output i)
+                      done;
+                      true
+                    end)
            | _ -> revert st)
         | _ -> revert st)
      | _ -> revert st)
@@ -3660,13 +3675,65 @@ let exec_one st op =
       true
     end
 
-let run state program =
+type opcode_profile = {
+  opcode : string;
+  count : int;
+  effort_used : int;
+  microseconds : int;
+}
+
+type opcode_profile_acc = {
+  mutable profile_count : int;
+  mutable profile_effort_used : int;
+  mutable profile_microseconds : int;
+}
+
+let profile_microseconds started stopped =
+  int_of_float ((stopped -. started) *. 1_000_000.0)
+
+let profile_record table opcode effort_delta elapsed =
+  let acc =
+    match Hashtbl.find_opt table opcode with
+    | Some acc -> acc
+    | None ->
+      let acc =
+        {
+          profile_count = 0;
+          profile_effort_used = 0;
+          profile_microseconds = 0;
+        }
+      in
+      Hashtbl.replace table opcode acc;
+      acc
+  in
+  acc.profile_count <- acc.profile_count + 1;
+  acc.profile_effort_used <- acc.profile_effort_used + effort_delta;
+  acc.profile_microseconds <- acc.profile_microseconds + elapsed
+
+let profile_rows table =
+  Hashtbl.fold
+    (fun opcode acc rows ->
+      {
+        opcode;
+        count = acc.profile_count;
+        effort_used = acc.profile_effort_used;
+        microseconds = acc.profile_microseconds;
+      } :: rows)
+    table
+    []
+  |> List.sort
+       (fun left right ->
+         match compare right.microseconds left.microseconds with
+         | 0 -> String.compare left.opcode right.opcode
+         | order -> order)
+
+let run_with_step state program step =
   try
     let len = Array.length program in
     while state.pc < len && not state.reverted do
       let op = program.(state.pc) in
       state.pc <- state.pc + 1;
-      if not (exec_one state op) then state.pc <- len
+      if not (step state op) then state.pc <- len
     done;
     not state.reverted
   with
@@ -3677,6 +3744,27 @@ let run state program =
   | Division_by_zero ->
     state.reverted <- true;
     false
+
+let run state program =
+  run_with_step state program exec_one
+
+let run_profiled ~clock ~opcode_name state program =
+  let profile = Hashtbl.create 64 in
+  let step (state : s) op =
+    let opcode = opcode_name op in
+    let effort_before = state.effort_used in
+    let started = clock () in
+    let ok = exec_one state op in
+    let stopped = clock () in
+    profile_record
+      profile
+      opcode
+      (state.effort_used - effort_before)
+      (profile_microseconds started stopped);
+    ok
+  in
+  let success = run_with_step state program step in
+  success, profile_rows profile
 
 module Verifier = struct
   type err =

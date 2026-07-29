@@ -12,6 +12,10 @@ Baseline: `octra-labs/lite_node` `main` at
 - [`inference-runtime-contracts.md`](inference-runtime-contracts.md) owns roots,
   identity, effort, sessions, cancellation, atomic execution, receipts, and
   scheduler isolation.
+- [`inference-fast-path-runtime.md`](inference-fast-path-runtime.md) owns the
+  local batch/session performance path that follows from the proven runtime
+  contracts. It cannot override canonical roots, session identity, admission,
+  or receipt semantics.
 - [`inference-capability-requirements.md`](inference-capability-requirements.md)
   is the non-normative working inventory of model-driven compute needs.
 - [`vm-semantic-inventory.md`](vm-semantic-inventory.md) is the observational

@@ -19,6 +19,7 @@ module Receipt = Octra_vm.Inference_receipt
 module Req = Octra_vm.Execution_requirement
 module Request = Octra_vm.Inference_request
 module Abi = Octra_vm.Inference_session_abi
+module Execution = Octra_vm.Inference_execution
 module Session = Octra_vm.Inference_session
 module Store = Octra_vm.Inference_store
 module Target = Octra_vm.Inference_target
@@ -171,6 +172,67 @@ let check_lifecycle () =
       check "finalize effort delta" (receipt.Receipt.effort_delta = 0);
       check "final receipt root" (String.length (Receipt.root receipt) = 64)
 
+let check_profiled_advance_equivalence () =
+  let admitted = admitted () in
+  let target = target admitted in
+  let request = request target in
+  let model = model target in
+  let plan, session = open_session admitted target request model in
+  let profile =
+    {
+      Execution.clock = (fun () -> 0.0);
+      opcode_name = (function
+        | VM.JDEST _ -> "JDEST"
+        | VM.STOP -> "STOP"
+        | _ -> "other");
+    }
+  in
+  match
+    Session.advance ~plan ~expected_sequence:0 session,
+    Session.advance_profiled ~profile ~plan ~expected_sequence:0 session
+  with
+  | Ok (plain, plain_receipt),
+    Ok (profiled, profiled_receipt, execution_profile, opcode_profile) ->
+    check "profiled sequence" (Session.sequence profiled = Session.sequence plain);
+    check
+      "profiled position"
+      (Session.logical_position profiled = Session.logical_position plain);
+    check
+      "profiled output root"
+      (String.equal (Session.output_root profiled) (Session.output_root plain));
+    check
+      "profiled output prefix root"
+      (String.equal
+         (Session.output_prefix_root profiled)
+         (Session.output_prefix_root plain));
+    check
+      "profiled candidate root"
+      (String.equal
+         (Session.candidate_root profiled)
+         (Session.candidate_root plain));
+    check
+      "profiled effort"
+      (Session.committed_effort profiled = Session.committed_effort plain);
+    check
+      "profiled receipt root"
+      (String.equal (Receipt.root profiled_receipt) (Receipt.root plain_receipt));
+    check
+      "profiled receipt effort"
+      (profiled_receipt.Receipt.effort_delta = plain_receipt.effort_delta);
+    check
+      "profiled execution phases"
+      (List.exists
+         (fun (row : Execution.execution_profile) ->
+           String.equal row.phase "vm_run")
+         execution_profile);
+    check
+      "profiled opcode rows"
+      (List.exists
+         (fun (row : VM.opcode_profile) -> String.equal row.opcode "STOP")
+         opcode_profile)
+  | Error error, _ -> failwith (Session.error_message error)
+  | _, Error error -> failwith (Session.error_message error)
+
 let check_sequence_mismatch () =
   let admitted = admitted () in
   let target = target admitted in
@@ -286,6 +348,7 @@ let check_session_cancel_limit () =
 
 let () =
   check_lifecycle ();
+  check_profiled_advance_equivalence ();
   check_sequence_mismatch ();
   check_finalize_phase ();
   check_cancel_terminal ();

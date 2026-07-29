@@ -13,10 +13,30 @@ Include at startup:
 *)
 
 
+type execution_profile = {
+  phase : string;
+  microseconds : int;
+}
+
 type result = {
   effort_used : int;
   output_root : string;
   candidate_root : string;
+}
+
+type profile_config = {
+  clock : unit -> float;
+  opcode_name : Contract_vm.instr -> string;
+}
+
+type profile = {
+  execution_profile : execution_profile list;
+  opcode_profile : Contract_vm.opcode_profile list;
+}
+
+type profiled_result = {
+  result : result;
+  profile : profile;
 }
 
 type error =
@@ -33,5 +53,11 @@ val run :
   plan:Inference_plan.t ->
   unit ->
   (result, error) Stdlib.result
+
+val run_profiled :
+  profile:profile_config ->
+  plan:Inference_plan.t ->
+  unit ->
+  (profiled_result, error) Stdlib.result
 
 val error_message : error -> string
