@@ -121,6 +121,46 @@ Return an artifact directory containing:
 - summary report;
 - recommended LiteNode P0 worklist.
 
+## First Corpus Status
+
+The first corpus was produced at `octra-inference` commit
+`7ae5fcec302e9d896b65f5e9dee0e4833920588b` as
+`determinism-qualification-corpus-20260729-235210`.
+
+It established:
+
+- `18` Bonsai schedule operations mapped;
+- `19` independent scalar fixture cases;
+- `11` malformed/failure/atomicity cases;
+- `32` Bonsai cutpoint comparisons;
+- Q16.16 preserved the selected token for the known logits cutpoint;
+- Q16.16 diverged immediately at numeric roots, first at
+  `fixtures:expected-final-norm.f64le`.
+
+The resulting recommendations are:
+
+- `q16-exact` viable: immutable range reads; argmax only if ordering is proven;
+- wider fixed point needed: residual add, elementwise multiply, attention
+  weighted sum;
+- deterministic software FP required: Q1 projection, explicit-epsilon RMSNorm,
+  L2Norm, nonlinear activations, gated delta rule, indexed RoPE, attention
+  scores, and softmax.
+
+## Follow-Up Ask
+
+The next `octra-inference` pass should strengthen the corpus rather than
+broaden demos:
+
+1. Add per-fixture input/output byte manifests suitable for direct LiteNode
+   conformance ingestion.
+2. Add exact oracle pseudocode or Rust snippets for every P0 primitive case.
+3. Split fixed-point differential results by representation:
+   - Q16.16;
+   - candidate wider fixed point if available;
+   - host-FP reference.
+4. Add top-k ordering deltas for logits, not only selected-token deltas.
+5. Return a P0-only minimized fixture pack for LiteNode CI.
+
 ## Constraints
 
 - Do not modify LiteNode.
@@ -167,4 +207,3 @@ machine-readable operation mapping, fixture corpus, rerun commands, and a
 recommendation for each operation: q16-exact viable, wider fixed point needed,
 deterministic software FP required, or host-fp local only.
 ```
-

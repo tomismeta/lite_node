@@ -84,6 +84,37 @@ kernels.
 | P1 | `SIGMOID_FP`, `SOFTPLUS_FP`, `SILU_FP` | Nonlinear activations. | Define deterministic exp/log1p behavior or lower to fixed-point profile. |
 | P2 | `LOAD_F32_LE_FP`, `LOAD_F64_LE_FP`, `ARGMAX_FP`, `ELEMWISE_MUL_FP`, `RESIDUAL_ADD_FP`, `CAUSAL_DEPTHWISE_CONV1D_FP` | Lower mathematical risk or mostly data movement/vector arithmetic. | Still need edge vectors, aliasing rules, and failure atomicity. |
 
+## First Qualification Corpus
+
+`octra-inference` produced the first independent determinism corpus at source
+commit `7ae5fcec302e9d896b65f5e9dee0e4833920588b`, artifact
+`determinism-qualification-corpus-20260729-235210`.
+
+That corpus is not normative, but it is the first concrete evidence intake for
+this hardening plan:
+
+| Evidence | Result |
+| --- | --- |
+| Bonsai schedule operations mapped | `18` |
+| Independent scalar fixture cases emitted | `19` |
+| Malformed/failure/atomicity cases emitted | `11` |
+| Bonsai cutpoint comparisons | `32` |
+| Q16.16 selected-token changes on the known logits cutpoint | `0` |
+| First Q16.16 numeric-root divergence | `fixtures:expected-final-norm.f64le` |
+
+The practical decision from this corpus is conservative:
+
+| Recommendation | Operations |
+| --- | --- |
+| `q16-exact` viable | immutable range reads; argmax only when ordering preservation is proven |
+| wider fixed point needed | residual add, elementwise multiply, attention weighted sum |
+| deterministic software FP required | Q1 projection, RMSNorm, L2Norm, SiLU, sigmoid, softplus, gated delta rule, indexed RoPE, attention scores, softmax |
+
+This means the existing Q16 surface is useful, but it is not the broad answer
+for Bonsai-class inference. The next LiteNode work should prioritize exact
+software math or wider fixed-point contracts for the P0 operations rather than
+forcing the whole path into Q16.16.
+
 ## Q16 Strategy
 
 Q16 is the most deterministic existing numerical substrate in the VM. It should

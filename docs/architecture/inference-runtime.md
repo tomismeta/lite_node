@@ -20,6 +20,9 @@ Baseline: `octra-labs/lite_node` `main` at
   owns the gap between local inference execution and validator-grade
   deterministic math. It cannot expand the execution surface; it defines the
   conformance bar for accepting that surface.
+- [`inference-determinism-p0-contracts.md`](inference-determinism-p0-contracts.md)
+  owns the first deterministic math contracts to write for P0 inference
+  primitives.
 - [`inference-capability-requirements.md`](inference-capability-requirements.md)
   is the non-normative working inventory of model-driven compute needs.
 - [`vm-semantic-inventory.md`](vm-semantic-inventory.md) is the observational
