@@ -445,6 +445,56 @@ let check_causal_conv_profile_gate () =
   | Error error -> failwith (Profile.error_message error)
   | Ok _ -> failwith "expected causal conv profile overclaim rejection"
 
+let check_byte_ingress_profile_gates () =
+  List.iter
+    (fun (opcode, local_needle, obligation_needle) ->
+      check
+        (opcode ^ " runtime profile")
+        (match Profile.current_runtime_profile ~opcode with
+         | Some "byte-ingress-exact" -> true
+         | _ -> false);
+      let profile =
+        match Profile.of_name "byte-ingress-exact" with
+        | Ok profile -> profile
+        | Error error -> failwith (Profile.error_message error)
+      in
+      check
+        (opcode ^ " consensus candidate")
+        (String.equal
+           (Profile.status_string profile.Profile.consensus_status)
+           "consensus_candidate");
+      let gate =
+        match Profile.to_json_for_opcode ~opcode profile with
+        | `Assoc gate -> gate
+        | _ -> failwith "byte ingress profile gate must be object"
+      in
+      check
+        (opcode ^ " local semantics")
+        (list_contains_substring
+           local_needle
+           (string_list_value "local_semantics" gate));
+      check
+        (opcode ^ " consensus obligations")
+        (list_contains_substring
+           obligation_needle
+           (string_list_value "consensus_obligations" gate));
+      List.iter
+        (fun profile ->
+          match Profile.validate_for_opcode ~opcode ~profile with
+          | Error (Profile.Unsupported_opcode_profile { opcode = actual; profile = actual_profile; expected }) ->
+            check (opcode ^ " overclaim opcode") (String.equal actual opcode);
+            check (opcode ^ " overclaim profile") (String.equal actual_profile profile);
+            check
+              (opcode ^ " overclaim expected")
+              (String.equal expected "byte-ingress-exact")
+          | Error error -> failwith (Profile.error_message error)
+          | Ok _ -> failwith (opcode ^ " should reject profile " ^ profile))
+        ["host-fp-local-candidate"; "q16-exact"])
+    [
+      "LOAD_F32_LE_FP", "binary32 values are decoded", "f32 little-endian ingress";
+      "LOAD_F64_LE_FP", "bit patterns are copied", "f64 little-endian ingress";
+    ]
+
 let check_rejects_unknown_opcode () =
   match Template.of_json (template ~opcode:"MODEL_SPECIFIC_FASTPATH" ()) with
   | Error (Template.Template_error message) ->
@@ -580,6 +630,7 @@ let () =
   check_vector_arithmetic_profile_gates ();
   check_attention_profile_gates ();
   check_causal_conv_profile_gate ();
+  check_byte_ingress_profile_gates ();
   check_rejects_unknown_opcode ();
   check_rejects_effect_drift ();
   check_rejects_missing_failure_cases ();

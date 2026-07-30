@@ -251,6 +251,13 @@ but execution reports attach the opcode's current runtime profile as an implicit
 diagnostic `profile_gate`. Any declared profile is still enforced before
 execution.
 
+`LOAD_F32_LE_FP` and `LOAD_F64_LE_FP` are intentionally separated from host-FP
+math under the `byte-ingress-exact` profile. They specify little-endian finite
+f32/f64 byte materialization from rooted source bytes into VM memory, including
+offset/count bounds, non-finite rejection, FLOAD-authenticated range binding,
+and decode atomicity. They are transport surfaces for model/session data, not
+arithmetic-kernel determinism claims.
+
 Initial P0 focus:
 
 | Opcode | Current accepted profile | Consensus status | Pinned locally | Why not ready |

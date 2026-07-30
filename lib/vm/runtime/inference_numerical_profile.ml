@@ -61,6 +61,17 @@ let of_name = function
         "native host floating point accepted only for local inference proof execution";
       required_actions = host_fp_actions;
     }
+  | "byte-ingress-exact" as name ->
+    Ok {
+      name;
+      consensus_status = Consensus_candidate;
+      summary = "little-endian finite floating-point byte-ingress profile";
+      required_actions = [
+        "pin little-endian f32/f64 bit interpretation and finite rejection";
+        "bind source bytes through authenticated ranges and storage_read effects";
+        "preserve decode atomicity before exposing loaded cells to arithmetic kernels";
+      ];
+    }
   | "q16-exact" as name ->
     Ok {
       name;
@@ -95,6 +106,9 @@ let of_name = function
 
 let current_runtime_profile ~opcode =
   match opcode with
+  | "LOAD_F32_LE_FP"
+  | "LOAD_F64_LE_FP" ->
+    Some "byte-ingress-exact"
   | "LINEAR_Q1_G128_FP"
   | "RMSNORM_FP_EPS"
   | "L2NORM_FP"
@@ -123,6 +137,22 @@ let validate_for_opcode ~opcode ~profile =
 
 let local_semantics ~opcode =
   match opcode with
+  | "LOAD_F32_LE_FP" ->
+    [
+      "source bytes are read from a string/bytes register";
+      "offset is byte-based, non-negative, and must cover count little-endian f32 cells";
+      "finite IEEE-754 binary32 values are decoded into binary64 memory cells";
+      "NaN and infinity are rejected before writeback";
+      "outputs are written only after the complete finite decode buffer is computed";
+    ]
+  | "LOAD_F64_LE_FP" ->
+    [
+      "source bytes are read from a string/bytes register";
+      "offset is byte-based, non-negative, and must cover count little-endian f64 cells";
+      "finite IEEE-754 binary64 bit patterns are copied into binary64 memory cells";
+      "NaN and infinity are rejected before writeback";
+      "outputs are written only after the complete finite decode buffer is computed";
+    ]
   | "LINEAR_Q1_G128_FP" ->
     [
       "Q1-G128 blocks are 18 bytes: little-endian binary16 scale followed by 128 sign bits";
@@ -241,6 +271,20 @@ let local_semantics ~opcode =
 
 let consensus_obligations ~opcode =
   match opcode with
+  | "LOAD_F32_LE_FP" ->
+    [
+      "pin IEEE-754 binary32 to binary64 widening for zero, signed zero, subnormal, normal, and max-finite values";
+      "define non-finite rejection, offset/count bounds, writeback atomicity, and effort";
+      "bind source bytes to authenticated range roots when loaded through FLOAD";
+      "pass independent cross-platform conformance for f32 little-endian ingress edge vectors";
+    ]
+  | "LOAD_F64_LE_FP" ->
+    [
+      "pin IEEE-754 binary64 bit preservation for zero, signed zero, subnormal, normal, and max-finite values";
+      "define non-finite rejection, offset/count bounds, writeback atomicity, and effort";
+      "bind source bytes to authenticated range roots when loaded through FLOAD";
+      "pass independent cross-platform conformance for f64 little-endian ingress edge vectors";
+    ]
   | "LINEAR_Q1_G128_FP" ->
     [
       "pin binary16 scale decode for zero, signed zero, subnormal, normal, NaN, and infinity";
