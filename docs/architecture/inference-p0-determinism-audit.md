@@ -377,20 +377,23 @@ LiteNode VM implementation for the five P0 positive cases. The next gap is
 full policy resolution for observational failure cases, followed by replacing
 host-FP semantics where protocol determinism requires it.
 
-Failure/atomicity status:
+Failure/edge-case status:
 
-| Opcode | Declared failure cases | Counted rejection cases | Counted cases accepted |
+| Opcode | Declared cases | Counted cases | Counted cases accepted |
 | --- | ---: | ---: | ---: |
-| `LINEAR_Q1_G128_FP` | 7 | 6 | 6 |
-| `RMSNORM_FP_EPS` | 7 | 6 | 6 |
-| `L2NORM_FP` | 7 | 6 | 6 |
-| `SOFTMAX_FP` | 7 | 6 | 6 |
-| `GATED_DELTA_RULE_FP` | 7 | 6 | 6 |
+| `LINEAR_Q1_G128_FP` | 7 | 7 | 7 |
+| `RMSNORM_FP_EPS` | 7 | 7 | 7 |
+| `L2NORM_FP` | 7 | 7 | 7 |
+| `SOFTMAX_FP` | 7 | 7 | 7 |
+| `GATED_DELTA_RULE_FP` | 7 | 7 | 7 |
 
-Uncounted cases are intentionally observational today:
+No current P0 failure/edge cases are left uncounted in the direct runner.
 
-- `output_input_aliasing`, because some operations are in-place or safe-copy
-  candidates rather than unconditional rejections.
+`output_input_aliasing` is counted as a deterministic policy branch: the VM
+must either reject before writeback with the declared spans unchanged, or accept
+with the active output span changed and finite. Current P0 behavior covers both
+branches: Q1, normalization, and softmax use documented safe-copy/in-place
+paths, while Gated Delta rejects the alias before writing output/state.
 
 `finite_square_overflow` is now counted for `RMSNORM_FP_EPS` and `L2NORM_FP`
 under the current deterministic normalization profile: finite square/reduction

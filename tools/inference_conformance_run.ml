@@ -665,6 +665,9 @@ let capture_span state span =
   seed_span_if_missing state base cells;
   name, base, cells, output_bytes state base cells
 
+let capture_existing_span state name base cells =
+  name, base, cells, output_bytes state base cells
+
 let unchanged_result state (name, base, cells, before) =
   let after = output_bytes state base cells in
   let matched = String.equal before after in
@@ -676,6 +679,19 @@ let unchanged_result state (name, base, cells, before) =
     "before_sha256", `String (sha256 before);
     "after_sha256", `String (sha256 after);
     "unchanged", `Bool matched;
+  ]
+
+let changed_span_result state (name, base, cells, before) =
+  let after = output_bytes state base cells in
+  let changed = not (String.equal before after) in
+  changed,
+  `Assoc [
+    "name", `String name;
+    "base_address", `Int base;
+    "length_f64_cells", `Int cells;
+    "before_sha256", `String (sha256 before);
+    "after_sha256", `String (sha256 after);
+    "changed", `Bool changed;
   ]
 
 let finite_span_result state (name, base, cells, _) =
@@ -694,6 +710,20 @@ let finite_span_result state (name, base, cells, _) =
     "finite", `Bool !finite;
   ]
 
+let output_register_name registers =
+  if List.mem_assoc "dst" registers then Some "dst"
+  else if List.mem_assoc "output" registers then Some "output"
+  else if List.mem_assoc "addr" registers then Some "addr"
+  else None
+
+let active_output_span state registers unchanged_spans =
+  match output_register_name registers, unchanged_spans with
+  | Some name, (_, _, cells, _) :: _ ->
+    let reg = reg_for name registers in
+    let base = Z.to_int (reg_z state reg) in
+    Some (capture_existing_span state "active_output" base cells)
+  | _ -> None
+
 let failure_expectation expected =
   if starts_with "reject_before_write" expected then `Must_reject
   else if starts_with
@@ -704,7 +734,8 @@ let failure_expectation expected =
             "implementation_must_use_stable_max_subtract"
             expected then
     `Must_accept_changed_finite
-  else if starts_with "reject_or_documented_safe_copy" expected then `Observation
+  else if starts_with "reject_or_documented_safe_copy" expected then
+    `Must_reject_or_accept_changed_finite
   else `Observation
 
 let failure_case_result root_dir opcode template registers values op case =
@@ -739,6 +770,7 @@ let failure_case_result root_dir opcode template registers values op case =
       list_field "unchanged_spans" fields
       |> List.map (capture_span state)
     in
+    let active_before = active_output_span state registers unchanged_spans in
     let ran = if ingress_rejected then false else VM.run state [|op; VM.STOP|] in
     let unchanged =
       List.map (unchanged_result state) unchanged_spans
@@ -746,6 +778,22 @@ let failure_case_result root_dir opcode template registers values op case =
     let unchanged_ok = List.for_all fst unchanged in
     let finite_spans = List.map (finite_span_result state) unchanged_spans in
     let finite_ok = List.for_all fst finite_spans in
+    let active_changed =
+      match active_before with
+      | None -> []
+      | Some span -> [changed_span_result state span]
+    in
+    let active_finite =
+      match active_before with
+      | None -> []
+      | Some span -> [finite_span_result state span]
+    in
+    let active_changed_ok =
+      active_changed <> [] && List.for_all fst active_changed
+    in
+    let active_finite_ok =
+      active_finite <> [] && List.for_all fst active_finite
+    in
     let changed_ok =
       unchanged <> [] && List.for_all (fun (unchanged, _) -> not unchanged) unchanged
     in
@@ -760,6 +808,9 @@ let failure_case_result root_dir opcode template registers values op case =
       | `Must_reject -> true, ((not ran) && unchanged_ok)
       | `Must_accept_changed_finite ->
         true, (ran && changed_ok && finite_ok)
+      | `Must_reject_or_accept_changed_finite ->
+        true, ((not ran) && unchanged_ok
+               || ran && active_changed_ok && active_finite_ok)
       | `Observation -> false, true
     in
     passed,
@@ -777,8 +828,14 @@ let failure_case_result root_dir opcode template registers values op case =
       `String (if changed_ok then "changed" else "not_changed");
       "finite_status",
       `String (if finite_ok then "finite" else "nonfinite_or_missing");
+      "active_changed_status",
+      `String (if active_changed_ok then "changed" else "not_changed");
+      "active_finite_status",
+      `String (if active_finite_ok then "finite" else "nonfinite_or_missing");
       "unchanged_spans", `List (List.map snd unchanged);
       "finite_spans", `List (List.map snd finite_spans);
+      "active_changed_spans", `List (List.map snd active_changed);
+      "active_finite_spans", `List (List.map snd active_finite);
     ]
   | _ -> fail "failure case must be an object"
 
