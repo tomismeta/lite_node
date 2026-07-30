@@ -148,7 +148,21 @@ let check_arithmetic_edges () =
     0x4008000000000000L;
   check
     "fp64 mul overflow rejects"
-    (Fp64.mul 0x7fefffffffffffffL 0x4000000000000000L = None)
+    (Fp64.mul 0x7fefffffffffffffL 0x4000000000000000L = None);
+  expect_bits
+    "fp64 square finite"
+    (Fp64.square 0x4000000000000000L)
+    0x4010000000000000L;
+  expect_bits
+    "fp64 square negative zero"
+    (Fp64.square Int64.min_int)
+    0L;
+  check
+    "fp64 square overflow rejects"
+    (Fp64.square 0x7fefffffffffffffL = None);
+  check
+    "fp64 square non-finite rejects"
+    (Fp64.square 0x7ff0000000000000L = None)
 
 let check_division_edges () =
   expect_bits

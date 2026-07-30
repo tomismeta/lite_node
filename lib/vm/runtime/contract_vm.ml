@@ -2831,14 +2831,14 @@ let exec_one st op =
        else if not (add_dyn_product st [n; 4] 1) then
          revert st
        else
-         (match read_fp64_bits_array st.memory.data addr n,
-                read_fp64_bits_array st.memory.data gamma n with
-          | Some input_values, Some gamma_values ->
+        (match read_fp64_bits_array st.memory.data addr n,
+               read_fp64_bits_array st.memory.data gamma n with
+         | Some input_values, Some gamma_values ->
             let ok = ref true in
             let sum_sq_bits = ref 0L in
             Array.iter
               (fun value ->
-                 match Inference_fp64.mul value value with
+                 match Inference_fp64.square value with
                  | Some square ->
                    (match Inference_fp64.add !sum_sq_bits square with
                     | Some next -> sum_sq_bits := next
@@ -2898,7 +2898,7 @@ let exec_one st op =
            let sum_sq_bits = ref 0L in
            Array.iter
              (fun value ->
-                match Inference_fp64.mul value value with
+                match Inference_fp64.square value with
                 | Some square ->
                   (match Inference_fp64.add !sum_sq_bits square with
                    | Some next -> sum_sq_bits := next

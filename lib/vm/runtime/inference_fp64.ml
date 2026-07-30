@@ -245,6 +245,9 @@ let mul left right =
         (left.exponent + right.exponent)
   | _ -> None
 
+let square bits =
+  mul bits bits
+
 let div left right =
   match decode left, decode right with
   | Some left, Some right ->

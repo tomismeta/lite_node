@@ -429,6 +429,11 @@ zero/subnormal/normal/non-finite interpretation now lives in the shared
 deterministic fp64 substrate and is exhaustively tested over all 65,536
 encodings.
 
+`finite_square_overflow` for normalization now maps to the named
+`Inference_fp64.square` helper. `RMSNORM_FP_EPS` and `L2NORM_FP` still reduce
+squares left-to-right exactly as before, but square overflow/non-finite
+rejection is now tested directly in the shared fp64 substrate.
+
 LiteNode reports `GATED_DELTA_RULE_FP` under the same
 `host-fp-exp-local-candidate` profile. The recurrence shape, query-scale
 sqrt/division, dot products, beta updates, state mutation order, and output
