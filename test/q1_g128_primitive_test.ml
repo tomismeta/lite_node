@@ -209,6 +209,7 @@ let check_sign_and_scale_edges () =
   let scale_zero = "\000\000" in
   let scale_negative_zero = "\000\128" in
   let scale_min_subnormal = "\001\000" in
+  let scale_max_finite = "\255\123" in
   List.iter
     (fun (name, q1, expected) ->
       let state = one_block_state q1 in
@@ -238,6 +239,9 @@ let check_sign_and_scale_edges () =
       "positive min-subnormal scale",
       q1_block scale_min_subnormal (String.make 16 '\255'),
       ldexp 1.0 (-17);
+      "positive max-finite scale",
+      q1_block scale_max_finite (String.make 16 '\255'),
+      8384512.0;
     ]
 
 let check_output_overflow_reverts () =
@@ -314,6 +318,22 @@ let check_bad_q1_reverts () =
   check
     "bad q1 does not overwrite output"
     (output_bytes state dst 1 = f64_bytes [42.0]);
+  List.iter
+    (fun (name, scale) ->
+      let state = one_block_state (q1_block scale (String.make 16 '\255')) in
+      set_output_cell state 10000 42.0;
+      check (name ^ " rejects") (not (VM.run state q1_code));
+      check
+        (name ^ " keeps output")
+        (output_bytes state 10000 1 = f64_bytes [42.0]))
+    [
+      "q1 positive infinity scale",
+      "\000\124";
+      "q1 negative infinity scale",
+      "\000\252";
+      "q1 nan scale",
+      "\000\126";
+    ];
   let state, _, _ = q1_state ~q1:(String.sub q1_owner 0 17) () in
   check "short q1 reverts" (not (VM.run state q1_code))
 
