@@ -295,6 +295,12 @@ Uncounted cases are intentionally observational today:
 - `overflow_without_max_subtract`, because that validates stable softmax
   behavior rather than reject-before-write behavior.
 
+LiteNode now also pins `SOFTMAX_FP` locally for extreme finite scores:
+equal `max_float` scores produce uniform probabilities after max subtraction,
+and a score dominated by `max_float` underflows to a zero probability without
+rejecting the finite input. This remains host-FP local-candidate behavior until
+`exp`, division, summation, and output encoding are protocol-owned.
+
 ## P0-Plus Execution Gate
 
 Status on 2026-07-30:

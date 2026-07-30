@@ -115,6 +115,18 @@ let check_softmax_exact_inplace () =
   check "softmax exact inplace runs" (VM.run st [|softmax_op; VM.STOP|]);
   check_cells "softmax exact inplace" st 100 [0.5; 0.5]
 
+let check_softmax_extreme_scores () =
+  let st = state () in
+  set_softmax_regs st ~count:2 ();
+  set_values st 100 [max_float; max_float];
+  check "softmax equal max scores runs" (VM.run st [|softmax_op; VM.STOP|]);
+  check_cells "softmax equal max scores" st 300 [0.5; 0.5];
+  let st = state () in
+  set_softmax_regs st ~count:2 ();
+  set_values st 100 [max_float; 0.];
+  check "softmax dominated score runs" (VM.run st [|softmax_op; VM.STOP|]);
+  check_cells "softmax dominated score" st 300 [1.; 0.]
+
 let check_weighted_sum_golden () =
   let st = state () in
   set_weighted_sum_regs st ();
@@ -456,6 +468,7 @@ let check_effects () =
 let () =
   check_softmax_equal_scores ();
   check_softmax_exact_inplace ();
+  check_softmax_extreme_scores ();
   check_weighted_sum_golden ();
   check_tail_reverts_atomically ();
   check_effort ();
