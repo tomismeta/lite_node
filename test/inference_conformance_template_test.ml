@@ -202,6 +202,31 @@ let profile_gate opcode =
      | `Assoc gate -> gate
      | _ -> failwith "profile gate must be object")
 
+let check_p0_profile_gate_coverage () =
+  List.iter
+    (fun opcode ->
+      check
+        (opcode ^ " runtime profile")
+        (match Profile.current_runtime_profile ~opcode with
+         | Some "host-fp-local-candidate" -> true
+         | _ -> false);
+      let gate = profile_gate opcode in
+      let local_semantics = string_list_value "local_semantics" gate in
+      let consensus_obligations =
+        string_list_value "consensus_obligations" gate
+      in
+      check (opcode ^ " local semantics present") (local_semantics <> []);
+      check
+        (opcode ^ " consensus obligations present")
+        (consensus_obligations <> []);
+      check
+        (opcode ^ " consensus obligations are specific")
+        (not
+           (list_contains_substring
+              "write primitive-specific"
+              consensus_obligations)))
+    Template.p0_opcodes
+
 let check_remaining_p0_profile_obligations () =
   List.iter
     (fun (opcode, local_needle, obligation_needle) ->
@@ -349,6 +374,7 @@ let check_rejects_single_delta_expected_span () =
 let () =
   check_accepts_template ();
   check_q1_profile_obligations ();
+  check_p0_profile_gate_coverage ();
   check_remaining_p0_profile_obligations ();
   check_rejects_unknown_opcode ();
   check_rejects_effect_drift ();
