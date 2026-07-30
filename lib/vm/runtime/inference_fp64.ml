@@ -222,6 +222,53 @@ let div left right =
         (left.exponent - right.exponent)
   | _ -> None
 
+let sqrt bits =
+  match decode bits with
+  | Some value ->
+    if Z.sign value.significand = 0 then
+      Some (zero value.negative)
+    else if value.negative then
+      None
+    else
+      let floor_log2 =
+        Z.numbits value.significand - 1 + value.exponent
+      in
+      let output_floor_log2 =
+        if floor_log2 >= 0 then
+          floor_log2 / 2
+        else
+          -(((-floor_log2) + 1) / 2)
+      in
+      let output_exponent = output_floor_log2 - 52 in
+      let scaled_exponent = value.exponent - (2 * output_exponent) in
+      let radicand =
+        Z.shift_left value.significand scaled_exponent
+      in
+      let root = Z.sqrt radicand in
+      let remainder =
+        Z.sub radicand (Z.mul root root)
+      in
+      let rounded =
+        if Z.gt remainder root then Z.succ root else root
+      in
+      if Z.gt rounded max_significand then
+        let encoded_exponent = output_floor_log2 + 1024 in
+        if encoded_exponent >= 0x7ff then
+          None
+        else
+          Some
+            (compose
+               ~negative:false
+               ~exponent:encoded_exponent
+               min_normal_significand)
+      else
+        Some
+          (compose
+             ~negative:false
+             ~exponent:(output_floor_log2 + 1023)
+             rounded)
+  | _ -> None
+
 let compare_magnitude left right =
   let exponent = min left.exponent right.exponent in
   let left_value =

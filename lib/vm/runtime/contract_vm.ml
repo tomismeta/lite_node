@@ -1086,16 +1086,18 @@ let read_fp64_reg_bits st reg =
 
 let fp64_one_bits = Int64.bits_of_float 1.0
 
+let fp64_positive_bits bits =
+  match Inference_fp64.compare bits 0L with
+  | Some cmp -> cmp > 0
+  | None -> false
+
 let fp64_inverse_sqrt_bits bits =
-  let value = Int64.float_of_bits bits in
-  if value > 0.0 && finite_fp64 value then
-    let root = sqrt value in
-    if finite_fp64 root then
-      Inference_fp64.div fp64_one_bits (Int64.bits_of_float root)
-    else
-      None
-  else
-    None
+  match Inference_fp64.compare bits 0L with
+  | Some cmp when cmp > 0 ->
+    (match Inference_fp64.sqrt bits with
+     | Some root -> Inference_fp64.div fp64_one_bits root
+     | None -> None)
+  | _ -> None
 
 let gated_delta_rule_effort timesteps v_heads value_dim key_dim =
   let scale_product factors scale =
@@ -2737,7 +2739,7 @@ let exec_one st op =
     (match read_int st rs_addr, read_int st rs_n, read_int st rs_gamma,
            read_fp64_reg_bits st rs_epsilon with
      | Some addr, Some n, Some gamma, Some epsilon_bits
-       when n > 0 && Int64.float_of_bits epsilon_bits > 0.0 ->
+       when n > 0 && fp64_positive_bits epsilon_bits ->
        if not
             (List.for_all
                (fun (addr, n) -> valid_large_mem_span addr n)
@@ -2802,7 +2804,7 @@ let exec_one st op =
     (match read_int st rs_addr, read_int st rs_n,
            read_fp64_reg_bits st rs_epsilon with
      | Some addr, Some n, Some epsilon_bits
-       when n > 0 && Int64.float_of_bits epsilon_bits > 0.0 ->
+       when n > 0 && fp64_positive_bits epsilon_bits ->
        if not (valid_large_mem_span addr n) then
          revert st
        else if not (add_dyn_product st [n; 3] 1) then
@@ -3095,8 +3097,16 @@ let exec_one st op =
                    read_fp64_array st.memory.data key key_cells with
              | Some query_values, Some key_values ->
                let output = Array.make key_count 0.0 in
-               let scale = 1.0 /. sqrt (float_of_int head_dim) in
-               let ok = ref (finite_fp64 scale) in
+               let scale_bits, scale_ok =
+                 match Inference_fp64.of_int head_dim with
+                 | Some head_dim_bits ->
+                   (match fp64_inverse_sqrt_bits head_dim_bits with
+                    | Some bits -> bits, true
+                    | None -> 0L, false)
+                 | None -> 0L, false
+               in
+               let scale = Int64.float_of_bits scale_bits in
+               let ok = ref (scale_ok && finite_fp64 scale) in
                for key_index = 0 to key_count - 1 do
                  let acc = ref 0.0 in
                  let key_base = key_index * head_dim in

@@ -280,6 +280,28 @@ let check_fp64_core_edges () =
     (Fp64.div (bits 1.0) 0L = None);
   check "fp64 div overflow rejects"
     (Fp64.div 0x7fefffffffffffffL (bits 0.5) = None);
+  expect_bits "fp64 sqrt four"
+    (Fp64.sqrt (bits 4.0))
+    (bits 2.0);
+  expect_bits "fp64 sqrt two"
+    (Fp64.sqrt (bits 2.0))
+    (bits (sqrt 2.0));
+  expect_bits "fp64 sqrt positive zero"
+    (Fp64.sqrt 0L)
+    0L;
+  expect_bits "fp64 sqrt negative zero"
+    (Fp64.sqrt Int64.min_int)
+    Int64.min_int;
+  expect_bits "fp64 sqrt min-subnormal"
+    (Fp64.sqrt 1L)
+    (bits (sqrt (Int64.float_of_bits 1L)));
+  expect_bits "fp64 sqrt max finite"
+    (Fp64.sqrt 0x7fefffffffffffffL)
+    (bits (sqrt Float.max_float));
+  check "fp64 sqrt negative finite rejects"
+    (Fp64.sqrt (bits (-1.0)) = None);
+  check "fp64 sqrt non-finite rejects"
+    (Fp64.sqrt 0x7ff0000000000000L = None);
   expect_compare "fp64 compare equal zeros"
     (Fp64.compare 0L Int64.min_int)
     0;

@@ -21,10 +21,10 @@ with a scalar oracle and VM conformance gate.
 | Opcode | Current implementation surface | Determinism risk | Required hardening |
 | --- | --- | --- | --- |
 | `LINEAR_Q1_G128_FP` | `contract_vm.ml` decodes Q1-G128 blocks, binary16-like scales, sign bits, and accumulates with LiteNode's finite binary64 core. | Scale/sign interpretation and accumulator order are now contract-bound locally; independent cross-platform oracle qualification is still required before consensus promotion. | Pin byte layout, scale decode, sign mapping, loop order, accumulator profile, finite rejection, aliasing, and output encoding. |
-| `RMSNORM_FP_EPS` | Reads explicit epsilon bits; sum of squares, count division, epsilon addition, reciprocal division, and output multiply use LiteNode's finite binary64 core; inverse-root `sqrt` remains native. | Inverse-root `sqrt`, signed-zero/subnormal treatment, and independent reduction/division qualification are not yet consensus-owned. | Define exact epsilon input, reduction order, inverse-root implementation, gamma read/order, non-finite policy, and rollback behavior. |
-| `L2NORM_FP` | Same deterministic reduction/output multiply shape as RMSNorm without gamma. | Same as RMSNorm; smaller surface but still depends on the native inverse-root path. | Define exact inverse-norm semantics, edge vectors near zero, signed-zero/subnormal behavior, and failure atomicity. |
+| `RMSNORM_FP_EPS` | Reads explicit epsilon bits; sum of squares, count division, epsilon addition, inverse-root `sqrt`, reciprocal division, and output multiply use LiteNode's finite binary64 core. | Independent cross-platform oracle qualification is still required before consensus promotion. | Define exact epsilon input, reduction order, inverse-root implementation, gamma read/order, non-finite policy, and rollback behavior. |
+| `L2NORM_FP` | Same deterministic reduction, inverse-root `sqrt`, and output multiply shape as RMSNorm without gamma. | Same as RMSNorm; smaller surface but still needs independent inverse-root qualification. | Define exact inverse-norm semantics, edge vectors near zero, signed-zero/subnormal behavior, and failure atomicity. |
 | `SOFTMAX_FP` | Uses deterministic finite binary64 left-to-right max selection, score shift, exponential sum, and probability division; `exp` remains native. | Highest math risk in this set because native `exp` can change probabilities and token/order behavior. | Replace or pin `exp`, tie behavior, overflow/underflow, in-place behavior, and finite-result rules. |
-| `GATED_DELTA_RULE_FP` | Stateful recurrence with native decay `exp` and native query-scale `sqrt`; integer key-dimension conversion, reciprocal division, recurrence dot products, beta-delta updates, state updates, and output scaling multiply use LiteNode's finite binary64 core. | Highest state risk: small numeric drift compounds; decay/scale and recurrence ordering are not yet consensus-owned. | Pin layout, head mapping, loop nesting, decay math, scale math, state update order, aliasing, software-fp effort, and atomicity. |
+| `GATED_DELTA_RULE_FP` | Stateful recurrence with native decay `exp`; integer key-dimension conversion, query-scale `sqrt`, reciprocal division, recurrence dot products, beta-delta updates, state updates, and output scaling multiply use LiteNode's finite binary64 core. | Highest state risk: small numeric drift compounds; decay math and recurrence ordering are not yet consensus-owned. | Pin layout, head mapping, loop nesting, decay math, scale math, state update order, aliasing, software-fp effort, and atomicity. |
 
 The software-fp effort charge is intentionally unchanged in this local-only
 hardening slice. Consensus promotion must recalibrate the charge for
@@ -71,8 +71,9 @@ The current branch already has useful controls:
 - an ingestion checker for the producer-side determinism corpus.
 
 These are necessary controls. They are not sufficient for consensus
-determinism because native `float`, `sqrt`, and `exp` are still active in the
-P0 path.
+determinism because native `exp` is still active in the P0 path, and the
+finite binary64 core still needs independent cross-platform oracle
+qualification.
 
 ## Runner Shape
 
@@ -314,8 +315,8 @@ Initial P0 focus:
 | Opcode | Current accepted profile | Consensus status | Pinned locally | Why not ready |
 | --- | --- | --- | --- | --- |
 | `LINEAR_Q1_G128_FP` | `host-fp-local-candidate` | `local_only` | Q1 scale/sign edge vectors, exhaustive binary16 scale decode, NaN/infinity scale rejection, finite rejection, overflow rollback, effort floor, output atomicity, and destination/lhs snapshot behavior. | Uses LiteNode's deterministic finite binary64 add/mul core; still needs independent cross-platform oracle qualification. |
-| `RMSNORM_FP_EPS` | `host-fp-local-candidate` | `local_only` | Explicit epsilon bits, minimum-subnormal epsilon, deterministic reduction/output multiply, row composition, signed-zero/subnormal acceptance, finite rejection, alias rejection, effort floor, and output atomicity. | Still uses the native inverse-root path; deterministic add/mul needs independent oracle qualification. |
-| `L2NORM_FP` | `host-fp-local-candidate` | `local_only` | Explicit epsilon bits, minimum-subnormal epsilon, deterministic reduction/output multiply, row composition, finite rejection, effort floor, inverse-root overflow rejection, and output atomicity. | Still uses the native inverse-root path; deterministic add/mul needs independent oracle qualification. |
+| `RMSNORM_FP_EPS` | `host-fp-local-candidate` | `local_only` | Explicit epsilon bits, minimum-subnormal epsilon, deterministic reduction/inverse-root/output multiply, row composition, signed-zero/subnormal acceptance, finite rejection, alias rejection, effort floor, and output atomicity. | Uses LiteNode's deterministic finite binary64 core; still needs independent cross-platform oracle qualification and profile-root binding. |
+| `L2NORM_FP` | `host-fp-local-candidate` | `local_only` | Explicit epsilon bits, minimum-subnormal epsilon, deterministic reduction/inverse-root/output multiply, row composition, finite rejection, effort floor, inverse-root overflow rejection, and output atomicity. | Uses LiteNode's deterministic finite binary64 core; still needs independent cross-platform oracle qualification and profile-root binding. |
 
 The next acceptable status change for these opcodes requires a runtime
 implementation change and matching scalar-oracle corpus, not just a new string

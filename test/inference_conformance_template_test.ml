@@ -188,7 +188,7 @@ let check_accepts_template () =
                 "minimum positive subnormal epsilon"
                 (string_list_value "local_semantics" gate)
            && List.mem
-                "host_fp_sqrt"
+                "fp64_sqrt_conformance"
                 (string_list_value "consensus_blocker_codes" gate)
            && List.mem
                 "fp64_reduction_conformance"
@@ -468,7 +468,7 @@ let check_remaining_p0_profile_obligations () =
        "l2 mixed rounding mode"
        (String.equal
           (string_value "rounding_mode" contract)
-          "deterministic-binary64-roundTiesToEven-with-host-math")
+          "deterministic-binary64-roundTiesToEven")
    | _ -> failwith "missing l2 profile contract");
   let l2_blockers = string_list_value "consensus_blocker_codes" l2_gate in
   check
@@ -476,7 +476,7 @@ let check_remaining_p0_profile_obligations () =
     (List.mem "fp64_reduction_conformance" l2_blockers);
   check
     "l2 inverse-root blocker"
-    (List.mem "host_fp_sqrt" l2_blockers);
+    (List.mem "fp64_sqrt_conformance" l2_blockers);
   check
     "l2 divide conformance blocker"
     (List.mem "fp64_divide_conformance" l2_blockers);
@@ -510,8 +510,11 @@ let check_remaining_p0_profile_obligations () =
     "delta recurrence blocker"
     (List.mem "fp64_recurrence_add_mul_conformance" delta_blockers);
   check
-    "delta exp sqrt blocker"
-    (List.mem "host_fp_exp_sqrt" delta_blockers);
+    "delta exp blocker"
+    (List.mem "host_fp_exp" delta_blockers);
+  check
+    "delta sqrt blocker"
+    (List.mem "fp64_sqrt_conformance" delta_blockers);
   check
     "delta divide conformance blocker"
     (List.mem "fp64_divide_conformance" delta_blockers);
