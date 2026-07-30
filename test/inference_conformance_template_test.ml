@@ -187,6 +187,9 @@ let check_accepts_template () =
            && List.mem
                 "host_fp_sqrt"
                 (string_list_value "consensus_blocker_codes" gate)
+           && List.mem
+                "fp64_reduction_conformance"
+                (string_list_value "consensus_blocker_codes" gate)
          | _ -> false)
     | _ -> failwith "template json must be object"
 

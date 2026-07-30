@@ -2670,27 +2670,41 @@ let exec_one st op =
        else if not (add_dyn_product st [n; 4] 1) then
          revert st
        else
-         (match read_fp64_array st.memory.data addr n,
-                read_fp64_array st.memory.data gamma n with
+         (match read_fp64_bits_array st.memory.data addr n,
+                read_fp64_bits_array st.memory.data gamma n with
           | Some input_values, Some gamma_values ->
-            let sum_sq =
-              Array.fold_left
-                (fun acc value -> acc +. (value *. value))
-                0.0
-                input_values
-            in
+            let ok = ref true in
+            let sum_sq_bits = ref 0L in
+            Array.iter
+              (fun value ->
+                 match Inference_fp64.mul value value with
+                 | Some square ->
+                   (match Inference_fp64.add !sum_sq_bits square with
+                    | Some next -> sum_sq_bits := next
+                    | None -> ok := false)
+                 | None -> ok := false)
+              input_values;
+            let sum_sq = Int64.float_of_bits !sum_sq_bits in
             let mean_sq = sum_sq /. float_of_int n in
             let inv_rms = 1.0 /. sqrt (mean_sq +. epsilon) in
+            let inv_rms_bits = Int64.bits_of_float inv_rms in
             let output =
               Array.init n (fun i ->
-                input_values.(i) *. inv_rms *. gamma_values.(i))
+                match Inference_fp64.mul input_values.(i) inv_rms_bits with
+                | Some scaled ->
+                  Inference_fp64.mul scaled gamma_values.(i)
+                | None -> None)
             in
-            if not (finite_fp64 sum_sq && finite_fp64 inv_rms)
-               || not (Array.for_all finite_fp64 output) then
+            if not !ok
+               || not (finite_fp64 sum_sq && finite_fp64 inv_rms)
+               || not (Array.for_all Option.is_some output) then
               revert st
             else begin
               for i = 0 to n - 1 do
-                mem_set_fp64 st.memory.data (addr + i) output.(i)
+                mem_set_fp64_bits
+                  st.memory.data
+                  (addr + i)
+                  (Option.get output.(i))
               done;
               true
             end

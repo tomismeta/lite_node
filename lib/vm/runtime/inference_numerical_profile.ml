@@ -290,8 +290,9 @@ let local_semantics ~opcode =
       "epsilon is read from an integer register as binary64 bits and must be finite and positive";
       "minimum positive subnormal epsilon is accepted by the current host-fp profile";
       "input and gamma cells are finite binary64 values and their ranges must not overlap";
-      "sum of squares is accumulated left-to-right in native binary64";
+      "sum of squares is accumulated left-to-right with deterministic finite binary64 multiply/add";
       "inverse RMS is computed as 1.0 / sqrt((sum_sq / count) + epsilon)";
+      "output multiply uses deterministic finite binary64 multiply";
       "outputs are written only after the complete finite output vector is computed";
     ]
   | "L2NORM_FP" ->
@@ -417,7 +418,8 @@ let consensus_obligations ~opcode =
     ]
   | "RMSNORM_FP_EPS" ->
     [
-      "replace or qualify native binary64 reduction, division, multiplication, and sqrt";
+      "replace or qualify native binary64 division and sqrt";
+      "qualify deterministic binary64 reduction and output multiplication";
       "pin signed-zero, subnormal, overflow, underflow, and non-finite behavior";
       "define exact epsilon-bit interpretation and range-overlap rejection";
       "pass independent cross-platform conformance for reduction and sqrt edge vectors";
@@ -541,9 +543,10 @@ let consensus_blocker_codes ~opcode =
   | "RMSNORM_FP_EPS" ->
     [
       "epsilon_bit_interpretation";
-      "host_fp_reduction";
+      "fp64_reduction_conformance";
       "host_fp_sqrt";
-      "host_fp_divide_multiply";
+      "host_fp_divide";
+      "fp64_output_multiply_conformance";
       "signed_zero_subnormal_policy";
       "alias_rejection";
       "atomic_writeback";
@@ -606,6 +609,8 @@ let arithmetic_domain ~profile ~opcode =
   | "soft-fp-exact", _ -> "software-defined-floating-point"
   | "host-fp-local-candidate", "LINEAR_Q1_G128_FP" ->
     "q1-g128-binary16-scale-deterministic-binary64-accumulator"
+  | "host-fp-local-candidate", "RMSNORM_FP_EPS" ->
+    "deterministic-binary64-reduction-host-sqrt-divide"
   | "host-fp-local-candidate", _ -> "native-binary64-host-floating-point"
   | name, _ -> name
 
