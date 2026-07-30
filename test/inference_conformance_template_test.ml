@@ -248,11 +248,46 @@ let check_profile_root () =
   | Error error -> failwith (Profile.error_message error)
   | Ok profile ->
     let root = Profile.root_for_opcode ~opcode:"RMSNORM_FP_EPS" profile in
+    let prose_changed_profile =
+      {
+        profile with
+        Profile.consensus_status = Profile.Consensus_ready;
+        summary = "changed summary";
+        required_actions = ["changed action"];
+      }
+    in
     let gate = profile_gate "RMSNORM_FP_EPS" in
     check "profile root is hex" (root_ok root);
     check
       "profile root is reported"
-      (String.equal root (string_value "profile_root" gate))
+      (String.equal root (string_value "profile_root" gate));
+    check
+      "profile root ignores readiness prose"
+      (String.equal
+         root
+         (Profile.root_for_opcode
+            ~opcode:"RMSNORM_FP_EPS"
+            prose_changed_profile));
+    (match List.assoc_opt "profile_contract" gate with
+     | Some (`Assoc contract) ->
+       check
+         "profile contract schema"
+         (String.equal
+            (string_value "schema" contract)
+            "octra.inference.numerical-contract.v1");
+       check
+         "profile contract opcode"
+         (String.equal (string_value "opcode" contract) "RMSNORM_FP_EPS")
+     | _ -> failwith "missing profile contract");
+    check
+      "profile set root is order-independent"
+      (String.equal
+         (Profile.profile_set_root_for_opcodes
+            ~opcodes:["LINEAR_Q1_G128_FP"; "RMSNORM_FP_EPS"]
+            profile)
+         (Profile.profile_set_root_for_opcodes
+            ~opcodes:["RMSNORM_FP_EPS"; "LINEAR_Q1_G128_FP"]
+            profile))
 
 let check_profile_root_binding_counts () =
   match Profile.of_name "host-fp-local-candidate" with

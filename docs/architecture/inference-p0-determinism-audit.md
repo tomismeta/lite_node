@@ -244,6 +244,7 @@ profile_gate.consensus_status
 profile_gate.local_semantics
 profile_gate.consensus_obligations
 profile_gate.consensus_blocker_codes
+profile_gate.profile_contract
 profile_gate.profile_root
 ```
 
@@ -261,13 +262,16 @@ as stable strings in `consensus_ready_gate.blockers`.
 `schema_status` remains the producer/template shape result in both normal and
 strict mode; top-level `status` additionally includes the active readiness gate.
 `consensus_blocker_codes` is the stable, machine-readable list of primitive
-math/profile blockers behind the prose obligations.
-`profile_root` is the LiteNode-owned descriptor root for the emitted profile
-gate. Current templates still validate `numerical_profile_root` syntactically;
-profile-root equality is diagnostic in default mode and enforced only by
-`--require-consensus-ready`. Template and P0 execution reports expose that
-diagnostic as `profile_root_binding.status`: `matched`, `unbound`, or
-`unavailable`.
+math/profile blockers behind the prose obligations. `profile_contract` is the
+machine-owned numerical descriptor: schema, opcode, arithmetic domain, rounding
+mode, operation sequence, edge/overflow/writeback policy, and oracle-vector
+root. `profile_root` is the root of that descriptor only. It deliberately
+excludes `consensus_status`, summaries, required-action prose, and blocker
+wording so documentation churn cannot rebind arithmetic. Current templates
+still validate `numerical_profile_root` syntactically; profile-root equality is
+diagnostic in default mode and enforced only by `--require-consensus-ready`.
+Template and P0 execution reports expose that diagnostic as
+`profile_root_binding.status`: `matched`, `unbound`, or `unavailable`.
 
 `local_semantics` records what the current VM does today.
 `consensus_obligations` records what must become protocol-owned before the

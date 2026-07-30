@@ -598,6 +598,202 @@ let consensus_blocker_codes ~opcode =
       ]
     | _ -> []
 
+let arithmetic_domain ~profile ~opcode =
+  match profile.name, opcode with
+  | "byte-ingress-exact", _ -> "ieee754-little-endian-byte-ingress"
+  | "q16-exact", _ -> "integer-q16"
+  | "q32-exact", _ -> "integer-q32"
+  | "soft-fp-exact", _ -> "software-defined-floating-point"
+  | "host-fp-local-candidate", "LINEAR_Q1_G128_FP" ->
+    "q1-g128-binary16-scale-native-binary64-accumulator"
+  | "host-fp-local-candidate", _ -> "native-binary64-host-floating-point"
+  | name, _ -> name
+
+let rounding_mode ~profile =
+  match profile.name with
+  | "q16-exact" | "q32-exact" -> "integer-profile-defined"
+  | "soft-fp-exact" -> "software-profile-defined"
+  | "byte-ingress-exact" -> "exact-byte-decode"
+  | "host-fp-local-candidate" -> "host-runtime-native"
+  | _ -> "profile-defined"
+
+let operation_sequence ~opcode =
+  match opcode with
+  | "LINEAR_Q1_G128_FP" ->
+    [
+      "decode_q1_g128_scale_fp16_le";
+      "decode_q1_g128_sign_bits_lsb0";
+      "iterate_row_col_block_item";
+      "multiply_lhs_sign_scale";
+      "accumulate_left_to_right";
+      "finite_output_check";
+      "atomic_output_writeback";
+    ]
+  | "RMSNORM_FP_EPS" ->
+    [
+      "read_epsilon_binary64_bits";
+      "snapshot_input_and_gamma";
+      "sum_squares_left_to_right";
+      "divide_by_count";
+      "add_epsilon";
+      "sqrt";
+      "reciprocal";
+      "multiply_input_inverse_gamma";
+      "finite_output_check";
+      "atomic_output_writeback";
+    ]
+  | "L2NORM_FP" ->
+    [
+      "read_epsilon_binary64_bits";
+      "snapshot_input";
+      "sum_squares_left_to_right";
+      "add_epsilon";
+      "sqrt";
+      "reciprocal";
+      "multiply_input_inverse";
+      "finite_output_check";
+      "atomic_output_writeback";
+    ]
+  | "SOFTMAX_FP" ->
+    [
+      "snapshot_scores";
+      "select_max_left_to_right";
+      "subtract_max";
+      "exp_each_score";
+      "sum_exponentials_left_to_right";
+      "divide_each_exponential_by_sum";
+      "finite_output_check";
+      "atomic_output_writeback";
+    ]
+  | "GATED_DELTA_RULE_FP" ->
+    [
+      "snapshot_operands_and_state";
+      "iterate_timestep_value_head_row_column";
+      "compute_decay";
+      "apply_state_decay";
+      "compute_memory_dot";
+      "apply_beta_delta";
+      "update_state";
+      "compute_output_dot";
+      "apply_query_scale";
+      "finite_output_and_state_check";
+      "atomic_output_and_state_writeback";
+    ]
+  | _ ->
+    [
+      "primitive_defined_snapshot";
+      "primitive_defined_compute";
+      "finite_output_check";
+      "atomic_writeback";
+    ]
+
+let edge_value_policy ~opcode =
+  match opcode with
+  | "LINEAR_Q1_G128_FP" ->
+    [
+      "reject_nonfinite_binary16_scale";
+      "accept_finite_binary16_zero_signed_zero_subnormal_normal_max";
+      "reject_missing_or_nonfinite_lhs";
+      "reject_nonfinite_output";
+      "preserve_destination_on_reject";
+    ]
+  | "RMSNORM_FP_EPS" | "L2NORM_FP" ->
+    [
+      "epsilon_must_decode_to_finite_positive_binary64";
+      "reject_missing_or_nonfinite_operands";
+      "reject_nonfinite_reduction_inverse_or_output";
+      "preserve_destination_on_reject";
+    ]
+  | _ ->
+    [
+      "reject_missing_or_nonfinite_operands";
+      "reject_nonfinite_output";
+      "preserve_destination_on_reject";
+    ]
+
+let oracle_vector_root ~opcode =
+  let vectors =
+    match opcode with
+    | "LINEAR_Q1_G128_FP" ->
+      [
+        "golden_q1_g128";
+        "sign_and_scale_edges";
+        "accumulation_order_stress";
+        "overflow_revert";
+        "invalid_lhs_revert";
+        "invalid_scale_revert";
+        "shape_effort_revert";
+        "offset_snapshot_overlap";
+      ]
+    | "RMSNORM_FP_EPS" ->
+      [
+        "model_epsilon";
+        "epsilon_1e_5";
+        "signed_zero_subnormal";
+        "minimum_subnormal_epsilon";
+        "reduction_order_stress";
+        "row_composition";
+        "invalid_epsilon_revert";
+        "alias_effort_revert";
+        "overflow_revert";
+      ]
+    | _ -> ["profile_gate_only"]
+  in
+  let payload =
+    `Assoc [
+      "schema", `String "octra.inference.oracle-vectors.v1";
+      "opcode", `String opcode;
+      "vectors", `List (List.map (fun value -> `String value) vectors);
+    ]
+    |> Yojson.Safe.to_string
+  in
+  Digestif.SHA256.(
+    digest_string ("octra:inference:oracle-vectors\000" ^ payload) |> to_hex)
+
+let contract_json_for_opcode ~opcode profile =
+  `Assoc [
+    "schema", `String "octra.inference.numerical-contract.v1";
+    "profile_name", `String profile.name;
+    "opcode", `String opcode;
+    "arithmetic_domain", `String (arithmetic_domain ~profile ~opcode);
+    "rounding_mode", `String (rounding_mode ~profile);
+    "operation_sequence",
+    `List (List.map (fun value -> `String value) (operation_sequence ~opcode));
+    "edge_value_policy",
+    `List (List.map (fun value -> `String value) (edge_value_policy ~opcode));
+    "overflow_policy", `String "reject_nonfinite_before_writeback";
+    "writeback_policy", `String "atomic_after_successful_full_output";
+    "oracle_vector_root", `String (oracle_vector_root ~opcode);
+  ]
+
+let root_for_opcode ~opcode profile =
+  let payload =
+    Yojson.Safe.to_string (contract_json_for_opcode ~opcode profile)
+  in
+  Digestif.SHA256.(
+    digest_string ("octra:inference:numerical-contract\000" ^ payload) |> to_hex)
+
+let profile_set_root_for_opcodes ~opcodes profile =
+  let entries =
+    opcodes
+    |> List.sort_uniq String.compare
+    |> List.map (fun opcode ->
+      `Assoc [
+        "opcode", `String opcode;
+        "profile_root", `String (root_for_opcode ~opcode profile);
+      ])
+  in
+  let payload =
+    `Assoc [
+      "schema", `String "octra.inference.numerical-profile-set.v1";
+      "entries", `List entries;
+    ]
+    |> Yojson.Safe.to_string
+  in
+  Digestif.SHA256.(
+    digest_string ("octra:inference:numerical-profile-set\000" ^ payload)
+    |> to_hex)
+
 let profile_gate_core_json ~opcode profile =
   `Assoc [
     "name", `String profile.name;
@@ -622,13 +818,6 @@ let profile_gate_core_json ~opcode profile =
          (fun value -> `String value)
          (consensus_blocker_codes ~opcode));
   ]
-
-let root_for_opcode ~opcode profile =
-  let payload =
-    Yojson.Safe.to_string (profile_gate_core_json ~opcode profile)
-  in
-  Digestif.SHA256.(
-    digest_string ("octra:inference:numerical-profile\000" ^ payload) |> to_hex)
 
 let profile_root_of_json = function
   | `Assoc fields ->
@@ -676,6 +865,7 @@ let to_json_for_opcode ~opcode profile =
     `Assoc
       (fields
        @ [
+         "profile_contract", contract_json_for_opcode ~opcode profile;
          "profile_root", `String (root_for_opcode ~opcode profile);
        ])
   | value -> value

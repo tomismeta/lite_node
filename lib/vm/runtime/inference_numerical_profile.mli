@@ -51,7 +51,9 @@ val status_string : consensus_status -> string
 val current_runtime_profile : opcode:string -> string option
 val validate_for_opcode : opcode:string -> profile:string -> (t, error) result
 val to_json : t -> Yojson.Safe.t
+val contract_json_for_opcode : opcode:string -> t -> Yojson.Safe.t
 val root_for_opcode : opcode:string -> t -> string
+val profile_set_root_for_opcodes : opcodes:string list -> t -> string
 val root_binding_json :
   numerical_profile_root:string -> Yojson.Safe.t -> Yojson.Safe.t
 val unavailable_root_binding_json : Yojson.Safe.t
