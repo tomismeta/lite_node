@@ -274,6 +274,39 @@ let check_argmax_profile_gate () =
   | Error error -> failwith (Profile.error_message error)
   | Ok _ -> failwith "expected argmax profile overclaim rejection"
 
+let check_rope_indexed_profile_gate () =
+  check
+    "rope indexed runtime profile"
+    (match Profile.current_runtime_profile ~opcode:"ROPE_APPLY_INDEXED_FP" with
+     | Some "host-fp-local-candidate" -> true
+     | _ -> false);
+  let gate = profile_gate "ROPE_APPLY_INDEXED_FP" in
+  check
+    "rope indexed local trig semantics"
+    (list_contains_substring
+       "native cos and sin"
+       (string_list_value "local_semantics" gate));
+  check
+    "rope indexed position obligation"
+    (list_contains_substring
+       "position-cell interpretation"
+       (string_list_value "consensus_obligations" gate));
+  match
+    Profile.validate_for_opcode
+      ~opcode:"ROPE_APPLY_INDEXED_FP"
+      ~profile:"q16-exact"
+  with
+  | Error (Profile.Unsupported_opcode_profile { opcode; profile; expected }) ->
+    check
+      "rope indexed overclaim opcode"
+      (String.equal opcode "ROPE_APPLY_INDEXED_FP");
+    check "rope indexed overclaim profile" (String.equal profile "q16-exact");
+    check
+      "rope indexed overclaim expected"
+      (String.equal expected "host-fp-local-candidate")
+  | Error error -> failwith (Profile.error_message error)
+  | Ok _ -> failwith "expected rope indexed profile overclaim rejection"
+
 let check_rejects_unknown_opcode () =
   match Template.of_json (template ~opcode:"MODEL_SPECIFIC_FASTPATH" ()) with
   | Error (Template.Template_error message) ->
@@ -404,6 +437,7 @@ let () =
   check_p0_profile_gate_coverage ();
   check_remaining_p0_profile_obligations ();
   check_argmax_profile_gate ();
+  check_rope_indexed_profile_gate ();
   check_rejects_unknown_opcode ();
   check_rejects_effect_drift ();
   check_rejects_missing_failure_cases ();

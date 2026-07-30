@@ -100,7 +100,8 @@ let current_runtime_profile ~opcode =
   | "L2NORM_FP"
   | "SOFTMAX_FP"
   | "GATED_DELTA_RULE_FP"
-  | "ARGMAX_FP" ->
+  | "ARGMAX_FP"
+  | "ROPE_APPLY_INDEXED_FP" ->
     Some "host-fp-local-candidate"
   | _ -> None
 
@@ -163,6 +164,14 @@ let local_semantics ~opcode =
       "ties keep the lowest zero-based index, including signed-zero ties";
       "the selected index is written only after the full input span is read";
     ]
+  | "ROPE_APPLY_INDEXED_FP" ->
+    [
+      "input cells are finite binary64 values and are updated in place";
+      "base is read as binary64, must be finite, and must be greater than 1.0";
+      "position cells must be exact signed integers within the binary64-safe integer range";
+      "theta uses native binary64 exponentiation before native cos and sin";
+      "outputs are written only after the complete finite output vector is computed";
+    ]
   | _ -> []
 
 let consensus_obligations ~opcode =
@@ -208,6 +217,13 @@ let consensus_obligations ~opcode =
       "reject non-finite logits before selection and preserve destination on rejection";
       "pin first-maximum tie behavior, selected-index encoding, and effort";
       "prove ordering preservation before mapping fixed-point logits to token authority";
+    ]
+  | "ROPE_APPLY_INDEXED_FP" ->
+    [
+      "replace or qualify native binary64 exponentiation, cos, sin, multiply, and add/subtract";
+      "pin exact position-cell interpretation, base handling, rotary dimension validation, and zero-position behavior";
+      "define in-place writeback atomicity, tail preservation, finite rejection, and effort";
+      "pass independent cross-platform conformance for indexed rotary edge vectors";
     ]
   | _ -> [
       "write primitive-specific deterministic math obligations before promotion";

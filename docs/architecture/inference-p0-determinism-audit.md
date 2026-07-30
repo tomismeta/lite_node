@@ -338,6 +338,13 @@ accumulation for `ATTENTION_SCORES_FP` dot products and
 is useful local evidence for the P0-plus attention surface, but it does not
 promote either opcode beyond local-candidate math.
 
+LiteNode also reports `ROPE_APPLY_INDEXED_FP` under the current
+`host-fp-local-candidate` runtime profile. The local profile covers finite
+binary64 input/base reads, exact integer position cells, native exponentiation,
+native `cos`/`sin`, finite-buffer writeback, zero-position behavior, and tail
+preservation. This remains local-only until rotary math has a software-defined
+or otherwise validator-qualified contract.
+
 The saved report is:
 
 ```text
