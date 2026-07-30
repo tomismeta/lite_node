@@ -60,6 +60,11 @@ let string_value name fields =
   | `String value -> value
   | _ -> failwith ("json field must be a string: " ^ name)
 
+let int_value name fields =
+  match assoc_value name fields with
+  | `Int value -> value
+  | _ -> failwith ("json field must be an int: " ^ name)
+
 let string_list_value name fields =
   match assoc_value name fields with
   | `List values ->
@@ -201,6 +206,32 @@ let profile_gate opcode =
     (match Profile.to_json_for_opcode ~opcode profile with
      | `Assoc gate -> gate
      | _ -> failwith "profile gate must be object")
+
+let check_profile_status_counts () =
+  let host_gate opcode = `Assoc (profile_gate opcode) in
+  let candidate_gate =
+    match Profile.of_name "byte-ingress-exact" with
+    | Error error -> failwith (Profile.error_message error)
+    | Ok profile -> Profile.to_json_for_opcode ~opcode:"LOAD_F64_LE_FP" profile
+  in
+  let counts =
+    Profile.status_counts_of_json_gates
+      [
+        host_gate "LINEAR_Q1_G128_FP";
+        host_gate "RMSNORM_FP_EPS";
+        candidate_gate;
+        `Assoc ["consensus_status", `String "consensus_ready"];
+        `Assoc ["consensus_status", `String "future_profile"];
+        `Assoc ["name", `String "profileless"];
+      ]
+  in
+  (match Profile.status_counts_json counts with
+   | `Assoc fields ->
+     check "local-only count" (int_value "local_only" fields = 2);
+     check "candidate count" (int_value "consensus_candidate" fields = 1);
+     check "ready count" (int_value "consensus_ready" fields = 1);
+     check "unknown count" (int_value "unknown" fields = 1)
+   | _ -> failwith "status counts json must be object")
 
 let check_p0_profile_gate_coverage () =
   List.iter
@@ -622,6 +653,7 @@ let check_rejects_single_delta_expected_span () =
 let () =
   check_accepts_template ();
   check_q1_profile_obligations ();
+  check_profile_status_counts ();
   check_p0_profile_gate_coverage ();
   check_remaining_p0_profile_obligations ();
   check_argmax_profile_gate ();

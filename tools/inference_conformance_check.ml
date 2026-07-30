@@ -173,52 +173,17 @@ let profile_gate_present = function
      | Some _ -> true)
   | _ -> false
 
-type profile_status_counts = {
-  local_only : int;
-  consensus_candidate : int;
-  consensus_ready : int;
-  unknown : int;
-}
-
-let empty_profile_status_counts = {
-  local_only = 0;
-  consensus_candidate = 0;
-  consensus_ready = 0;
-  unknown = 0;
-}
-
-let profile_gate_status = function
+let profile_gate_value = function
   | `Assoc fields ->
     (match List.assoc_opt "profile_gate" fields with
-     | Some (`Assoc gate) ->
-       (match List.assoc_opt "consensus_status" gate with
-        | Some (`String value) -> Some value
-        | _ -> None)
+     | Some (`Assoc _ as gate) -> Some gate
      | _ -> None)
   | _ -> None
 
-let add_profile_status counts value =
-  match profile_gate_status value with
-  | Some "local_only" ->
-    { counts with local_only = counts.local_only + 1 }
-  | Some "consensus_candidate" ->
-    { counts with consensus_candidate = counts.consensus_candidate + 1 }
-  | Some "consensus_ready" ->
-    { counts with consensus_ready = counts.consensus_ready + 1 }
-  | Some _ ->
-    { counts with unknown = counts.unknown + 1 }
-  | None -> counts
-
 let profile_status_counts values =
-  List.fold_left add_profile_status empty_profile_status_counts values
-
-let profile_status_counts_json counts =
-  `Assoc [
-    "local_only", `Int counts.local_only;
-    "consensus_candidate", `Int counts.consensus_candidate;
-    "consensus_ready", `Int counts.consensus_ready;
-    "unknown", `Int counts.unknown;
-  ]
+  values
+  |> List.filter_map profile_gate_value
+  |> Profile.status_counts_of_json_gates
 
 let template_profile_gate_present (checked : checked_template) =
   profile_gate_present (Template.to_json checked.template)
@@ -682,7 +647,7 @@ let producer_index_report index_path =
       "profile_gate_count", `Int profile_gate_count;
       "unprofiled_template_count", `Int unprofiled_template_count;
       "profile_consensus_status_counts",
-      profile_status_counts_json profile_status_counts;
+      Profile.status_counts_json profile_status_counts;
       "issue_count", `Int (List.length issues);
       "issues", `List (List.map issue_json issues);
     ]
@@ -733,7 +698,7 @@ let () =
               "profile_gate_count", `Int profile_gate_count;
               "unprofiled_template_count", `Int (1 - profile_gate_count);
               "profile_consensus_status_counts",
-              profile_status_counts_json (profile_status_counts [template_json]);
+              Profile.status_counts_json (profile_status_counts [template_json]);
               "templates", `List [checked_template_json checked];
             ]))
      | _ -> fail (path ^ ": template must be an object"))
@@ -761,7 +726,7 @@ let () =
         "unprofiled_template_count",
         `Int (List.length templates - profile_gate_count);
         "profile_consensus_status_counts",
-        profile_status_counts_json (profile_status_counts template_jsons);
+        Profile.status_counts_json (profile_status_counts template_jsons);
         "p0_opcodes",
         `List (List.map (fun opcode -> `String opcode) Template.p0_opcodes);
         "templates", `List (List.map checked_template_json templates);

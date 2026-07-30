@@ -24,6 +24,13 @@ type t = {
   required_actions : string list;
 }
 
+type status_counts = {
+  local_only : int;
+  consensus_candidate : int;
+  consensus_ready : int;
+  unknown : int;
+}
+
 type error =
   | Unknown_profile of string
   | Unsupported_opcode_profile of {
@@ -39,3 +46,5 @@ val current_runtime_profile : opcode:string -> string option
 val validate_for_opcode : opcode:string -> profile:string -> (t, error) result
 val to_json : t -> Yojson.Safe.t
 val to_json_for_opcode : opcode:string -> t -> Yojson.Safe.t
+val status_counts_of_json_gates : Yojson.Safe.t list -> status_counts
+val status_counts_json : status_counts -> Yojson.Safe.t

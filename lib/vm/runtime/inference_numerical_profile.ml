@@ -24,6 +24,13 @@ type t = {
   required_actions : string list;
 }
 
+type status_counts = {
+  local_only : int;
+  consensus_candidate : int;
+  consensus_ready : int;
+  unknown : int;
+}
+
 type error =
   | Unknown_profile of string
   | Unsupported_opcode_profile of {
@@ -36,6 +43,43 @@ let status_string = function
   | Local_only -> "local_only"
   | Consensus_candidate -> "consensus_candidate"
   | Consensus_ready -> "consensus_ready"
+
+let empty_status_counts = {
+  local_only = 0;
+  consensus_candidate = 0;
+  consensus_ready = 0;
+  unknown = 0;
+}
+
+let gate_status = function
+  | `Assoc fields ->
+    (match List.assoc_opt "consensus_status" fields with
+     | Some (`String value) -> Some value
+     | _ -> None)
+  | _ -> None
+
+let add_gate_status counts gate =
+  match gate_status gate with
+  | Some "local_only" ->
+    { counts with local_only = counts.local_only + 1 }
+  | Some "consensus_candidate" ->
+    { counts with consensus_candidate = counts.consensus_candidate + 1 }
+  | Some "consensus_ready" ->
+    { counts with consensus_ready = counts.consensus_ready + 1 }
+  | Some _ ->
+    { counts with unknown = counts.unknown + 1 }
+  | None -> counts
+
+let status_counts_of_json_gates gates =
+  List.fold_left add_gate_status empty_status_counts gates
+
+let status_counts_json counts =
+  `Assoc [
+    "local_only", `Int counts.local_only;
+    "consensus_candidate", `Int counts.consensus_candidate;
+    "consensus_ready", `Int counts.consensus_ready;
+    "unknown", `Int counts.unknown;
+  ]
 
 let error_message = function
   | Unknown_profile profile -> "unknown numerical profile: " ^ profile
