@@ -261,7 +261,7 @@ let build_p0_from_fixtures fixtures =
   in
   loop [] p0_requirements
 
-let rec failure_case_count = function
+let failure_case_count = function
   | `List cases -> Ok (List.length cases)
   | `Assoc groups ->
     List.fold_left

@@ -54,6 +54,7 @@ The current branch already has useful controls:
 - opcode capability gates under `inference_opcode_policy.ml`;
 - generic program policy still rejects these inference FP opcodes outside the
   inference path;
+- conformance templates reject unknown or over-claimed numerical profiles;
 - fixed loop order in the OCaml implementation;
 - finite-output checks for the P0 primitives;
 - aliasing and span checks in the major writeback paths;
@@ -200,6 +201,39 @@ Acceptance means only:
 - failure cases are present.
 
 After that, LiteNode can execute templates without negotiating schema again.
+
+## Numerical Profile Gate
+
+The conformance template parser now treats the numerical profile as a gate, not
+as free-form metadata. The current runtime profile for the P0 FP templates is:
+
+```text
+host-fp-local-candidate
+```
+
+That profile is accepted only as local candidate execution. It is reported as
+`local_only`, with required actions to bind exact arithmetic, replace or qualify
+host math, and pass cross-platform conformance before validator admission.
+
+Templates that declare an unknown profile are rejected. Templates that claim a
+profile the current runtime does not implement, such as `soft-fp-exact` for
+`RMSNORM_FP_EPS`, are also rejected. That prevents producer artifacts from
+silently upgrading a host-FP fixture into a consensus-candidate claim.
+
+The same check applies to producer VM execution templates when they include a
+`profile` field. Older accepted templates without that field remain readable,
+but any declared profile is now enforced before execution.
+
+Initial P0 focus:
+
+| Opcode | Current accepted profile | Consensus status | Why not ready |
+| --- | --- | --- | --- |
+| `LINEAR_Q1_G128_FP` | `host-fp-local-candidate` | `local_only` | Uses native binary64 multiplication/addition after Q1 scale/sign decode. |
+| `RMSNORM_FP_EPS` | `host-fp-local-candidate` | `local_only` | Uses native binary64 reduction, division, multiplication, and `sqrt`. |
+
+The next acceptable status change for either opcode requires a runtime
+implementation change and matching scalar-oracle corpus, not just a new string
+in the producer template.
 
 ## Current Positive Execution Gate
 

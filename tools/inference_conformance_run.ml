@@ -13,6 +13,7 @@ Include at startup:
 *)
 
 module VM = Octra_vm.Contract_vm
+module Profile = Octra_vm.Inference_numerical_profile
 
 let template_index = ref None
 let p0_plus_pack = ref None
@@ -109,6 +110,15 @@ let opt_int_field name fields =
   | Some `Null
   | None -> None
   | _ -> fail ("invalid int field: " ^ name)
+
+let profile_gate_json opcode fields =
+  match opt_string_field "profile" fields with
+  | None -> `Null
+  | Some profile ->
+    (match Profile.validate_for_opcode ~opcode ~profile with
+     | Ok gate -> Profile.to_json gate
+     | Error error ->
+       fail (Profile.error_message error))
 
 let register_index value =
   let len = String.length value in
@@ -606,6 +616,7 @@ let execute_template root_dir entry =
     | `Assoc fields -> fields
     | _ -> fail (full_template_path ^ ": template must be an object")
   in
+  let profile_gate = profile_gate_json opcode template in
   let expected_effort = int_field "expected_effort" template in
   let params = assoc_field "parameter_addresses_and_scalar_params" template in
   let registers = assoc_field "registers" params in
@@ -653,6 +664,7 @@ let execute_template root_dir entry =
   `Assoc [
     "opcode", `String opcode;
     "template_path", `String template_path;
+    "profile_gate", profile_gate;
     "status", `String (if accepted then "accepted" else "rejected");
     "vm_run", `String (if ran then "accepted" else "rejected");
     "output_status",

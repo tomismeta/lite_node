@@ -13,6 +13,7 @@ Include at startup:
 *)
 
 module Template = Octra_vm.Inference_conformance_template
+module Profile = Octra_vm.Inference_numerical_profile
 
 let template_path = ref None
 let template_dir = ref None
@@ -88,6 +89,16 @@ let relative_path_ok path =
   && List.for_all
        (fun part -> part <> "" && part <> "." && part <> "..")
        (String.split_on_char '/' path)
+
+let hex_char = function
+  | '0' .. '9'
+  | 'a' .. 'f'
+  | 'A' .. 'F' -> true
+  | _ -> false
+
+let root_ok value =
+  String.length value = 64
+  && String.for_all hex_char value
 
 type issue = {
   path : string;
@@ -422,6 +433,15 @@ let gated_delta_semantic_issues path opcode fields =
          | None -> [issue ~opcode path
                      "missing Gated Delta operation_order"])
 
+let profile_issues path opcode fields =
+  match string_field "profile" fields with
+  | None -> []
+  | Some profile ->
+    (match Profile.validate_for_opcode ~opcode ~profile with
+     | Ok _ -> []
+     | Error error ->
+       [issue ~opcode path (Profile.error_message error)])
+
 let producer_template_issues path opcode json =
   match json with
   | `Assoc fields ->
@@ -434,12 +454,16 @@ let producer_template_issues path opcode json =
     let root_issues =
       let vm =
         match string_field "vm_semantics_root" fields with
-        | Some _ -> []
+        | Some value when root_ok value -> []
+        | Some _ -> [issue ~opcode path
+                       "vm_semantics_root must be a 32-byte hex root"]
         | None -> [issue ~opcode path "missing vm_semantics_root"]
       in
       let numerical =
         match string_field "numerical_profile_root" fields with
-        | Some _ -> []
+        | Some value when root_ok value -> []
+        | Some _ -> [issue ~opcode path
+                       "numerical_profile_root must be a 32-byte hex root"]
         | None -> [issue ~opcode path "missing numerical_profile_root"]
       in
       let effort =
@@ -451,6 +475,7 @@ let producer_template_issues path opcode json =
     in
     type_issue
     @ root_issues
+    @ profile_issues path opcode fields
     @ issues_for_program_effects path opcode fields
     @ source_path_issues path opcode fields
     @ expected_issues path opcode fields

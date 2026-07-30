@@ -200,6 +200,16 @@ let optional_exists predicate = function
   | None -> false
   | Some value -> predicate value
 
+let hex_char = function
+  | '0' .. '9'
+  | 'a' .. 'f'
+  | 'A' .. 'F' -> true
+  | _ -> false
+
+let root_ok value =
+  String.length value = 64
+  && String.for_all hex_char value
+
 let require_string expected name fields =
   let* actual = string_field name fields in
   if String.equal actual expected then Ok ()
@@ -366,11 +376,28 @@ let validate (template : t) =
   | None -> Error (Template_error ("unsupported P0 opcode: " ^ template.opcode))
   | Some requirement ->
     let* () = check_primitive requirement template.primitive in
+    let* _profile =
+      match
+        Inference_numerical_profile.validate_for_opcode
+          ~opcode:template.opcode
+          ~profile:template.profile
+      with
+      | Ok profile -> Ok profile
+      | Error error ->
+        Error
+          (Template_error
+             (Inference_numerical_profile.error_message error))
+    in
     let missing = missing_effects requirement.effects template.effects in
     if missing <> [] then
       Error
         (Template_error
            ("missing required effects: " ^ String.concat "," missing))
+    else if not (root_ok template.vm_semantics_root) then
+      Error (Template_error "vm_semantics_root must be a 32-byte hex root")
+    else if not (root_ok template.numerical_profile_root) then
+      Error
+        (Template_error "numerical_profile_root must be a 32-byte hex root")
     else if template.registers = [] then
       Error (Template_error "register bindings are required")
     else if template.memory = [] then
@@ -503,13 +530,38 @@ let failure_json (item : failure_case) =
     `List (List.map (fun value -> `String value) item.unchanged_spans);
   ]
 
+let profile_json (template : t) =
+  match
+    Inference_numerical_profile.validate_for_opcode
+      ~opcode:template.opcode
+      ~profile:template.profile
+  with
+  | Ok profile -> Inference_numerical_profile.to_json profile
+  | Error error ->
+    `Assoc [
+      "name", `String template.profile;
+      "consensus_status", `String "invalid";
+      "error", `String (Inference_numerical_profile.error_message error);
+    ]
+
 let to_json (template : t) =
+  let profile = profile_json template in
+  let consensus_status =
+    match profile with
+    | `Assoc fields ->
+      (match List.assoc_opt "consensus_status" fields with
+       | Some (`String status) -> status
+       | _ -> "unknown")
+    | _ -> "unknown"
+  in
   `Assoc [
     "status", `String "accepted";
     "diagnostic_only", `Bool true;
     "opcode", `String template.opcode;
     "primitive", `String template.primitive;
     "profile", `String template.profile;
+    "profile_gate", profile;
+    "consensus_status", `String consensus_status;
     "vm_semantics_root", `String template.vm_semantics_root;
     "numerical_profile_root", `String template.numerical_profile_root;
     "expected_effort", `Int template.expected_effort;

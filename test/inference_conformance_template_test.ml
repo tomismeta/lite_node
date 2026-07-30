@@ -51,15 +51,17 @@ let failure case =
 
 let template ?(opcode = "RMSNORM_FP_EPS") ?(primitive = "rmsnorm_fp_eps")
     ?(effects = ["memory_read"; "memory_write"]) ?(memory_access = "read_write")
+    ?(profile = "host-fp-local-candidate") ?(vm_semantics_root = hex_root 'd')
+    ?(numerical_profile_root = hex_root 'e')
     ?(failure_cases = [failure "nonfinite_input_nan"]) () =
   `Assoc [
     "type", `String "litenode_vm_conformance_template";
     "schema", `Int 1;
     "opcode", `String opcode;
     "primitive", `String primitive;
-    "profile", `String "host-fp-local-candidate";
-    "vm_semantics_root", `String (hex_root 'd');
-    "numerical_profile_root", `String (hex_root 'e');
+    "profile", `String profile;
+    "vm_semantics_root", `String vm_semantics_root;
+    "numerical_profile_root", `String numerical_profile_root;
     "expected_effort", `Int 16;
     "effects", `List (List.map (fun effect -> `String effect) effects);
     "registers",
@@ -100,7 +102,17 @@ let check_accepts_template () =
     | `Assoc fields ->
       check
         "diagnostic only"
-        (List.mem_assoc "diagnostic_only" fields)
+        (List.mem_assoc "diagnostic_only" fields);
+      check
+        "consensus status"
+        (match List.assoc_opt "consensus_status" fields with
+         | Some (`String "local_only") -> true
+         | _ -> false);
+      check
+        "profile gate"
+        (match List.assoc_opt "profile_gate" fields with
+         | Some (`Assoc _) -> true
+         | _ -> false)
     | _ -> failwith "template json must be object"
 
 let check_rejects_unknown_opcode () =
@@ -129,6 +141,38 @@ let check_rejects_missing_failure_cases () =
       (String.equal message "failure cases are required")
   | Error error -> failwith (Template.error_message error)
   | Ok _ -> failwith "expected failure-case rejection"
+
+let check_rejects_unknown_profile () =
+  match Template.of_json (template ~profile:"vendor-fast-float" ()) with
+  | Error (Template.Template_error message) ->
+    check
+      "unknown profile"
+      (String.equal message "unknown numerical profile: vendor-fast-float")
+  | Error error -> failwith (Template.error_message error)
+  | Ok _ -> failwith "expected profile rejection"
+
+let check_rejects_profile_overclaim () =
+  match Template.of_json (template ~profile:"soft-fp-exact" ()) with
+  | Error (Template.Template_error message) ->
+    check
+      "profile overclaim"
+      (String.equal
+         message
+         "profile soft-fp-exact is not implemented for opcode \
+          RMSNORM_FP_EPS; expected host-fp-local-candidate")
+  | Error error -> failwith (Template.error_message error)
+  | Ok _ -> failwith "expected profile overclaim rejection"
+
+let check_rejects_bad_roots () =
+  match Template.of_json (template ~numerical_profile_root:"not-a-root" ()) with
+  | Error (Template.Template_error message) ->
+    check
+      "bad numerical root"
+      (String.equal
+         message
+         "numerical_profile_root must be a 32-byte hex root")
+  | Error error -> failwith (Template.error_message error)
+  | Ok _ -> failwith "expected numerical root rejection"
 
 let check_rejects_non_writable_template () =
   match Template.of_json (template ~memory_access:"read" ()) with
@@ -200,6 +244,9 @@ let () =
   check_rejects_unknown_opcode ();
   check_rejects_effect_drift ();
   check_rejects_missing_failure_cases ();
+  check_rejects_unknown_profile ();
+  check_rejects_profile_overclaim ();
+  check_rejects_bad_roots ();
   check_rejects_non_writable_template ();
   check_rejects_wide_register ();
   check_rejects_single_delta_expected_span ()
