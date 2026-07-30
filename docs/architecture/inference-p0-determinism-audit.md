@@ -265,7 +265,8 @@ math/profile blockers behind the prose obligations.
 `profile_root` is the LiteNode-owned descriptor root for the emitted profile
 gate. Current templates still validate `numerical_profile_root` syntactically;
 profile-root equality is diagnostic until a profile is promoted beyond
-`local_only`.
+`local_only`. Template and P0 execution reports expose that diagnostic as
+`profile_root_binding.status`: `matched`, `unbound`, or `unavailable`.
 
 `local_semantics` records what the current VM does today.
 `consensus_obligations` records what must become protocol-owned before the

@@ -584,6 +584,30 @@ let root_for_opcode ~opcode profile =
   Digestif.SHA256.(
     digest_string ("octra:inference:numerical-profile\000" ^ payload) |> to_hex)
 
+let profile_root_of_json = function
+  | `Assoc fields ->
+    (match List.assoc_opt "profile_root" fields with
+     | Some (`String root) -> Some root
+     | _ -> None)
+  | _ -> None
+
+let root_binding_json ~numerical_profile_root profile_gate =
+  let profile_root = profile_root_of_json profile_gate in
+  let status =
+    match profile_root with
+    | Some root when String.equal root numerical_profile_root -> "matched"
+    | Some _ -> "unbound"
+    | None -> "unavailable"
+  in
+  `Assoc [
+    "status", `String status;
+    "numerical_profile_root", `String numerical_profile_root;
+    "profile_root",
+    (match profile_root with
+     | None -> `Null
+     | Some root -> `String root);
+  ]
+
 let to_json profile =
   `Assoc [
     "name", `String profile.name;

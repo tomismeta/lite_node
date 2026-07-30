@@ -567,6 +567,10 @@ let to_json (template : t) =
     "consensus_status", `String consensus_status;
     "vm_semantics_root", `String template.vm_semantics_root;
     "numerical_profile_root", `String template.numerical_profile_root;
+    "profile_root_binding",
+    Inference_numerical_profile.root_binding_json
+      ~numerical_profile_root:template.numerical_profile_root
+      profile;
     "expected_effort", `Int template.expected_effort;
     "effects", `List (List.map (fun value -> `String value) template.effects);
     "register_count", `Int (List.length template.registers);

@@ -731,6 +731,11 @@ let execute_template root_dir entry =
   in
   check_template_identity full_template_path opcode primitive template;
   let profile_gate = profile_gate_json opcode template in
+  let profile_root_binding =
+    Profile.root_binding_json
+      ~numerical_profile_root:(string_field "numerical_profile_root" template)
+      profile_gate
+  in
   let expected_effort = int_field "expected_effort" template in
   let params = assoc_field "parameter_addresses_and_scalar_params" template in
   let registers = assoc_field "registers" params in
@@ -779,6 +784,7 @@ let execute_template root_dir entry =
     "opcode", `String opcode;
     "template_path", `String template_path;
     "profile_gate", profile_gate;
+    "profile_root_binding", profile_root_binding;
     "status", `String (if accepted then "accepted" else "rejected");
     "vm_run", `String (if ran then "accepted" else "rejected");
     "output_status",

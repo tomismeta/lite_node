@@ -46,6 +46,8 @@ val current_runtime_profile : opcode:string -> string option
 val validate_for_opcode : opcode:string -> profile:string -> (t, error) result
 val to_json : t -> Yojson.Safe.t
 val root_for_opcode : opcode:string -> t -> string
+val root_binding_json :
+  numerical_profile_root:string -> Yojson.Safe.t -> Yojson.Safe.t
 val to_json_for_opcode : opcode:string -> t -> Yojson.Safe.t
 val status_counts_of_json_gates : Yojson.Safe.t list -> status_counts
 val classified_gate_count : status_counts -> int

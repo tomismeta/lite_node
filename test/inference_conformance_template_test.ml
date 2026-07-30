@@ -160,6 +160,16 @@ let check_accepts_template () =
          | Some (`String "local_only") -> true
          | _ -> false);
       check
+        "profile root binding"
+        (match List.assoc_opt "profile_root_binding" fields with
+         | Some (`Assoc binding) ->
+           String.equal (string_value "status" binding) "unbound"
+           && String.equal
+                (string_value "numerical_profile_root" binding)
+                (hex_root 'e')
+           && root_ok (string_value "profile_root" binding)
+         | _ -> false);
+      check
         "profile gate"
         (match List.assoc_opt "profile_gate" fields with
          | Some (`Assoc gate) ->

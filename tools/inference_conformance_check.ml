@@ -526,11 +526,18 @@ let profile_issues path opcode fields =
 let profile_gate_entry path opcode fields =
   match profile_gate_result opcode fields with
   | Ok profile_gate ->
+    let profile_root_binding =
+      match string_field "numerical_profile_root" fields with
+      | Some numerical_profile_root ->
+        Profile.root_binding_json ~numerical_profile_root profile_gate
+      | None -> `Null
+    in
     Some
       (`Assoc [
         "path", `String path;
         "opcode", `String opcode;
         "profile_gate", profile_gate;
+        "profile_root_binding", profile_root_binding;
       ])
   | Error _ -> None
 
