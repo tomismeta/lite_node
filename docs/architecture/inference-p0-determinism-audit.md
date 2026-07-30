@@ -237,3 +237,41 @@ Uncounted cases are intentionally observational today:
   needs an explicit protocol decision; and
 - `overflow_without_max_subtract`, because that validates stable softmax
   behavior rather than reject-before-write behavior.
+
+## P0-Plus Execution Gate
+
+Status on 2026-07-30:
+
+```text
+/home/exedev/evidence/octra-inference/determinism-p0-plus-corpus-20260730-022653/p0-plus-fixture-pack.cjson
+```
+
+LiteNode executes this pack with:
+
+```text
+tools/inference_conformance_run.exe \
+  --p0-plus-pack <p0-plus-fixture-pack.cjson>
+```
+
+Current result:
+
+| Surface | Fixture cases | VM result |
+| --- | ---: | --- |
+| `SOFTMAX_FP` | 2 | accepted/matched |
+| `ATTENTION_SCORES_FP` | 1 | accepted/matched |
+| `ATTENTION_WEIGHTED_SUM_FP` | 1 | accepted/matched |
+| `ROPE_APPLY_INDEXED_FP` | 2 | accepted/matched |
+| `ARGMAX_FP` | 2 | accepted/matched for selected index |
+| `RMSNORM_FP_EPS -> LINEAR_Q1_G128_FP -> ARGMAX_FP` | 1 | accepted/matched |
+
+The saved report is:
+
+```text
+/home/exedev/evidence/octra-inference/determinism-p0-plus-corpus-20260730-022653/litenode-p0-plus-execution-report.cjson
+```
+
+The P0-plus pack is still diagnostic and model-neutral. It adds coverage for
+attention math, indexed RoPE, argmax tie behavior, and the final logits-tail
+composition. `ARGMAX_FP` only returns the selected index, so producer top-k
+ordering manifests are preserved as `producer_only` evidence until the VM
+exposes a top-k primitive.

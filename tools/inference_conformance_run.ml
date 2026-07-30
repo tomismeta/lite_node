@@ -15,6 +15,7 @@ Include at startup:
 module VM = Octra_vm.Contract_vm
 
 let template_index = ref None
+let p0_plus_pack = ref None
 let strict_effort = ref false
 let include_failures = ref false
 
@@ -26,6 +27,9 @@ let args = [
   "--template-index",
   Arg.String (fun value -> template_index := Some value),
   "producer template index json";
+  "--p0-plus-pack",
+  Arg.String (fun value -> p0_plus_pack := Some value),
+  "producer P0-plus fixture pack json";
   "--strict-effort",
   Arg.Set strict_effort,
   "fail when observed VM effort differs from expected_effort";
@@ -36,7 +40,8 @@ let args = [
 
 let usage =
   "inference_conformance_run --template-index <path> [--strict-effort] \
-   [--include-failures]"
+   [--include-failures]\n\
+   or inference_conformance_run --p0-plus-pack <path>"
 
 let read_file path =
   let input = open_in_bin path in
@@ -170,6 +175,11 @@ let output_bytes state base cells =
   done;
   Bytes.to_string raw
 
+let u64_bytes value =
+  let raw = Bytes.create 8 in
+  put_int64_le raw 0 (Z.to_int64 value);
+  Bytes.to_string raw
+
 let state ?(limit = 1_000_000_000) () =
   VM.create_state
     ~limit
@@ -189,6 +199,14 @@ let set_z_reg state reg value =
 
 let set_raw_reg state reg raw =
   state.VM.regs.(reg) <- VM.VString raw
+
+let reg_z state reg =
+  match state.VM.regs.(reg) with
+  | VM.VInt value
+  | VM.VU64 value
+  | VM.VU128 value
+  | VM.VU256 value -> value
+  | _ -> fail ("register is not an integer: r" ^ string_of_int reg)
 
 let value_for name values =
   int_field name values
@@ -654,6 +672,328 @@ let execute_template root_dir entry =
     "failure_cases", `List (List.map (fun (_, _, json) -> json) failure_results);
   ]
 
+let find_manifest list_name fixture name =
+  match
+    list_field list_name fixture
+    |> List.find_opt (function
+      | `Assoc fields -> String.equal (string_field "name" fields) name
+      | _ -> false)
+  with
+  | Some (`Assoc fields) -> fields
+  | Some _ -> fail "manifest must be an object"
+  | None -> fail ("missing manifest: " ^ list_name ^ "." ^ name)
+
+let load_manifest_raw root_dir manifest =
+  let path = Filename.concat root_dir (string_field "path" manifest) in
+  let expected_bytes = int_field "bytes" manifest in
+  let expected_sha = string_field "sha256" manifest in
+  let raw =
+    try read_file path with
+    | Sys_error message -> fail message
+  in
+  if String.length raw <> expected_bytes then
+    fail
+      (Printf.sprintf
+         "%s: expected %d bytes actual %d"
+         path
+         expected_bytes
+         (String.length raw));
+  let actual_sha = sha256 raw in
+  if not (String.equal actual_sha expected_sha) then
+    fail
+      (Printf.sprintf
+         "%s: expected sha256 %s actual %s"
+         path
+         expected_sha
+         actual_sha);
+  raw
+
+let load_input_raw root_dir fixture name =
+  load_manifest_raw root_dir (find_manifest "input_byte_manifests" fixture name)
+
+let compare_expected_raw root_dir fixture name raw =
+  let manifest = find_manifest "expected_output_byte_manifests" fixture name in
+  let expected = load_manifest_raw root_dir manifest in
+  let matched = String.equal raw expected in
+  matched,
+  `Assoc [
+    "name", `String name;
+    "status", `String (if matched then "matched" else "mismatch");
+    "expected_sha256", `String (sha256 expected);
+    "observed_sha256", `String (sha256 raw);
+    "expected_root", `String (string_field "root" manifest);
+    "bytes", `Int (String.length raw);
+  ]
+
+let producer_only_expected root_dir fixture name =
+  let manifest = find_manifest "expected_output_byte_manifests" fixture name in
+  let raw = load_manifest_raw root_dir manifest in
+  `Assoc [
+    "name", `String name;
+    "status", `String "producer_only";
+    "expected_sha256", `String (sha256 raw);
+    "expected_root", `String (string_field "root" manifest);
+    "bytes", `Int (String.length raw);
+  ]
+
+let set_manifest_f64 root_dir fixture name state base =
+  let raw = load_input_raw root_dir fixture name in
+  if String.length raw mod 8 <> 0 then
+    fail ("input is not f64le: " ^ name);
+  set_f64le state base (String.length raw / 8) raw;
+  String.length raw / 8
+
+let int_list_field name fields =
+  list_field name fields
+  |> List.map (function
+    | `Int value -> value
+    | `Intlit value -> int_of_string value
+    | _ -> fail ("field must be an int list: " ^ name))
+
+let set_position_cells state base values =
+  List.iteri
+    (fun index value ->
+       Hashtbl.replace
+         state.VM.memory.data
+         (base + index)
+         (VM.VInt (Z.of_int value)))
+    values
+
+let p0_plus_softmax root_dir fixture params =
+  let st = state () in
+  let scores = 100 in
+  let dst = 10000 in
+  ignore (set_manifest_f64 root_dir fixture "scores" st scores);
+  set_int_reg st 0 dst;
+  set_int_reg st 1 scores;
+  set_int_reg st 2 (int_field "count" params);
+  let ran = VM.run st [|VM.SOFTMAX_FP (0, 1, 2); VM.STOP|] in
+  let raw =
+    if ran then output_bytes st dst (int_field "count" params) else ""
+  in
+  let matched, result =
+    if ran then compare_expected_raw root_dir fixture "expected_probabilities" raw
+    else false, `Assoc ["name", `String "expected_probabilities"; "status", `String "vm_rejected"]
+  in
+  ran, matched, [result], st.VM.effort_used
+
+let p0_plus_attention_scores root_dir fixture params =
+  let st = state () in
+  let query = 100 in
+  let key = 1000 in
+  let dst = 10000 in
+  ignore (set_manifest_f64 root_dir fixture "query" st query);
+  ignore (set_manifest_f64 root_dir fixture "keys" st key);
+  set_int_reg st 0 dst;
+  set_int_reg st 1 query;
+  set_int_reg st 2 key;
+  set_int_reg st 3 (int_field "key_count" params);
+  set_int_reg st 4 (int_field "head_dim" params);
+  let ran = VM.run st [|VM.ATTENTION_SCORES_FP (0, 1, 2, 3, 4); VM.STOP|] in
+  let raw =
+    if ran then output_bytes st dst (int_field "key_count" params) else ""
+  in
+  let matched, result =
+    if ran then compare_expected_raw root_dir fixture "expected_scores" raw
+    else false, `Assoc ["name", `String "expected_scores"; "status", `String "vm_rejected"]
+  in
+  ran, matched, [result], st.VM.effort_used
+
+let p0_plus_weighted_sum root_dir fixture params =
+  let st = state () in
+  let weights = 100 in
+  let values = 1000 in
+  let dst = 10000 in
+  ignore (set_manifest_f64 root_dir fixture "weights" st weights);
+  ignore (set_manifest_f64 root_dir fixture "values" st values);
+  set_int_reg st 0 dst;
+  set_int_reg st 1 weights;
+  set_int_reg st 2 values;
+  set_int_reg st 3 (int_field "key_count" params);
+  set_int_reg st 4 (int_field "head_dim" params);
+  let ran =
+    VM.run st [|VM.ATTENTION_WEIGHTED_SUM_FP (0, 1, 2, 3, 4); VM.STOP|]
+  in
+  let raw =
+    if ran then output_bytes st dst (int_field "head_dim" params) else ""
+  in
+  let matched, result =
+    if ran then compare_expected_raw root_dir fixture "expected_output" raw
+    else false, `Assoc ["name", `String "expected_output"; "status", `String "vm_rejected"]
+  in
+  ran, matched, [result], st.VM.effort_used
+
+let p0_plus_rope root_dir fixture params =
+  let st = state () in
+  let addr = 100 in
+  let positions = 1000 in
+  ignore (set_manifest_f64 root_dir fixture "input" st addr);
+  set_position_cells st positions (int_list_field "pair_positions" params);
+  set_int_reg st 0 addr;
+  set_int_reg st 1 (int_field "count" params);
+  set_int_reg st 2 (int_field "head_dim" params);
+  set_int_reg st 3 (int_field "rotary_dim" params);
+  set_int_reg st 4 positions;
+  set_z_reg st 5 (z_field "freq_base_bits" params);
+  let ran = VM.run st [|VM.ROPE_APPLY_INDEXED_FP (0, 1, 2, 3, 4, 5); VM.STOP|] in
+  let raw =
+    if ran then output_bytes st addr (int_field "count" params) else ""
+  in
+  let matched, result =
+    if ran then compare_expected_raw root_dir fixture "expected_output" raw
+    else false, `Assoc ["name", `String "expected_output"; "status", `String "vm_rejected"]
+  in
+  ran, matched, [result], st.VM.effort_used
+
+let p0_plus_argmax root_dir fixture params =
+  let st = state () in
+  let logits = 100 in
+  ignore (set_manifest_f64 root_dir fixture "logits" st logits);
+  set_int_reg st 0 logits;
+  set_int_reg st 1 (int_field "count" params);
+  let ran = VM.run st [|VM.ARGMAX_FP (2, 0, 1); VM.STOP|] in
+  let selected = if ran then u64_bytes (reg_z st 2) else "" in
+  let matched, selected_result =
+    if ran then compare_expected_raw root_dir fixture "selected_index_u64le" selected
+    else false, `Assoc ["name", `String "selected_index_u64le"; "status", `String "vm_rejected"]
+  in
+  let top5 = producer_only_expected root_dir fixture "top5_indices_u64le" in
+  ran, matched, [selected_result; top5], st.VM.effort_used
+
+let p0_plus_logits_tail root_dir fixture params =
+  let st = state () in
+  let hidden = 100 in
+  let gamma = 7000 in
+  let logits = 10000 in
+  let q1 = load_input_raw root_dir fixture "lm_head_q1_owner" in
+  ignore (set_manifest_f64 root_dir fixture "final_hidden" st hidden);
+  ignore (set_manifest_f64 root_dir fixture "final_norm_gamma" st gamma);
+  set_int_reg st 0 hidden;
+  set_int_reg st 1 (int_field "hidden_dim" params);
+  set_int_reg st 3 gamma;
+  set_z_reg st 4 (z_field "epsilon_bits" params);
+  set_int_reg st 5 logits;
+  set_raw_reg st 6 q1;
+  set_int_reg st 7 0;
+  set_int_reg st 8 1;
+  set_int_reg st 9 (int_field "hidden_dim" params);
+  set_int_reg st 10 (int_field "vocab_slice" params);
+  set_int_reg st 11 logits;
+  set_int_reg st 12 (int_field "vocab_slice" params);
+  let program = [|
+    VM.RMSNORM_FP_EPS (0, 1, 3, 4);
+    VM.LINEAR_Q1_G128_FP (5, 0, 6, 7, 8, 9, 10);
+    VM.ARGMAX_FP (13, 11, 12);
+    VM.STOP;
+  |] in
+  let ran = VM.run st program in
+  let norm_raw =
+    if ran then output_bytes st hidden (int_field "hidden_dim" params) else ""
+  in
+  let logits_raw =
+    if ran then output_bytes st logits (int_field "vocab_slice" params) else ""
+  in
+  let selected_raw = if ran then u64_bytes (reg_z st 13) else "" in
+  let results =
+    if not ran then [
+      `Assoc ["name", `String "final_norm_output"; "status", `String "vm_rejected"];
+      `Assoc ["name", `String "logits"; "status", `String "vm_rejected"];
+      `Assoc ["name", `String "selected_index_u64le"; "status", `String "vm_rejected"];
+      producer_only_expected root_dir fixture "top5_indices_u64le";
+    ]
+    else
+      let _, norm_result =
+        compare_expected_raw root_dir fixture "final_norm_output" norm_raw
+      in
+      let _, logits_result =
+        compare_expected_raw root_dir fixture "logits" logits_raw
+      in
+      let _, selected_result =
+        compare_expected_raw root_dir fixture "selected_index_u64le" selected_raw
+      in
+      [
+        norm_result;
+        logits_result;
+        selected_result;
+        producer_only_expected root_dir fixture "top5_indices_u64le";
+      ]
+  in
+  let matched =
+    List.for_all
+      (function
+        | `Assoc fields ->
+          (match string_field "status" fields with
+           | "matched"
+           | "producer_only" -> true
+           | _ -> false)
+        | _ -> false)
+      results
+  in
+  ran, matched, results, st.VM.effort_used
+
+let execute_p0_plus_fixture root_dir entry =
+  let manifest_path = string_field "manifest" entry in
+  let full_manifest_path = Filename.concat root_dir manifest_path in
+  let fixture =
+    match read_json full_manifest_path with
+    | `Assoc fields -> fields
+    | _ -> fail (full_manifest_path ^ ": fixture must be an object")
+  in
+  let opcode = string_field "opcode" fixture in
+  let primitive = string_field "primitive" fixture in
+  let case_name = string_field "case" fixture in
+  let params = assoc_field "parameters" fixture in
+  let ran, matched, outputs, effort =
+    match opcode with
+    | "SOFTMAX_FP" -> p0_plus_softmax root_dir fixture params
+    | "ATTENTION_SCORES_FP" -> p0_plus_attention_scores root_dir fixture params
+    | "ATTENTION_WEIGHTED_SUM_FP" -> p0_plus_weighted_sum root_dir fixture params
+    | "ROPE_APPLY_INDEXED_FP" -> p0_plus_rope root_dir fixture params
+    | "ARGMAX_FP" -> p0_plus_argmax root_dir fixture params
+    | "LOGITS_TAIL_PATH" -> p0_plus_logits_tail root_dir fixture params
+    | value -> fail ("unsupported P0-plus opcode: " ^ value)
+  in
+  let accepted = ran && matched in
+  accepted,
+  `Assoc [
+    "case", `String case_name;
+    "opcode", `String opcode;
+    "primitive", `String primitive;
+    "manifest", `String manifest_path;
+    "status", `String (if accepted then "accepted" else "rejected");
+    "vm_run", `String (if ran then "accepted" else "rejected");
+    "output_status", `String (if matched then "matched" else "mismatch");
+    "observed_effort", `Int effort;
+    "outputs", `List outputs;
+  ]
+
+let run_p0_plus_pack path =
+  let root_dir = Filename.dirname path in
+  let pack =
+    match read_json path with
+    | `Assoc fields -> fields
+    | _ -> fail (path ^ ": fixture pack must be an object")
+  in
+  let entries =
+    list_field "fixtures" pack
+    |> List.map (function
+      | `Assoc fields -> fields
+      | _ -> fail "P0-plus fixture entries must be objects")
+  in
+  let results = List.map (execute_p0_plus_fixture root_dir) entries in
+  let accepted = List.for_all fst results in
+  `Assoc [
+    "status", `String (if accepted then "accepted" else "rejected");
+    "diagnostic_only", `Bool true;
+    "execution_mode", `String "p0_plus_fixture_pack_vm_execution";
+    "fixture_pack", `String path;
+    "fixture_count", `Int (List.length results);
+    "accepted_count", `Int (List.length (List.filter fst results));
+    "rejected_count",
+    `Int (List.length (List.filter (fun (ok, _) -> not ok) results));
+    "results", `List (List.map snd results);
+  ]
+
 let run_index path =
   let root_dir = Filename.dirname path in
   let index =
@@ -685,10 +1025,13 @@ let run_index path =
 
 let () =
   Arg.parse args (fun value -> fail ("unexpected argument: " ^ value)) usage;
-  match !template_index with
-  | None -> fail usage
-  | Some path ->
-    let report = run_index path in
+  let report =
+    match !template_index, !p0_plus_pack with
+    | Some _, Some _ -> fail "choose only one input mode"
+    | None, None -> fail usage
+    | Some path, None -> run_index path
+    | None, Some path -> run_p0_plus_pack path
+  in
     print_endline (Yojson.Safe.pretty_to_string report);
     (match report with
      | `Assoc fields ->
