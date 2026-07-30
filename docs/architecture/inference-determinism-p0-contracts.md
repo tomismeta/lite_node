@@ -151,6 +151,30 @@ Minimum vectors:
 5. Preserve existing opcode policy until every P0 primitive has a semantic root
    and conformance gate.
 
+## Corpus Intake Tool
+
+LiteNode includes a diagnostic corpus consumer:
+
+```text
+tools/inference_determinism_check.exe --artifact-dir <determinism-corpus-dir>
+```
+
+The tool does not execute math and does not make the corpus normative. It
+validates the producer-side corpus shape, checks P0 operation and fixture
+coverage, and emits a machine-readable P0 worklist for LiteNode engineering.
+
+The first accepted corpus readout was:
+
+```text
+operation_count = 18
+fixture_count = 19
+failure_case_count = 11
+bonsai_cutpoint_count = 32
+selected_token_changes_under_q16_16_candidate = 0
+first_divergent_cutpoint = fixtures:expected-final-norm.f64le
+P0 worklist = LINEAR_Q1_G128_FP, RMSNORM_FP_EPS, L2NORM_FP, SOFTMAX_FP, GATED_DELTA_RULE_FP
+```
+
 ## Non-Goals
 
 - No Bonsai-specific opcode.
@@ -158,4 +182,3 @@ Minimum vectors:
 - No devnet-readiness claim from host-FP proof mode.
 - No performance optimization before semantic conformance.
 - No blanket Q16 migration without token-ranking evidence.
-

@@ -1,3 +1,9 @@
 (executable
  (name inference_admit)
+ (modules inference_admit)
  (libraries octra_vm yojson unix))
+
+(executable
+ (name inference_determinism_check)
+ (modules inference_determinism_check)
+ (libraries octra_vm yojson))
