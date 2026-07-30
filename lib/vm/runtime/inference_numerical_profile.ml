@@ -102,6 +102,8 @@ let current_runtime_profile ~opcode =
   | "GATED_DELTA_RULE_FP"
   | "ARGMAX_FP"
   | "ROPE_APPLY_INDEXED_FP"
+  | "ATTENTION_SCORES_FP"
+  | "ATTENTION_WEIGHTED_SUM_FP"
   | "SIGMOID_FP"
   | "SOFTPLUS_FP"
   | "SILU_FP"
@@ -209,6 +211,22 @@ let local_semantics ~opcode =
       "theta uses native binary64 exponentiation before native cos and sin";
       "outputs are written only after the complete finite output vector is computed";
     ]
+  | "ATTENTION_SCORES_FP" ->
+    [
+      "query and key cells are finite binary64 values";
+      "each score is a dot product accumulated left-to-right by head dimension";
+      "scale is computed as 1.0 / sqrt(head_dim) using native binary64";
+      "each output score is computed with native binary64 multiplication and addition";
+      "outputs are written only after the complete finite score vector is computed";
+    ]
+  | "ATTENTION_WEIGHTED_SUM_FP" ->
+    [
+      "probability and value cells are finite binary64 values";
+      "each output dimension is accumulated left-to-right by key index";
+      "probabilities are consumed as provided and are not renormalized";
+      "each weighted value is computed with native binary64 multiplication and addition";
+      "outputs are written only after the complete finite output vector is computed";
+    ]
   | _ -> []
 
 let consensus_obligations ~opcode =
@@ -296,6 +314,20 @@ let consensus_obligations ~opcode =
       "pin exact position-cell interpretation, base handling, rotary dimension validation, and zero-position behavior";
       "define in-place writeback atomicity, tail preservation, finite rejection, and effort";
       "pass independent cross-platform conformance for indexed rotary edge vectors";
+    ]
+  | "ATTENTION_SCORES_FP" ->
+    [
+      "replace or qualify native binary64 multiplication, addition, sqrt, and division";
+      "pin scale semantics, finite rejection, score accumulation order, output atomicity, and effort";
+      "define exact output encoding for cancellation, signed-zero, subnormal, and overflow cases";
+      "pass independent cross-platform conformance for attention-score edge vectors";
+    ]
+  | "ATTENTION_WEIGHTED_SUM_FP" ->
+    [
+      "replace or qualify native binary64 multiplication and addition";
+      "pin weighted-sum accumulation order, finite rejection, overlap rejection, writeback atomicity, and effort";
+      "define exact output encoding for cancellation, signed-zero, subnormal, and overflow cases";
+      "pass independent cross-platform conformance for weighted-sum edge vectors";
     ]
   | _ -> [
       "write primitive-specific deterministic math obligations before promotion";

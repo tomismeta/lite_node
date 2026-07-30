@@ -374,6 +374,39 @@ let check_vector_arithmetic_profile_gates () =
       "RESIDUAL_ADD_FP", "native binary64 addition", "residual add edge vectors";
     ]
 
+let check_attention_profile_gates () =
+  List.iter
+    (fun (opcode, local_needle, obligation_needle) ->
+      check
+        (opcode ^ " runtime profile")
+        (match Profile.current_runtime_profile ~opcode with
+         | Some "host-fp-local-candidate" -> true
+         | _ -> false);
+      let gate = profile_gate opcode in
+      check
+        (opcode ^ " local semantics")
+        (list_contains_substring
+           local_needle
+           (string_list_value "local_semantics" gate));
+      check
+        (opcode ^ " consensus obligations")
+        (list_contains_substring
+           obligation_needle
+           (string_list_value "consensus_obligations" gate));
+      match Profile.validate_for_opcode ~opcode ~profile:"q16-exact" with
+      | Error (Profile.Unsupported_opcode_profile { opcode = actual; profile; expected }) ->
+        check (opcode ^ " overclaim opcode") (String.equal actual opcode);
+        check (opcode ^ " overclaim profile") (String.equal profile "q16-exact");
+        check
+          (opcode ^ " overclaim expected")
+          (String.equal expected "host-fp-local-candidate")
+      | Error error -> failwith (Profile.error_message error)
+      | Ok _ -> failwith (opcode ^ " should reject profile overclaim"))
+    [
+      "ATTENTION_SCORES_FP", "scale is computed", "attention-score edge vectors";
+      "ATTENTION_WEIGHTED_SUM_FP", "not renormalized", "weighted-sum edge vectors";
+    ]
+
 let check_rejects_unknown_opcode () =
   match Template.of_json (template ~opcode:"MODEL_SPECIFIC_FASTPATH" ()) with
   | Error (Template.Template_error message) ->
@@ -507,6 +540,7 @@ let () =
   check_rope_indexed_profile_gate ();
   check_activation_profile_gates ();
   check_vector_arithmetic_profile_gates ();
+  check_attention_profile_gates ();
   check_rejects_unknown_opcode ();
   check_rejects_effect_drift ();
   check_rejects_missing_failure_cases ();

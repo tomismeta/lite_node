@@ -336,7 +336,10 @@ LiteNode runtime tests now also pin current host-FP left-to-right
 accumulation for `ATTENTION_SCORES_FP` dot products and
 `ATTENTION_WEIGHTED_SUM_FP` weighted reductions with cancellation vectors. This
 is useful local evidence for the P0-plus attention surface, but it does not
-promote either opcode beyond local-candidate math.
+promote either opcode beyond local-candidate math. LiteNode now reports both
+under the `host-fp-local-candidate` runtime profile; any fixed-point,
+software-FP, or consensus-ready attention claim must be a separate proven
+profile rather than an overclaim on the current FP opcodes.
 
 LiteNode also reports `ROPE_APPLY_INDEXED_FP` under the current
 `host-fp-local-candidate` runtime profile. The local profile covers finite
