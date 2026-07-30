@@ -244,6 +244,37 @@ let check_sqrt_edges () =
     "fp64 sqrt non-finite rejects"
     (Fp64.sqrt 0x7ff0000000000000L = None)
 
+let check_inverse_sqrt_edges () =
+  check "fp64 positive min-subnormal" (Fp64.positive 1L);
+  check "fp64 positive zero false" (not (Fp64.positive 0L));
+  check "fp64 positive negative zero false" (not (Fp64.positive Int64.min_int));
+  check
+    "fp64 positive negative finite false"
+    (not (Fp64.positive 0xbff0000000000000L));
+  check
+    "fp64 positive non-finite false"
+    (not (Fp64.positive 0x7ff0000000000000L));
+  expect_bits
+    "fp64 inverse sqrt four"
+    (Fp64.inverse_sqrt 0x4010000000000000L)
+    0x3fe0000000000000L;
+  expect_bits
+    "fp64 inverse sqrt one"
+    (Fp64.inverse_sqrt 0x3ff0000000000000L)
+    0x3ff0000000000000L;
+  check
+    "fp64 inverse sqrt zero rejects"
+    (Fp64.inverse_sqrt 0L = None);
+  check
+    "fp64 inverse sqrt negative zero rejects"
+    (Fp64.inverse_sqrt Int64.min_int = None);
+  check
+    "fp64 inverse sqrt negative finite rejects"
+    (Fp64.inverse_sqrt 0xbff0000000000000L = None);
+  check
+    "fp64 inverse sqrt non-finite rejects"
+    (Fp64.inverse_sqrt 0x7ff0000000000000L = None)
+
 let check_compare_edges () =
   expect_compare
     "fp64 compare equal zeros"
@@ -275,4 +306,5 @@ let () =
   check_arithmetic_edges ();
   check_division_edges ();
   check_sqrt_edges ();
+  check_inverse_sqrt_edges ();
   check_compare_edges ()

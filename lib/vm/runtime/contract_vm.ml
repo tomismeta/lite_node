@@ -1081,18 +1081,11 @@ let read_fp64_reg_bits st reg =
 
 let fp64_one_bits = Int64.bits_of_float 1.0
 
-let fp64_positive_bits bits =
-  match Inference_fp64.compare bits 0L with
-  | Some cmp -> cmp > 0
-  | None -> false
+let fp64_positive_bits =
+  Inference_fp64.positive
 
-let fp64_inverse_sqrt_bits bits =
-  match Inference_fp64.compare bits 0L with
-  | Some cmp when cmp > 0 ->
-    (match Inference_fp64.sqrt bits with
-     | Some root -> Inference_fp64.div fp64_one_bits root
-     | None -> None)
-  | _ -> None
+let fp64_inverse_sqrt_bits =
+  Inference_fp64.inverse_sqrt
 
 let fp64_exp_nonpositive_bits bits =
   match Inference_fp64.compare bits 0L with

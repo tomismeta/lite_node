@@ -335,6 +335,21 @@ let compare left right =
       Some (if left.negative then -cmp else cmp)
   | _ -> None
 
+let positive bits =
+  match compare bits 0L with
+  | Some cmp -> cmp > 0
+  | None -> false
+
+let one_bits = 0x3ff0000000000000L
+
+let inverse_sqrt bits =
+  if positive bits then
+    match sqrt bits with
+    | Some root -> div one_bits root
+    | None -> None
+  else
+    None
+
 let of_int value =
   let value = Z.of_int value in
   if Z.sign value = 0 then

@@ -434,6 +434,12 @@ encodings.
 squares left-to-right exactly as before, but square overflow/non-finite
 rejection is now tested directly in the shared fp64 substrate.
 
+The positive-input gate and reciprocal root are also named in the shared
+substrate as `Inference_fp64.positive` and `Inference_fp64.inverse_sqrt`.
+RMSNorm, L2Norm, Gated Delta query scaling, and attention score scaling still
+perform the same comparison, square-root, and division sequence, but the
+deterministic inverse-root obligation now has one tested entry point.
+
 LiteNode reports `GATED_DELTA_RULE_FP` under the same
 `host-fp-exp-local-candidate` profile. The recurrence shape, query-scale
 sqrt/division, dot products, beta updates, state mutation order, and output
