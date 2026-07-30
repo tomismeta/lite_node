@@ -100,6 +100,16 @@ let contains_substring needle value =
 let list_contains_substring needle values =
   List.exists (contains_substring needle) values
 
+let string_list_field name fields =
+  match assoc_value name fields with
+  | `List values ->
+    List.map
+      (function
+        | `String value -> value
+        | _ -> failwith ("json field must be a string list: " ^ name))
+      values
+  | _ -> failwith ("json field must be a list: " ^ name)
+
 let template ?(opcode = "RMSNORM_FP_EPS") ?(primitive = "rmsnorm_fp_eps")
     ?(effects = ["memory_read"; "memory_write"]) ?(memory_access = "read_write")
     ?profile ?(vm_semantics_root = hex_root 'd')
@@ -647,7 +657,41 @@ let check_inference_profile_surface_coverage () =
                  | _ -> false)
                catalog))
        surface
-   | _ -> failwith "surface profile root catalog must be list")
+   | _ -> failwith "surface profile root catalog must be list");
+  (match Profile.consensus_blocker_catalog_json gates with
+   | `List catalog ->
+     let blocker_entry code =
+       List.find_opt
+         (function
+           | `Assoc fields ->
+             String.equal (string_value "blocker_code" fields) code
+           | _ -> false)
+         catalog
+     in
+     let check_blocker code expected =
+       match blocker_entry code with
+       | Some (`Assoc fields) ->
+         let opcodes = string_list_field "opcodes" fields in
+         List.iter
+           (fun opcode ->
+              check
+                (code ^ " catalog contains " ^ opcode)
+                (List.mem opcode opcodes))
+           expected
+       | _ -> failwith ("missing blocker catalog entry: " ^ code)
+     in
+     check_blocker
+       "binary16_scale_decode"
+       ["LINEAR_Q1_G128_FP"];
+     check_blocker
+       "host_fp_exp"
+       ["SIGMOID_FP"; "SOFTPLUS_FP"; "SILU_FP"; "SOFTMAX_FP";
+        "GATED_DELTA_RULE_FP"];
+     check_blocker
+       "fp64_sqrt_conformance"
+       ["RMSNORM_FP_EPS"; "L2NORM_FP"; "GATED_DELTA_RULE_FP";
+        "ATTENTION_SCORES_FP"]
+   | _ -> failwith "surface consensus blocker catalog must be list")
 
 let check_remaining_p0_profile_obligations () =
   List.iter

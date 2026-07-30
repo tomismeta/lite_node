@@ -223,6 +223,13 @@ let string_field name fields =
   | Some (`String value) -> Some value
   | _ -> None
 
+let string_list_field name fields =
+  match List.assoc_opt name fields with
+  | Some (`List values) ->
+    values
+    |> List.filter_map (function `String value -> Some value | _ -> None)
+  | _ -> []
+
 let catalog_entry_json (opcode, name, consensus_status, profile_root, source) =
   let fields = [
     "opcode", `String opcode;
@@ -285,6 +292,70 @@ let profile_root_catalog_json values =
        []
   |> List.sort_uniq compare
   |> List.map catalog_entry_json
+  |> fun entries -> `List entries
+
+let rec consensus_blocker_pairs = function
+  | `Assoc fields ->
+    let direct =
+      match string_field "opcode" fields with
+      | Some opcode ->
+        List.map
+          (fun blocker -> blocker, opcode)
+          (string_list_field "consensus_blocker_codes" fields)
+      | None -> []
+    in
+    let nested_gate =
+      match List.assoc_opt "profile_gate" fields with
+      | Some value -> consensus_blocker_pairs value
+      | None -> []
+    in
+    let nested_gates =
+      match List.assoc_opt "profile_gates" fields with
+      | Some (`List values) ->
+        List.fold_left
+          (fun pairs value -> consensus_blocker_pairs value @ pairs)
+          []
+          values
+      | _ -> []
+    in
+    direct @ nested_gate @ nested_gates
+  | `List values ->
+    List.fold_left
+      (fun pairs value -> consensus_blocker_pairs value @ pairs)
+      []
+      values
+  | _ -> []
+
+let add_blocker_pair groups (blocker, opcode) =
+  let rec loop acc = function
+    | [] -> List.rev ((blocker, [opcode]) :: acc)
+    | (candidate, opcodes) :: rest when String.equal candidate blocker ->
+      let opcodes =
+        if List.exists (String.equal opcode) opcodes then opcodes
+        else opcode :: opcodes
+      in
+      List.rev_append acc ((candidate, opcodes) :: rest)
+    | entry :: rest -> loop (entry :: acc) rest
+  in
+  loop [] groups
+
+let blocker_entry_json (blocker, opcodes) =
+  let opcodes = List.sort_uniq String.compare opcodes in
+  `Assoc [
+    "blocker_code", `String blocker;
+    "opcode_count", `Int (List.length opcodes);
+    "opcodes", `List (List.map (fun opcode -> `String opcode) opcodes);
+  ]
+
+let consensus_blocker_catalog_json values =
+  values
+  |> List.fold_left
+       (fun pairs value -> consensus_blocker_pairs value @ pairs)
+       []
+  |> List.sort_uniq compare
+  |> List.fold_left add_blocker_pair []
+  |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+  |> List.map blocker_entry_json
   |> fun entries -> `List entries
 
 let error_message = function

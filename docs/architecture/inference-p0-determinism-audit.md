@@ -306,7 +306,10 @@ profile roots without walking every template row. They also expose a
 deduplicated `profile_root_catalog` with the current LiteNode opcode, profile
 name, consensus status, and `profile_root` values. That catalog is a producer
 handoff convenience; it does not make an artifact consensus-ready unless its
-declared roots also bind and the readiness gate accepts.
+declared roots also bind and the readiness gate accepts. Reports also include
+`consensus_blocker_catalog`, a deduplicated mapping from blocker code to the
+opcodes carrying that blocker. This is the machine-readable remaining-math
+worklist after local execution succeeds.
 
 `local_semantics` records what the current VM does today.
 `consensus_obligations` records what must become protocol-owned before the
@@ -513,9 +516,10 @@ composition. `ARGMAX_FP` only returns the selected index, so producer top-k
 ordering manifests are preserved as `producer_only` evidence. The explicit
 P0-plus runner now reports per-fixture `profile_gates` plus an aggregate
 `profile_gate_count`, `classified_profile_gate_count`, and
-`profile_root_catalog`; the composite logits-tail case reports the component
-profiles for `RMSNORM_FP_EPS`, `LINEAR_Q1_G128_FP`, and `ARGMAX_FP`. Its
-`profile_consensus_status_counts` now separate deterministic comparison,
+`profile_root_catalog`; both P0 and P0-plus reports also expose
+`consensus_blocker_catalog`. The composite logits-tail case reports the
+component profiles for `RMSNORM_FP_EPS`, `LINEAR_Q1_G128_FP`, and `ARGMAX_FP`.
+Its `profile_consensus_status_counts` now separate deterministic comparison,
 normalization, and Q1 candidates from remaining local-only host-FP math. Like
 P0 execution reports,
 `execution_status` is the VM
