@@ -1,10 +1,10 @@
 # Inference P0 Determinism Contracts
 
-Status: implementation worklist, 2026-07-29.
+Status: implementation worklist, 2026-07-30.
 
 This document defines the first LiteNode-side contracts to write after the
 initial determinism qualification corpus. It is scoped to P0 math only. It does
-not add opcodes and it does not make current host-FP inference validator-ready.
+not add opcodes and it does not make current inference math validator-ready.
 
 ## Contract Shape
 
@@ -30,7 +30,8 @@ code must be tested against that oracle, not against itself.
 
 Current opcode: `LINEAR_Q1_G128_FP`.
 
-Current status: local host-FP candidate. Runtime hotspot.
+Current status: `deterministic-q1-g128-fp64-linear` consensus candidate.
+Runtime hotspot.
 
 Required contract decisions:
 
@@ -42,7 +43,7 @@ Required contract decisions:
 | Accumulation | Fixed inner-loop order and accumulator domain. |
 | Output | Exact output cell encoding and finite-result policy. |
 | Failure | Reject malformed ranges, bad shape, invalid scale, overflow, and output aliasing before write. |
-| Profile decision | Deterministic software FP or wider fixed point; Q16.16 is not sufficient per first corpus. |
+| Profile decision | Exact integer binary16 scale decode plus deterministic binary64 accumulator. Q16.16 is not sufficient per first corpus. |
 
 Minimum vectors:
 
@@ -57,9 +58,9 @@ Minimum vectors:
 
 Current opcodes: `RMSNORM_FP_EPS`, `L2NORM_FP`.
 
-Current status: local host-FP candidate. Existing Q16 RMSNorm has implicit
-epsilon of one Q16 unit and does not exactly represent Bonsai's `1e-6`
-contract.
+Current status: `deterministic-fp64-normalization` consensus candidate.
+Existing Q16 RMSNorm has implicit epsilon of one Q16 unit and does not exactly
+represent Bonsai's `1e-6` contract.
 
 Required contract decisions:
 
@@ -150,7 +151,7 @@ Minimum vectors:
 1. Land the contract text and independent oracle vectors.
 2. Add a LiteNode conformance runner that consumes the minimized P0 fixture
    pack from `octra-inference`.
-3. Run current VM host-FP opcodes against the vectors and record failures as
+3. Run current VM inference opcodes against the vectors and record failures as
    local-profile behavior.
 4. Implement deterministic software-FP or wider fixed-point kernels one P0
    primitive at a time.
@@ -189,6 +190,6 @@ P0 worklist = LINEAR_Q1_G128_FP, RMSNORM_FP_EPS, L2NORM_FP, SOFTMAX_FP, GATED_DE
 
 - No Bonsai-specific opcode.
 - No model names in VM semantics.
-- No devnet-readiness claim from host-FP proof mode.
+- No devnet-readiness claim from local or candidate proof mode.
 - No performance optimization before semantic conformance.
 - No blanket Q16 migration without token-ranking evidence.

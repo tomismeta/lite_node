@@ -204,10 +204,13 @@ let check_fp16_scale_decode_exhaustive () =
   let finite = ref 0 in
   let rejected = ref 0 in
   for bits = 0 to 0xffff do
-    match expected_fp16 bits, VM.fp16_le_to_fp64 (fp16_bytes bits) 0 with
-    | None, None -> incr rejected
-    | Some expected, Some observed
-      when Int64.equal expected (Int64.bits_of_float observed) ->
+    let bytes = fp16_bytes bits in
+    match expected_fp16 bits, VM.fp16_le_to_fp64 bytes 0,
+          VM.fp16_le_to_fp64_bits bytes 0 with
+    | None, None, None -> incr rejected
+    | Some expected, Some observed, Some observed_bits
+      when Int64.equal expected (Int64.bits_of_float observed)
+           && Int64.equal expected observed_bits ->
       incr finite
     | _ ->
       failwith

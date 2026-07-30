@@ -216,6 +216,17 @@ let of_name = function
         "pin signed-zero, subnormal, overflow, aliasing, effort, and atomic writeback policy";
       ];
     }
+  | "deterministic-q1-g128-fp64-linear" as name ->
+    Ok {
+      name;
+      consensus_status = Consensus_candidate;
+      summary = "deterministic Q1-G128 binary16-scale linear profile";
+      required_actions = [
+        "bind the numerical profile root in the model or request authority";
+        "qualify binary16 scale decode, Q1 sign mapping, and binary64 accumulator edge vectors across validators";
+        "pin loop order, finite rejection, aliasing, effort, and atomic writeback policy";
+      ];
+    }
   | "deterministic-fp64-normalization" as name ->
     Ok {
       name;
@@ -264,7 +275,8 @@ let current_runtime_profile ~opcode =
   | "LOAD_F32_LE_FP"
   | "LOAD_F64_LE_FP" ->
     Some "byte-ingress-exact"
-  | "LINEAR_Q1_G128_FP"
+  | "LINEAR_Q1_G128_FP" ->
+    Some "deterministic-q1-g128-fp64-linear"
   | "SOFTMAX_FP"
   | "GATED_DELTA_RULE_FP"
   | "CAUSAL_DEPTHWISE_CONV1D_FP"
@@ -320,6 +332,7 @@ let local_semantics ~opcode =
       "loop order is row, column, block, item with a deterministic finite binary64 accumulator";
       "input cells, decoded scales, and final outputs must be finite before writeback";
       "destination cells are written only after the full output buffer is computed";
+      "the Q1 linear compute path uses no native host floating-point math";
     ]
   | "RMSNORM_FP_EPS" ->
     [
@@ -464,6 +477,7 @@ let consensus_obligations ~opcode =
     ]
   | "LINEAR_Q1_G128_FP" ->
     [
+      "bind the deterministic Q1-G128 linear profile root before consensus admission";
       "pin binary16 scale decode for zero, signed zero, subnormal, normal, NaN, and infinity";
       "qualify deterministic binary64 multiply/add rounding and accumulator behavior";
       "define exact output encoding, overflow policy, and writeback atomicity";
@@ -778,7 +792,7 @@ let arithmetic_domain ~profile ~opcode =
   | "q16-exact", _ -> "integer-q16"
   | "q32-exact", _ -> "integer-q32"
   | "soft-fp-exact", _ -> "software-defined-floating-point"
-  | "host-fp-local-candidate", "LINEAR_Q1_G128_FP" ->
+  | "deterministic-q1-g128-fp64-linear", "LINEAR_Q1_G128_FP" ->
     "q1-g128-binary16-scale-deterministic-binary64-accumulator"
   | "deterministic-fp64-normalization", "RMSNORM_FP_EPS" ->
     "deterministic-binary64-reduction-divide-epsilon-sqrt-output-mul"
@@ -813,8 +827,8 @@ let arithmetic_domain ~profile ~opcode =
 
 let rounding_mode ~profile ~opcode =
   match profile.name, opcode with
-  | "host-fp-local-candidate", "LINEAR_Q1_G128_FP" ->
-    "ieee754-roundTiesToEven"
+  | "deterministic-q1-g128-fp64-linear", "LINEAR_Q1_G128_FP" ->
+    "deterministic-binary64-roundTiesToEven"
   | ( "deterministic-fp64-normalization",
       ( "RMSNORM_FP_EPS" | "L2NORM_FP" ) ) ->
     "deterministic-binary64-roundTiesToEven"
@@ -847,8 +861,10 @@ let operation_sequence ~opcode =
   match opcode with
   | "LINEAR_Q1_G128_FP" ->
     [
-      "decode_q1_g128_scale_fp16_le";
-      "decode_q1_g128_sign_bits_lsb0";
+      "snapshot_lhs_and_q1_before_output";
+      "read_q1_g128_blocks_18_bytes_each";
+      "decode_q1_g128_scale_fp16_le_exact";
+      "decode_q1_g128_sign_bits_lsb0_one_is_positive";
       "iterate_row_col_block_item";
       "multiply_lhs_sign_scale";
       "accumulate_left_to_right";
@@ -985,10 +1001,13 @@ let edge_value_policy ~opcode =
   match opcode with
   | "LINEAR_Q1_G128_FP" ->
     [
+      "q1_block_is_18_bytes_little_endian_binary16_scale_then_128_lsb0_sign_bits";
       "reject_nonfinite_binary16_scale";
       "accept_finite_binary16_zero_signed_zero_subnormal_normal_max";
+      "sign_bit_1_maps_to_positive_scale_and_0_maps_to_negative_scale";
       "reject_missing_or_nonfinite_lhs";
       "reject_nonfinite_output";
+      "snapshot_lhs_and_q1_before_output_writeback";
       "preserve_destination_on_reject";
     ]
   | "RMSNORM_FP_EPS" | "L2NORM_FP" ->

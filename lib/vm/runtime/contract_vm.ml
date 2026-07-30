@@ -603,22 +603,47 @@ let f64_le_to_fp64 data offset =
   let value = Int64.float_of_bits !bits in
   if finite_fp64 value then Some value else None
 
-let fp16_le_to_fp64 data offset =
+let fp16_le_to_fp64_bits data offset =
   let bits =
     Char.code data.[offset]
     lor (Char.code data.[offset + 1] lsl 8)
   in
-  let sign = if bits land 0x8000 = 0 then 1.0 else -1.0 in
+  let sign =
+    if bits land 0x8000 = 0 then 0L else Int64.min_int
+  in
   let exponent = (bits lsr 10) land 0x1f in
   let fraction = bits land 0x03ff in
   match exponent, fraction with
-  | 0, 0 -> Some (sign *. 0.0)
+  | 0, 0 -> Some sign
   | 0, _ ->
-    Some (sign *. ldexp (float_of_int fraction) (-24))
+    let top = ref 0 in
+    for bit = 1 to 9 do
+      if fraction land (1 lsl bit) <> 0 then top := bit
+    done;
+    let exponent_bits =
+      Int64.shift_left (Int64.of_int (!top + 999)) 52
+    in
+    let significand =
+      Int64.shift_left (Int64.of_int fraction) (52 - !top)
+    in
+    let fraction_bits =
+      Int64.logand significand 0x000fffffffffffffL
+    in
+    Some (Int64.logor sign (Int64.logor exponent_bits fraction_bits))
   | 31, _ -> None
   | _ ->
-    Some
-      (sign *. ldexp (1024.0 +. float_of_int fraction) (exponent - 25))
+    let exponent_bits =
+      Int64.shift_left (Int64.of_int (exponent + 1008)) 52
+    in
+    let fraction_bits =
+      Int64.shift_left (Int64.of_int fraction) 42
+    in
+    Some (Int64.logor sign (Int64.logor exponent_bits fraction_bits))
+
+let fp16_le_to_fp64 data offset =
+  Option.map
+    Int64.float_of_bits
+    (fp16_le_to_fp64_bits data offset)
 
 let make_u64 z =
   if validate_u64 z then Some (VU64 z) else None
@@ -1043,13 +1068,13 @@ let read_fp64_bits_array mem addr n =
   if Array.for_all Option.is_some values then Some (Array.map Option.get values)
   else None
 
-let decode_q1_g128_scales q1 off blocks =
+let decode_q1_g128_scale_bits q1 off blocks =
   let block_bytes = 18 in
-  let scales = Array.make blocks 0.0 in
+  let scales = Array.make blocks 0L in
   let ok = ref true in
   for block = 0 to blocks - 1 do
     let block_offset = off + (block * block_bytes) in
-    match fp16_le_to_fp64 q1 block_offset with
+    match fp16_le_to_fp64_bits q1 block_offset with
     | None -> ok := false
     | Some scale -> scales.(block) <- scale
   done;
@@ -2404,10 +2429,9 @@ let exec_one st op =
                (match read_fp64_bits_array st.memory.data lhs lhs_n with
                | None -> revert st
                | Some lhs_values ->
-                 (match decode_q1_g128_scales q1 off blocks with
+                 (match decode_q1_g128_scale_bits q1 off blocks with
                   | None -> revert st
-                  | Some scales ->
-                    let scale_bits = Array.map Int64.bits_of_float scales in
+                  | Some scale_bits ->
                     let output = Array.make dst_n 0L in
                     let ok = ref true in
                     for row = 0 to m - 1 do

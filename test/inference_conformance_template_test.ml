@@ -216,6 +216,11 @@ let check_q1_profile_obligations () =
      | `Assoc fields ->
        (match List.assoc_opt "profile_gate" fields with
         | Some (`Assoc gate) ->
+          let contract =
+            match List.assoc_opt "profile_contract" gate with
+            | Some (`Assoc contract) -> contract
+            | _ -> failwith "missing q1 profile contract"
+          in
           check
             "q1 profile opcode"
             (String.equal (string_value "opcode" gate) "LINEAR_Q1_G128_FP");
@@ -235,6 +240,21 @@ let check_q1_profile_obligations () =
                "binary16 scale"
                (string_list_value "consensus_obligations" gate));
           check
+            "q1 consensus candidate"
+            (String.equal
+               (string_value "consensus_status" gate)
+               "consensus_candidate");
+          check
+            "q1 deterministic profile"
+            (String.equal
+               (string_value "name" gate)
+               "deterministic-q1-g128-fp64-linear");
+          check
+            "q1 records no native fp math"
+            (list_contains_substring
+               "no native host floating-point math"
+               (string_list_value "local_semantics" gate));
+          check
             "q1 blocker code"
             (List.mem
                "binary16_scale_decode"
@@ -244,15 +264,44 @@ let check_q1_profile_obligations () =
             (List.mem
                "fp64_mul_add_conformance"
                (string_list_value "consensus_blocker_codes" gate));
-          (match List.assoc_opt "profile_contract" gate with
-           | Some (`Assoc contract) ->
-             check
-               "q1 contract rounding mode"
-               (String.equal
-                  (string_value "rounding_mode" contract)
-                  "ieee754-roundTiesToEven")
-           | _ -> failwith "missing q1 profile contract")
-        | _ -> failwith "missing q1 profile gate")
+          check
+            "q1 contract rounding mode"
+            (String.equal
+               (string_value "rounding_mode" contract)
+               "deterministic-binary64-roundTiesToEven");
+          check
+            "q1 contract block layout"
+            (list_contains_substring
+               "18_bytes"
+               (string_list_value "edge_value_policy" contract));
+          check
+            "q1 contract sign polarity"
+            (list_contains_substring
+               "1_maps_to_positive"
+               (string_list_value "edge_value_policy" contract));
+          check
+            "q1 contract snapshots inputs"
+            (list_contains_substring
+               "snapshot_lhs_and_q1"
+               (string_list_value "operation_sequence" contract))
+        | _ -> failwith "missing q1 profile gate");
+       (match
+          Profile.validate_for_opcode
+            ~opcode:"LINEAR_Q1_G128_FP"
+            ~profile:"host-fp-local-candidate"
+        with
+        | Error (Profile.Unsupported_opcode_profile { opcode; profile; expected }) ->
+          check
+            "q1 old host profile opcode"
+            (String.equal opcode "LINEAR_Q1_G128_FP");
+          check
+            "q1 old host profile rejected"
+            (String.equal profile "host-fp-local-candidate");
+          check
+            "q1 old host profile expected"
+            (String.equal expected "deterministic-q1-g128-fp64-linear")
+        | Error error -> failwith (Profile.error_message error)
+        | Ok _ -> failwith "q1 should reject old host profile")
      | _ -> failwith "template json must be object")
 
 let profile_gate opcode =
@@ -342,7 +391,7 @@ let check_profile_root_binding_counts () =
      | _ -> failwith "root binding counts json must be object")
 
 let check_profile_status_counts () =
-  let host_gate opcode = `Assoc (profile_gate opcode) in
+  let runtime_gate opcode = `Assoc (profile_gate opcode) in
   let candidate_gate =
     match Profile.of_name "byte-ingress-exact" with
     | Error error -> failwith (Profile.error_message error)
@@ -351,8 +400,8 @@ let check_profile_status_counts () =
   let counts =
     Profile.status_counts_of_json_gates
       [
-        host_gate "LINEAR_Q1_G128_FP";
-        host_gate "RMSNORM_FP_EPS";
+        runtime_gate "LINEAR_Q1_G128_FP";
+        runtime_gate "RMSNORM_FP_EPS";
         candidate_gate;
         `Assoc ["consensus_status", `String "consensus_ready"];
         `Assoc ["consensus_status", `String "future_profile"];
@@ -362,8 +411,8 @@ let check_profile_status_counts () =
   (match Profile.status_counts_json counts with
    | `Assoc fields ->
      check "classified count" (Profile.classified_gate_count counts = 6);
-     check "local-only count" (int_value "local_only" fields = 1);
-     check "candidate count" (int_value "consensus_candidate" fields = 2);
+     check "local-only count" (int_value "local_only" fields = 0);
+     check "candidate count" (int_value "consensus_candidate" fields = 3);
      check "ready count" (int_value "consensus_ready" fields = 1);
      check "unknown count" (int_value "unknown" fields = 2);
      check
@@ -378,7 +427,6 @@ let check_profile_status_counts () =
              counts)
           [
             "unprofiled_profile_gates";
-            "local_only_profile_gates";
             "consensus_candidate_profile_gates";
             "unknown_profile_gates";
           ]);

@@ -20,7 +20,7 @@ with a scalar oracle and VM conformance gate.
 
 | Opcode | Current implementation surface | Determinism risk | Required hardening |
 | --- | --- | --- | --- |
-| `LINEAR_Q1_G128_FP` | `contract_vm.ml` decodes Q1-G128 blocks, binary16-like scales, sign bits, and accumulates with LiteNode's finite binary64 core. | Scale/sign interpretation and accumulator order are now contract-bound locally; independent cross-platform oracle qualification is still required before consensus promotion. | Pin byte layout, scale decode, sign mapping, loop order, accumulator profile, finite rejection, aliasing, and output encoding. |
+| `LINEAR_Q1_G128_FP` | `contract_vm.ml` decodes Q1-G128 blocks, exact little-endian binary16 scale bits, sign bits, and accumulates with LiteNode's finite binary64 core. | Scale/sign interpretation and accumulator order are now profile-described and tested locally; independent cross-platform oracle qualification is still required before consensus promotion. | Pin byte layout, scale decode, sign mapping, loop order, accumulator profile, finite rejection, aliasing, and output encoding. |
 | `RMSNORM_FP_EPS` | Reads explicit epsilon bits; sum of squares, count division, epsilon addition, inverse-root `sqrt`, reciprocal division, and output multiply use LiteNode's finite binary64 core. | Independent cross-platform oracle qualification is still required before consensus promotion. | Define exact epsilon input, reduction order, inverse-root implementation, gamma read/order, non-finite policy, and rollback behavior. |
 | `L2NORM_FP` | Same deterministic reduction, inverse-root `sqrt`, and output multiply shape as RMSNorm without gamma. | Same as RMSNorm; smaller surface but still needs independent inverse-root qualification. | Define exact inverse-norm semantics, edge vectors near zero, signed-zero/subnormal behavior, and failure atomicity. |
 | `SOFTMAX_FP` | Uses deterministic finite binary64 left-to-right max selection, score shift, nonpositive shifted-score gate, exponential sum, and probability division; `exp` remains native. | Highest math risk in this set because native `exp` can change probabilities and token/order behavior. The local gate now constrains host `exp` inputs to shifted scores that compare `<= +0.0`. | Replace or pin `exp`, tie behavior, overflow/underflow, in-place behavior, and finite-result rules. |
@@ -62,8 +62,8 @@ The current branch already has useful controls:
 - conformance templates reject unknown or over-claimed numerical profiles;
 - fixed loop order in the OCaml implementation;
 - finite-output checks for the P0 primitives;
-- L2Norm accepts the current host-FP minimum-positive-subnormal epsilon path
-  over signed-zero/subnormal inputs;
+- L2Norm accepts the current normalization-profile minimum-positive-subnormal
+  epsilon path over signed-zero/subnormal inputs;
 - aliasing and span checks in the major writeback paths;
 - failure-path tests for individual primitives, including gated-delta output
   and next-state rollback on missing input, nonfinite decay, invalid shape,
@@ -110,11 +110,11 @@ Positive execution reports also include `profile_gate_count`,
 `classified_profile_gate_count`, and `unprofiled_template_count` so an
 accepted VM run can be audited for profile coverage without walking every
 per-template result. They also include
-`profile_consensus_status_counts`, which should remain `local_only` for the
-current host-FP P0 math until a deterministic runtime profile lands.
+`profile_consensus_status_counts`, which separates deterministic candidate
+profiles from remaining local-only host-FP math.
 Passing `--require-consensus-ready` turns that diagnostic boundary into a hard
-gate; current host-FP artifacts are expected to reject under that flag with
-`local_only_profile_gates` in `consensus_ready_gate.blockers`.
+gate; current non-ready artifacts are expected to reject under that flag with
+profile blockers in `consensus_ready_gate.blockers`.
 In that strict mode, `execution_status` remains the VM-output result while the
 top-level `status` reflects the active consensus-readiness gate.
 
@@ -237,7 +237,7 @@ as free-form metadata. P0 templates are no longer forced into one broad host-FP
 bucket:
 
 ```text
-LINEAR_Q1_G128_FP      host-fp-local-candidate
+LINEAR_Q1_G128_FP      deterministic-q1-g128-fp64-linear
 RMSNORM_FP_EPS         deterministic-fp64-normalization
 L2NORM_FP              deterministic-fp64-normalization
 SOFTMAX_FP             host-fp-local-candidate
@@ -247,9 +247,10 @@ GATED_DELTA_RULE_FP    host-fp-local-candidate
 `host-fp-local-candidate` is accepted only as local candidate execution and is
 reported as `local_only`, with required actions to bind exact arithmetic,
 replace or qualify host math, and pass cross-platform conformance before
-validator admission. `deterministic-fp64-normalization` is reported as
-`consensus_candidate`; it still requires profile-root binding and independent
-cross-platform conformance before any consensus-ready claim.
+validator admission. `deterministic-q1-g128-fp64-linear` and
+`deterministic-fp64-normalization` are reported as `consensus_candidate`; they
+still require profile-root binding and independent cross-platform conformance
+before any consensus-ready claim.
 Conformance JSON includes:
 
 ```text
@@ -322,16 +323,14 @@ Initial P0 focus:
 
 | Opcode | Current accepted profile | Consensus status | Pinned locally | Why not ready |
 | --- | --- | --- | --- | --- |
-| `LINEAR_Q1_G128_FP` | `host-fp-local-candidate` | `local_only` | Q1 scale/sign edge vectors, exhaustive binary16 scale decode, NaN/infinity scale rejection, finite rejection, overflow rollback, effort floor, output atomicity, and destination/lhs snapshot behavior. | Uses LiteNode's deterministic finite binary64 add/mul core; still needs independent cross-platform oracle qualification. |
+| `LINEAR_Q1_G128_FP` | `deterministic-q1-g128-fp64-linear` | `consensus_candidate` | Q1 scale/sign edge vectors, exhaustive binary16 scale decode, NaN/infinity scale rejection, finite rejection, overflow rollback, effort floor, output atomicity, and destination/lhs snapshot behavior. | Uses exact integer binary16 scale decode plus LiteNode's software-defined finite binary64 add/mul core; still needs independent cross-platform oracle qualification and profile-root binding. |
 | `RMSNORM_FP_EPS` | `deterministic-fp64-normalization` | `consensus_candidate` | Explicit epsilon bits, minimum-subnormal epsilon, deterministic reduction/inverse-root/output multiply, row composition, signed-zero/subnormal acceptance, finite rejection, alias rejection, effort floor, and output atomicity. | Uses LiteNode's software-defined finite binary64 core; still needs independent cross-platform oracle qualification and profile-root binding. |
 | `L2NORM_FP` | `deterministic-fp64-normalization` | `consensus_candidate` | Explicit epsilon bits, minimum-subnormal epsilon, deterministic reduction/inverse-root/output multiply, row composition, finite rejection, effort floor, inverse-root overflow rejection, and output atomicity. | Uses LiteNode's software-defined finite binary64 core; still needs independent cross-platform oracle qualification and profile-root binding. |
 
-The next acceptable status change for `LINEAR_Q1_G128_FP` requires closing the
-binary16 scale-decode authority gap and matching scalar-oracle corpus, not just
-a new string in the producer template. The normalization opcodes have moved out
-of the broad host-FP bucket because their current runtime path uses LiteNode's
-deterministic finite binary64 helper for reduction, division, sqrt, and output
-multiply, but they still are not consensus-ready until profile roots and
+`LINEAR_Q1_G128_FP` and the normalization opcodes have moved out of the broad
+host-FP bucket because their current runtime paths avoid native host
+floating-point math in the admitted compute path. They still are not
+consensus-ready until profile roots, independent scalar-oracle coverage, and
 cross-platform conformance are bound.
 
 ## Current Positive Execution Gate
@@ -474,8 +473,9 @@ P0-plus runner now reports per-fixture `profile_gates` plus an aggregate
 `profile_gate_count` and `classified_profile_gate_count`; the composite
 logits-tail case reports the component profiles for `RMSNORM_FP_EPS`,
 `LINEAR_Q1_G128_FP`, and `ARGMAX_FP`. Its `profile_consensus_status_counts`
-now separate the deterministic `ARGMAX_FP` comparison candidate from remaining
-local-only host-FP math. Like P0 execution reports, `execution_status` is the VM
+now separate deterministic comparison, normalization, and Q1 candidates from
+remaining local-only host-FP math. Like P0 execution reports,
+`execution_status` is the VM
 output result and top-level `status` includes any strict consensus-readiness
 gate. The explicit top-k boundary is:
 
@@ -507,5 +507,4 @@ The next Q16 step must be narrow and fixture-led: choose the exact Q16 opcode
 subset, pin per-opcode scaling/rounding/saturation/aliasing/effort semantics,
 and require `q16-exact` only for those opcodes after positive, negative,
 atomicity, and token-order fixtures pass. Until then, Q16 is a candidate speed
-path, not a replacement claim for the current `host-fp-local-candidate`
-inference proof path.
+path, not a replacement claim for the current FP inference proof profiles.
