@@ -16,6 +16,7 @@ module Template = Octra_vm.Inference_conformance_template
 
 let template_path = ref None
 let template_dir = ref None
+let template_index = ref None
 
 let fail message =
   prerr_endline message;
@@ -28,11 +29,15 @@ let args = [
   "--template-dir",
   Arg.String (fun value -> template_dir := Some value),
   "directory containing conformance template json files";
+  "--template-index",
+  Arg.String (fun value -> template_index := Some value),
+  "producer template index json";
 ]
 
 let usage =
   "inference_conformance_check --template <path>\n\
-   or inference_conformance_check --template-dir <dir>"
+   or inference_conformance_check --template-dir <dir>\n\
+   or inference_conformance_check --template-index <path>"
 
 let read_json path =
   try Yojson.Safe.from_file path with
@@ -50,6 +55,55 @@ let read_file path =
 
 let sha256 raw =
   Digestif.SHA256.(digest_string raw |> to_hex)
+
+let field name fields =
+  match List.filter (fun (key, _) -> String.equal key name) fields with
+  | [(_, value)] -> Some value
+  | _ -> None
+
+let string_field name fields =
+  match field name fields with
+  | Some (`String value) -> Some value
+  | _ -> None
+
+let int_field name fields =
+  match field name fields with
+  | Some (`Int value) -> Some value
+  | _ -> None
+
+let list_field name fields =
+  match field name fields with
+  | Some (`List values) -> Some values
+  | _ -> None
+
+let assoc_field name fields =
+  match field name fields with
+  | Some (`Assoc values) -> Some values
+  | _ -> None
+
+let relative_path_ok path =
+  String.length path > 0
+  && path.[0] <> '/'
+  && not (String.contains path '\\')
+  && List.for_all
+       (fun part -> part <> "" && part <> "." && part <> "..")
+       (String.split_on_char '/' path)
+
+type issue = {
+  path : string;
+  opcode : string option;
+  message : string;
+}
+
+let issue ?opcode path message = { path; opcode; message }
+
+let issue_json issue =
+  `Assoc [
+    "path", `String issue.path;
+    "opcode",
+    (match issue.opcode with None -> `Null | Some opcode -> `String opcode);
+    "message", `String issue.message;
+  ]
 
 type checked_template = {
   path : string;
@@ -131,21 +185,387 @@ let duplicate_opcodes templates =
       None
     end)
 
+let resolve_template_path index_path value =
+  if relative_path_ok value then
+    Filename.concat (Filename.dirname index_path) value
+  else value
+
+let read_template_for_diagnostics path =
+  try Some (read_json path) with
+  | _ -> None
+
+let issues_for_program_effects path opcode fields =
+  match assoc_field "program_effect_requirements" fields with
+  | None -> [issue ~opcode path "missing program_effect_requirements"]
+  | Some effect_fields ->
+    let effects =
+      match list_field "program_effects" effect_fields with
+      | Some values ->
+        List.filter_map
+          (function `String value -> Some value | _ -> None)
+          values
+      | None -> []
+    in
+    ["memory_read"; "memory_write"; "storage_read"]
+    |> List.filter
+         (fun effect -> not (List.exists (String.equal effect) effects))
+    |> List.map (fun effect ->
+      issue ~opcode path ("missing program effect: " ^ effect))
+
+let source_path_issues path opcode fields =
+  match list_field "input_memory_ranges" fields with
+  | None -> [issue ~opcode path "missing input_memory_ranges"]
+  | Some ranges ->
+    List.concat
+      (List.map
+         (function
+           | `Assoc range_fields ->
+             let name =
+               match string_field "name" range_fields with
+               | Some value -> value
+               | None -> "<unknown>"
+             in
+             let range_issues =
+               match assoc_field "source" range_fields with
+               | None -> [issue ~opcode path ("missing source for input " ^ name)]
+               | Some source_fields ->
+                 let base =
+                   match string_field "path" source_fields with
+                   | Some source when not (relative_path_ok source) ->
+                     [issue ~opcode path
+                        ("source path must be relative for input " ^ name)]
+                   | Some _ -> []
+                   | None ->
+                     [issue ~opcode path ("missing source path for input " ^ name)]
+                 in
+                 let bytes_issue =
+                   match int_field "bytes" source_fields with
+                   | Some bytes when bytes > 0 -> []
+                   | _ -> [issue ~opcode path
+                             ("source bytes must be positive for input " ^ name)]
+                 in
+                 let sha_issue =
+                   match string_field "sha256" source_fields with
+                   | Some _ -> []
+                   | None -> [issue ~opcode path
+                                ("source sha256 is required for input " ^ name)]
+                 in
+                 base @ bytes_issue @ sha_issue
+             in
+             let vm_issues =
+               match assoc_field "vm_memory" range_fields with
+               | None -> [issue ~opcode path ("missing vm_memory for input " ^ name)]
+               | Some vm_fields ->
+                 let f64_input =
+                   match assoc_field "range_binding" range_fields with
+                   | Some binding_fields ->
+                     (match string_field "encoding" binding_fields with
+                      | Some "f64le" -> true
+                      | _ -> false)
+                   | None -> false
+                 in
+                 let base_issue =
+                   match int_field "base_address" vm_fields with
+                   | Some base when base >= 0 -> []
+                   | _ -> [issue ~opcode path
+                             ("vm_memory base_address required for input " ^ name)]
+                 in
+                 let count_issue =
+                   match int_field "length_f64_cells" vm_fields with
+                   | Some cells when cells > 0 -> []
+                   | _ when not f64_input -> []
+                   | _ -> [issue ~opcode path
+                             ("vm_memory length_f64_cells required for input " ^ name)]
+                 in
+                 base_issue @ count_issue
+             in
+             range_issues @ vm_issues
+           | _ -> [issue ~opcode path "input_memory_ranges entry must be object"])
+         ranges)
+
+let expected_issues path opcode fields =
+  let manifest_issues =
+    match list_field "expected_output_byte_manifests" fields with
+    | None -> [issue ~opcode path "missing expected_output_byte_manifests"]
+    | Some manifests ->
+      if manifests = [] then
+        [issue ~opcode path "expected_output_byte_manifests must be non-empty"]
+      else
+        List.concat
+          (List.map
+             (function
+               | `Assoc manifest_fields ->
+                 let name =
+                   match string_field "name" manifest_fields with
+                   | Some value -> value
+                   | None -> "<unknown>"
+                 in
+                 let path_issue =
+                   match string_field "path" manifest_fields with
+                   | Some value when not (relative_path_ok value) ->
+                     [issue ~opcode path
+                        ("expected output path must be relative for " ^ name)]
+                   | Some _ -> []
+                   | None ->
+                     [issue ~opcode path
+                        ("expected output path required for " ^ name)]
+                 in
+                 let bytes_issue =
+                   match int_field "bytes" manifest_fields with
+                   | Some bytes when bytes > 0 -> []
+                   | _ -> [issue ~opcode path
+                             ("expected output bytes must be positive for " ^ name)]
+                 in
+                 let sha_issue =
+                   match string_field "sha256" manifest_fields with
+                   | Some _ -> []
+                   | None -> [issue ~opcode path
+                                ("expected output sha256 required for " ^ name)]
+                 in
+                 path_issue @ bytes_issue @ sha_issue
+               | _ -> [issue ~opcode path
+                         "expected_output_byte_manifests entry must be object"])
+             manifests)
+  in
+  let span_issues =
+    match assoc_field "output" fields with
+    | None -> [issue ~opcode path "missing output"]
+    | Some output_fields ->
+      let subspans =
+        match list_field "subspans" output_fields with
+        | Some values -> values
+        | None -> []
+      in
+      if String.equal opcode "GATED_DELTA_RULE_FP" && List.length subspans < 2 then
+        [issue ~opcode path
+           "GATED_DELTA_RULE_FP requires recurrent output and next-state subspans"]
+      else []
+  in
+  manifest_issues @ span_issues
+
+let failure_issues path opcode fields =
+  match list_field "expected_failure_atomicity_behavior" fields with
+  | None -> [issue ~opcode path "missing expected_failure_atomicity_behavior"]
+  | Some failures ->
+    if failures = [] then
+      [issue ~opcode path "expected_failure_atomicity_behavior must be non-empty"]
+    else
+      let parsed =
+        List.map
+          (function
+            | `Assoc failure_fields ->
+              let case =
+                match string_field "case" failure_fields with
+                | Some value -> value
+                | None -> "<unknown>"
+              in
+              `Case
+                (case,
+                 field "mutations" failure_fields <> None,
+                 field "unchanged_spans" failure_fields <> None)
+            | _ -> `Bad)
+          failures
+      in
+      let bad =
+        if List.exists (( = ) `Bad) parsed then
+          [issue ~opcode path
+             "expected_failure_atomicity_behavior entries must be objects"]
+        else []
+      in
+      let missing_mutations =
+        List.filter_map
+          (function
+            | `Case (case, false, _) -> Some case
+            | _ -> None)
+          parsed
+      in
+      let missing_unchanged =
+        List.filter_map
+          (function
+            | `Case (case, _, false) -> Some case
+            | _ -> None)
+          parsed
+      in
+      let mutation_issue =
+        if missing_mutations = [] then []
+        else
+          [issue ~opcode path
+             ("failure cases lack executable mutations: "
+              ^ String.concat "," missing_mutations)]
+      in
+      let unchanged_issue =
+        if missing_unchanged = [] then []
+        else
+          [issue ~opcode path
+             ("failure cases lack unchanged_spans: "
+              ^ String.concat "," missing_unchanged)]
+      in
+      bad @ mutation_issue @ unchanged_issue
+
+let gated_delta_semantic_issues path opcode fields =
+  if not (String.equal opcode "GATED_DELTA_RULE_FP") then []
+  else
+    match assoc_field "parameter_addresses_and_scalar_params" fields with
+    | None -> [issue ~opcode path "missing Gated Delta parameter metadata"]
+    | Some params ->
+      (match assoc_field "source_parameters" params with
+       | None -> [issue ~opcode path "missing Gated Delta source_parameters"]
+       | Some source ->
+         match string_field "operation_order" source with
+         | Some order
+           when String.contains order 'v'
+                && String.contains order '*'
+                && not (String.contains order '-') ->
+           [issue ~opcode path
+              "Gated Delta operation_order still describes beta*v*k update, not LiteNode memory-correction recurrence"]
+         | Some _ -> []
+         | None -> [issue ~opcode path
+                     "missing Gated Delta operation_order"])
+
+let producer_template_issues path opcode json =
+  match json with
+  | `Assoc fields ->
+    let type_issue =
+      match string_field "type" fields with
+      | Some "p0_litenode_vm_execution_template" -> []
+      | Some value -> [issue ~opcode path ("unexpected template type: " ^ value)]
+      | None -> [issue ~opcode path "missing template type"]
+    in
+    let root_issues =
+      let vm =
+        match string_field "vm_semantics_root" fields with
+        | Some _ -> []
+        | None -> [issue ~opcode path "missing vm_semantics_root"]
+      in
+      let numerical =
+        match string_field "numerical_profile_root" fields with
+        | Some _ -> []
+        | None -> [issue ~opcode path "missing numerical_profile_root"]
+      in
+      let effort =
+        match int_field "expected_effort" fields with
+        | Some value when value >= 0 -> []
+        | _ -> [issue ~opcode path "missing expected_effort"]
+      in
+      vm @ numerical @ effort
+    in
+    type_issue
+    @ root_issues
+    @ issues_for_program_effects path opcode fields
+    @ source_path_issues path opcode fields
+    @ expected_issues path opcode fields
+    @ failure_issues path opcode fields
+    @ gated_delta_semantic_issues path opcode fields
+  | _ -> [issue ~opcode path "template must be an object"]
+
+let producer_index_report index_path =
+  let index = read_json index_path in
+  match index with
+  | `Assoc fields ->
+    let templates =
+      match list_field "templates" fields with
+      | Some values -> values
+      | None -> fail (index_path ^ ": missing templates")
+    in
+    let entries =
+      List.map
+        (function
+          | `Assoc entry_fields ->
+            let opcode = string_field "opcode" entry_fields in
+            let template_path = string_field "vm_execution_template" entry_fields in
+            let path_issues =
+              match template_path with
+              | Some path when not (relative_path_ok path) ->
+                [issue ?opcode index_path "vm_execution_template path must be relative"]
+              | Some _ -> []
+              | None -> [issue ?opcode index_path "missing vm_execution_template"]
+            in
+            let template_issues =
+              match template_path with
+              | None -> []
+              | Some raw_path ->
+                let resolved = resolve_template_path index_path raw_path in
+                (match read_template_for_diagnostics resolved with
+                 | None -> [issue ?opcode resolved "template file is unreadable"]
+                 | Some json ->
+                   let opcode_value =
+                     match opcode with Some value -> value | None -> "<unknown>"
+                   in
+                   producer_template_issues resolved opcode_value json)
+            in
+            opcode, path_issues @ template_issues
+          | _ -> None, [issue index_path "template index entry must be object"])
+        templates
+    in
+    let opcodes = List.filter_map fst entries in
+    let missing =
+      Template.p0_opcodes
+      |> List.filter
+           (fun opcode -> not (List.exists (String.equal opcode) opcodes))
+      |> List.map (fun opcode -> issue ~opcode index_path "missing P0 template")
+    in
+    let seen = Hashtbl.create 8 in
+    let duplicates =
+      opcodes
+      |> List.filter_map (fun opcode ->
+        if Hashtbl.mem seen opcode then Some (issue ~opcode index_path "duplicate P0 template")
+        else begin Hashtbl.add seen opcode (); None end)
+    in
+    let issues = List.concat (List.map snd entries) @ missing @ duplicates in
+    let status = if issues = [] then "accepted" else "rejected" in
+    `Assoc [
+      "status", `String status;
+      "diagnostic_only", `Bool true;
+      "index_path", `String index_path;
+      "template_count", `Int (List.length templates);
+      "p0_opcodes",
+      `List (List.map (fun opcode -> `String opcode) Template.p0_opcodes);
+      "issue_count", `Int (List.length issues);
+      "issues", `List (List.map issue_json issues);
+    ]
+  | _ -> fail (index_path ^ ": template index must be an object")
+
+let print_report_and_exit report =
+  print_endline (Yojson.Safe.pretty_to_string report);
+  match report with
+  | `Assoc fields ->
+    (match string_field "status" fields with
+     | Some "accepted" -> ()
+     | _ -> exit 1)
+  | _ -> exit 1
+
 let () =
   Arg.parse args (fun arg -> fail ("unexpected argument: " ^ arg)) usage;
-  match !template_path, !template_dir with
-  | Some _, Some _ -> fail "use --template or --template-dir, not both"
-  | None, None -> fail "missing --template or --template-dir"
-  | Some path, None ->
-    let checked = check_template path in
-    print_endline
-      (Yojson.Safe.pretty_to_string
-         (`Assoc [
-           "status", `String "accepted";
-           "diagnostic_only", `Bool true;
-           "templates", `List [checked_template_json checked];
-         ]))
-  | None, Some dir ->
+  let modes =
+    List.filter_map
+      Fun.id
+      [
+        Option.map (fun value -> `Template value) !template_path;
+        Option.map (fun value -> `Dir value) !template_dir;
+        Option.map (fun value -> `Index value) !template_index;
+      ]
+  in
+  match modes with
+  | [] -> fail "missing --template, --template-dir, or --template-index"
+  | _ :: _ :: _ -> fail "use only one template input mode"
+  | [`Index path] -> print_report_and_exit (producer_index_report path)
+  | [`Template path] ->
+    let json = read_json path in
+    (match json with
+     | `Assoc fields ->
+       (match string_field "type" fields with
+        | Some "p0_litenode_vm_execution_template_index" ->
+          print_report_and_exit (producer_index_report path)
+        | _ ->
+          let checked = check_template path in
+          print_report_and_exit
+            (`Assoc [
+              "status", `String "accepted";
+              "diagnostic_only", `Bool true;
+              "templates", `List [checked_template_json checked];
+            ]))
+     | _ -> fail (path ^ ": template must be an object"))
+  | [`Dir dir] ->
     let templates = List.map check_template (template_files dir) in
     if templates = [] then fail ("no templates in " ^ dir);
     let missing = missing_p0 templates in
@@ -154,13 +574,12 @@ let () =
     let duplicates = duplicate_opcodes templates in
     if duplicates <> [] then
       fail ("duplicate P0 templates: " ^ String.concat "," duplicates);
-    print_endline
-      (Yojson.Safe.pretty_to_string
-         (`Assoc [
-           "status", `String "accepted";
-           "diagnostic_only", `Bool true;
-           "template_count", `Int (List.length templates);
-           "p0_opcodes",
-           `List (List.map (fun opcode -> `String opcode) Template.p0_opcodes);
-           "templates", `List (List.map checked_template_json templates);
-         ]))
+    print_report_and_exit
+      (`Assoc [
+        "status", `String "accepted";
+        "diagnostic_only", `Bool true;
+        "template_count", `Int (List.length templates);
+        "p0_opcodes",
+        `List (List.map (fun opcode -> `String opcode) Template.p0_opcodes);
+        "templates", `List (List.map checked_template_json templates);
+      ])

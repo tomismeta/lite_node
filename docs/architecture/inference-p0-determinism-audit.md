@@ -149,6 +149,12 @@ The next useful LiteNode gate is:
 inference_conformance_check --template-dir <p0-template-dir>
 ```
 
+For the producer-emitted index format:
+
+```text
+inference_conformance_check --template-index <p0-vm-execution-templates.cjson>
+```
+
 Acceptance means only:
 
 - all five P0 opcodes are represented;
