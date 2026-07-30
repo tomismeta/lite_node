@@ -625,7 +625,29 @@ let check_inference_profile_surface_coverage () =
        (int_value "consensus_candidate" fields = 11);
      check "surface consensus-ready count" (int_value "consensus_ready" fields = 0);
      check "surface unknown count" (int_value "unknown" fields = 0)
-   | _ -> failwith "surface status counts json must be object")
+   | _ -> failwith "surface status counts json must be object");
+  (match Profile.profile_root_catalog_json gates with
+   | `List catalog ->
+     check "surface profile root catalog count" (List.length catalog = 17);
+     List.iter
+       (fun (opcode, expected_profile, expected_status, expected_root) ->
+          check
+            (opcode ^ " catalog entry")
+            (List.exists
+               (function
+                 | `Assoc fields ->
+                   String.equal (string_value "opcode" fields) opcode
+                   && String.equal (string_value "name" fields) expected_profile
+                   && String.equal
+                        (string_value "consensus_status" fields)
+                        expected_status
+                   && String.equal
+                        (string_value "profile_root" fields)
+                        expected_root
+                 | _ -> false)
+               catalog))
+       surface
+   | _ -> failwith "surface profile root catalog must be list")
 
 let check_remaining_p0_profile_obligations () =
   List.iter

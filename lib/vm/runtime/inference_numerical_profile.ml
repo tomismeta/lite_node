@@ -218,6 +218,75 @@ let status_counts_json counts =
     "unknown", `Int counts.unknown;
   ]
 
+let string_field name fields =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> Some value
+  | _ -> None
+
+let catalog_entry_json (opcode, name, consensus_status, profile_root, source) =
+  let fields = [
+    "opcode", `String opcode;
+    "name", `String name;
+    "consensus_status", `String consensus_status;
+    "profile_root", `String profile_root;
+  ] in
+  let fields =
+    match source with
+    | None -> fields
+    | Some value -> fields @ ["profile_source", `String value]
+  in
+  `Assoc fields
+
+let rec profile_root_catalog_entries = function
+  | `Assoc fields ->
+    let direct =
+      match
+        string_field "opcode" fields,
+        string_field "name" fields,
+        string_field "consensus_status" fields,
+        string_field "profile_root" fields
+      with
+      | Some opcode, Some name, Some consensus_status, Some profile_root ->
+        [
+          ( opcode,
+            name,
+            consensus_status,
+            profile_root,
+            string_field "profile_source" fields );
+        ]
+      | _ -> []
+    in
+    let nested_gate =
+      match List.assoc_opt "profile_gate" fields with
+      | Some value -> profile_root_catalog_entries value
+      | None -> []
+    in
+    let nested_gates =
+      match List.assoc_opt "profile_gates" fields with
+      | Some (`List values) ->
+        List.fold_left
+          (fun entries value -> profile_root_catalog_entries value @ entries)
+          []
+          values
+      | _ -> []
+    in
+    direct @ nested_gate @ nested_gates
+  | `List values ->
+    List.fold_left
+      (fun entries value -> profile_root_catalog_entries value @ entries)
+      []
+      values
+  | _ -> []
+
+let profile_root_catalog_json values =
+  values
+  |> List.fold_left
+       (fun entries value -> profile_root_catalog_entries value @ entries)
+       []
+  |> List.sort_uniq compare
+  |> List.map catalog_entry_json
+  |> fun entries -> `List entries
+
 let error_message = function
   | Unknown_profile profile -> "unknown numerical profile: " ^ profile
   | Unsupported_opcode_profile { opcode; profile; expected } ->

@@ -173,11 +173,6 @@ let profile_gate_value = function
      | _ -> None)
   | _ -> None
 
-let profile_status_counts values =
-  values
-  |> List.filter_map profile_gate_value
-  |> Profile.status_counts_of_json_gates
-
 let profile_root_binding_value value =
   match value with
   | `Assoc fields ->
@@ -1235,6 +1230,8 @@ let run_p0_plus_pack path =
     "classified_profile_gate_count", `Int classified_profile_gate_count;
     "profile_consensus_status_counts",
     Profile.status_counts_json status_counts;
+    "profile_root_catalog",
+    Profile.profile_root_catalog_json profile_gates;
     "profile_root_binding_status_counts",
     Profile.root_binding_counts_json root_binding_counts;
     "profile_root_binding_classification_counts",
@@ -1273,8 +1270,11 @@ let run_index path =
       0
       results
   in
+  let profile_gates =
+    List.filter_map profile_gate_value (List.map snd results)
+  in
   let status_counts =
-    profile_status_counts (List.map snd results)
+    Profile.status_counts_of_json_gates profile_gates
   in
   let root_binding_counts =
     profile_root_binding_status_counts (List.map snd results)
@@ -1308,6 +1308,8 @@ let run_index path =
     "unprofiled_template_count", `Int unprofiled_count;
     "profile_consensus_status_counts",
     Profile.status_counts_json status_counts;
+    "profile_root_catalog",
+    Profile.profile_root_catalog_json profile_gates;
     "profile_root_binding_status_counts",
     Profile.root_binding_counts_json root_binding_counts;
     "profile_root_binding_classification_counts",

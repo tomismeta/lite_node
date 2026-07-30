@@ -745,6 +745,8 @@ let producer_index_report index_path =
       "unprofiled_template_count", `Int unprofiled_template_count;
       "profile_consensus_status_counts",
       Profile.status_counts_json profile_status_counts;
+      "profile_root_catalog",
+      Profile.profile_root_catalog_json profile_gates;
       "profile_root_binding_status_counts",
       Profile.root_binding_counts_json profile_root_binding_counts;
       "profile_root_binding_classification_counts",
@@ -831,6 +833,8 @@ let () =
               "unprofiled_template_count", `Int (1 - profile_gate_count);
               "profile_consensus_status_counts",
               Profile.status_counts_json profile_status_counts;
+              "profile_root_catalog",
+              Profile.profile_root_catalog_json [template_json];
               "profile_root_binding_status_counts",
               Profile.root_binding_counts_json profile_root_binding_counts;
               "profile_root_binding_classification_counts",
@@ -893,6 +897,8 @@ let () =
         "unprofiled_template_count", `Int unprofiled_count;
         "profile_consensus_status_counts",
         Profile.status_counts_json status_counts;
+        "profile_root_catalog",
+        Profile.profile_root_catalog_json template_jsons;
         "profile_root_binding_status_counts",
         Profile.root_binding_counts_json root_binding_counts;
         "profile_root_binding_classification_counts",

@@ -302,7 +302,11 @@ root is bound, `profile_root_mismatch` means the producer supplied a different
 numerical root, and `profile_root_unavailable` means the gate root was missing.
 Conformance reports summarize those values in
 `profile_root_binding_classification_counts` so consumers can detect stale
-profile roots without walking every template row.
+profile roots without walking every template row. They also expose a
+deduplicated `profile_root_catalog` with the current LiteNode opcode, profile
+name, consensus status, and `profile_root` values. That catalog is a producer
+handoff convenience; it does not make an artifact consensus-ready unless its
+declared roots also bind and the readiness gate accepts.
 
 `local_semantics` records what the current VM does today.
 `consensus_obligations` records what must become protocol-owned before the
@@ -499,11 +503,12 @@ attention math, indexed RoPE, argmax tie behavior, and the final logits-tail
 composition. `ARGMAX_FP` only returns the selected index, so producer top-k
 ordering manifests are preserved as `producer_only` evidence. The explicit
 P0-plus runner now reports per-fixture `profile_gates` plus an aggregate
-`profile_gate_count` and `classified_profile_gate_count`; the composite
-logits-tail case reports the component profiles for `RMSNORM_FP_EPS`,
-`LINEAR_Q1_G128_FP`, and `ARGMAX_FP`. Its `profile_consensus_status_counts`
-now separate deterministic comparison, normalization, and Q1 candidates from
-remaining local-only host-FP math. Like P0 execution reports,
+`profile_gate_count`, `classified_profile_gate_count`, and
+`profile_root_catalog`; the composite logits-tail case reports the component
+profiles for `RMSNORM_FP_EPS`, `LINEAR_Q1_G128_FP`, and `ARGMAX_FP`. Its
+`profile_consensus_status_counts` now separate deterministic comparison,
+normalization, and Q1 candidates from remaining local-only host-FP math. Like
+P0 execution reports,
 `execution_status` is the VM
 output result and top-level `status` includes any strict consensus-readiness
 gate. The explicit top-k boundary is:
