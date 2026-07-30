@@ -131,6 +131,30 @@ let local_semantics ~opcode =
       "inverse RMS is computed as 1.0 / sqrt((sum_sq / count) + epsilon)";
       "outputs are written only after the complete finite output vector is computed";
     ]
+  | "L2NORM_FP" ->
+    [
+      "epsilon is read from an integer register as binary64 bits and must be finite and positive";
+      "input cells are finite binary64 values";
+      "sum of squares is accumulated left-to-right in native binary64";
+      "inverse norm is computed as 1.0 / sqrt(sum_sq + epsilon)";
+      "outputs are written only after the complete finite output vector is computed";
+    ]
+  | "SOFTMAX_FP" ->
+    [
+      "score cells are finite binary64 values";
+      "maximum score is selected left-to-right before exponentiation";
+      "exp is applied to each score minus the selected maximum score";
+      "probabilities are divided by the native binary64 sum of exponentials";
+      "destination may equal scores exactly, but partial overlap is rejected";
+    ]
+  | "GATED_DELTA_RULE_FP" ->
+    [
+      "query, key, value, decay, beta, and recurrent-state cells are finite binary64 values";
+      "value heads map to query and key heads by modulo";
+      "state decay uses exp(log_decay) and scale uses 1.0 / sqrt(key_dim)";
+      "loop order is timestep, value head, value row, key column";
+      "output and next-state cells are written only after both buffers are finite";
+    ]
   | _ -> []
 
 let consensus_obligations ~opcode =
@@ -148,6 +172,27 @@ let consensus_obligations ~opcode =
       "pin signed-zero, subnormal, overflow, underflow, and non-finite behavior";
       "define exact epsilon-bit interpretation and range-overlap rejection";
       "pass independent cross-platform conformance for reduction and sqrt edge vectors";
+    ]
+  | "L2NORM_FP" ->
+    [
+      "replace or qualify native binary64 reduction, division, multiplication, and sqrt";
+      "pin epsilon-bit interpretation, signed-zero, subnormal, overflow, and non-finite behavior";
+      "define exact output encoding and in-place writeback atomicity";
+      "pass independent cross-platform conformance for inverse-norm edge vectors";
+    ]
+  | "SOFTMAX_FP" ->
+    [
+      "replace or qualify native binary64 exp, division, summation, and comparison behavior";
+      "pin max-subtract semantics, ties, underflow, overflow, and non-finite rejection";
+      "define exact output encoding and overlap/writeback atomicity";
+      "pass independent cross-platform conformance for probability and ordering edge vectors";
+    ]
+  | "GATED_DELTA_RULE_FP" ->
+    [
+      "replace or qualify native binary64 exp, sqrt, dot-product, and recurrence behavior";
+      "pin head mapping, decay order, beta application, state update order, and scaling";
+      "define exact output plus next-state encoding, alias rejection, effort, and atomicity";
+      "pass independent cross-platform conformance for recurrent state-transition edge vectors";
     ]
   | _ -> [
       "write primitive-specific deterministic math obligations before promotion";

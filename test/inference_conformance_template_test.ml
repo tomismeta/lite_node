@@ -12,6 +12,7 @@ Include at startup:
 - gRPC (version 9738fdy44-2025)
 *)
 
+module Profile = Octra_vm.Inference_numerical_profile
 module Template = Octra_vm.Inference_conformance_template
 
 let check label condition =
@@ -193,6 +194,34 @@ let check_q1_profile_obligations () =
         | _ -> failwith "missing q1 profile gate")
      | _ -> failwith "template json must be object")
 
+let profile_gate opcode =
+  match Profile.of_name "host-fp-local-candidate" with
+  | Error error -> failwith (Profile.error_message error)
+  | Ok profile ->
+    (match Profile.to_json_for_opcode ~opcode profile with
+     | `Assoc gate -> gate
+     | _ -> failwith "profile gate must be object")
+
+let check_remaining_p0_profile_obligations () =
+  List.iter
+    (fun (opcode, local_needle, obligation_needle) ->
+      let gate = profile_gate opcode in
+      check
+        (opcode ^ " local semantics")
+        (list_contains_substring
+           local_needle
+           (string_list_value "local_semantics" gate));
+      check
+        (opcode ^ " consensus obligations")
+        (list_contains_substring
+           obligation_needle
+           (string_list_value "consensus_obligations" gate)))
+    [
+      "L2NORM_FP", "inverse norm", "inverse-norm edge vectors";
+      "SOFTMAX_FP", "maximum score", "probability and ordering";
+      "GATED_DELTA_RULE_FP", "next-state cells", "state-transition";
+    ]
+
 let check_rejects_unknown_opcode () =
   match Template.of_json (template ~opcode:"MODEL_SPECIFIC_FASTPATH" ()) with
   | Error (Template.Template_error message) ->
@@ -320,6 +349,7 @@ let check_rejects_single_delta_expected_span () =
 let () =
   check_accepts_template ();
   check_q1_profile_obligations ();
+  check_remaining_p0_profile_obligations ();
   check_rejects_unknown_opcode ();
   check_rejects_effect_drift ();
   check_rejects_missing_failure_cases ();

@@ -226,6 +226,8 @@ profile_gate.consensus_obligations
 `local_semantics` records what the current VM does today.
 `consensus_obligations` records what must become protocol-owned before the
 opcode can be promoted out of `local_only`.
+All five P0 opcodes report primitive-specific local semantics and consensus
+obligations; none fall back to a generic promotion checklist.
 
 Templates that declare an unknown profile are rejected. Templates that claim a
 profile the current runtime does not implement, such as `soft-fp-exact` for
