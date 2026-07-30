@@ -205,6 +205,17 @@ let of_name = function
         "preserve non-finite rejection and destination atomicity before validator admission";
       ];
     }
+  | "deterministic-fp64-elementwise" as name ->
+    Ok {
+      name;
+      consensus_status = Consensus_candidate;
+      summary = "deterministic finite binary64 elementwise arithmetic profile";
+      required_actions = [
+        "bind the numerical profile root in the model or request authority";
+        "qualify software-defined binary64 add and multiply edge vectors across validators";
+        "pin signed-zero, subnormal, overflow, aliasing, effort, and atomic writeback policy";
+      ];
+    }
   | "q16-exact" as name ->
     Ok {
       name;
@@ -253,12 +264,13 @@ let current_runtime_profile ~opcode =
   | "ATTENTION_WEIGHTED_SUM_FP"
   | "SIGMOID_FP"
   | "SOFTPLUS_FP"
-  | "SILU_FP"
-  | "ELEMWISE_MUL_FP"
-  | "RESIDUAL_ADD_FP" ->
+  | "SILU_FP" ->
     Some "host-fp-local-candidate"
   | "ARGMAX_FP" ->
     Some "deterministic-fp64-comparison"
+  | "ELEMWISE_MUL_FP"
+  | "RESIDUAL_ADD_FP" ->
+    Some "deterministic-fp64-elementwise"
   | _ -> None
 
 let validate_for_opcode ~opcode ~profile =
@@ -357,6 +369,7 @@ let local_semantics ~opcode =
       "destination may equal source exactly, but partial overlap is rejected";
       "each output cell is computed with deterministic finite binary64 multiplication";
       "outputs are written only after the complete finite output vector is computed";
+      "no native host math is used";
     ]
   | "RESIDUAL_ADD_FP" ->
     [
@@ -364,6 +377,7 @@ let local_semantics ~opcode =
       "destination may equal source exactly, but partial overlap is rejected";
       "each output cell is computed with deterministic finite binary64 addition";
       "outputs are written only after the complete finite output vector is computed";
+      "no native host math is used";
     ]
   | "GATED_DELTA_RULE_FP" ->
     [
@@ -494,6 +508,7 @@ let consensus_obligations ~opcode =
     ]
   | "ELEMWISE_MUL_FP" ->
     [
+      "bind the deterministic elementwise profile root before consensus admission";
       "qualify deterministic binary64 multiplication";
       "pin signed-zero, subnormal, overflow, and non-finite behavior";
       "define same-range aliasing, partial-overlap rejection, writeback atomicity, and effort";
@@ -501,6 +516,7 @@ let consensus_obligations ~opcode =
     ]
   | "RESIDUAL_ADD_FP" ->
     [
+      "bind the deterministic elementwise profile root before consensus admission";
       "qualify deterministic binary64 addition";
       "pin signed-zero, subnormal, overflow, and non-finite behavior";
       "define same-range aliasing, partial-overlap rejection, writeback atomicity, and effort";
@@ -752,9 +768,9 @@ let arithmetic_domain ~profile ~opcode =
     "deterministic-binary64-reduction-divide-epsilon-sqrt-output-mul"
   | "host-fp-local-candidate", "L2NORM_FP" ->
     "deterministic-binary64-reduction-epsilon-sqrt-divide-output-mul"
-  | "host-fp-local-candidate", "ELEMWISE_MUL_FP" ->
+  | "deterministic-fp64-elementwise", "ELEMWISE_MUL_FP" ->
     "deterministic-binary64-elementwise-multiply"
-  | "host-fp-local-candidate", "RESIDUAL_ADD_FP" ->
+  | "deterministic-fp64-elementwise", "RESIDUAL_ADD_FP" ->
     "deterministic-binary64-elementwise-add"
   | "host-fp-local-candidate", "SOFTMAX_FP" ->
     "deterministic-binary64-compare-shift-nonpositive-exp-gate-sum-divide-host-exp"
@@ -791,10 +807,11 @@ let rounding_mode ~profile ~opcode =
       | "GATED_DELTA_RULE_FP"
       | "SIGMOID_FP"
       | "SOFTPLUS_FP"
-      | "SILU_FP"
-      | "ELEMWISE_MUL_FP"
-      | "RESIDUAL_ADD_FP" ) ) ->
+      | "SILU_FP" ) ) ->
     "deterministic-binary64-roundTiesToEven-with-host-math"
+  | ( "deterministic-fp64-elementwise",
+      ( "ELEMWISE_MUL_FP" | "RESIDUAL_ADD_FP" ) ) ->
+    "deterministic-binary64-roundTiesToEven"
   | "host-fp-local-candidate", "ARGMAX_FP" ->
     "not-applicable-deterministic-comparison"
   | "deterministic-fp64-comparison", "ARGMAX_FP" ->

@@ -428,11 +428,15 @@ activation effort schedule is unchanged in this local-only profile; it must be
 repriced before any broader admission claim because the deterministic helper
 path does more host work than the earlier native float mapping.
 
-LiteNode also reports `ELEMWISE_MUL_FP` and `RESIDUAL_ADD_FP` under the current
-`host-fp-local-candidate` runtime profile. Their runtime tests already pin
-finite reads, exact same-range aliasing, partial-overlap rejection, overflow
-rollback, and effort; profile reporting now prevents deterministic binary64
-multiply/add from being mislabeled as fixed-point or consensus authority.
+LiteNode now reports `ELEMWISE_MUL_FP` and `RESIDUAL_ADD_FP` under a
+`deterministic-fp64-elementwise` consensus-candidate profile. Their runtime
+tests already pin finite reads, exact same-range aliasing, partial-overlap
+rejection, overflow rollback, and effort, and the VM path uses LiteNode's
+software-defined binary64 add/multiply helpers rather than native host math.
+Consensus-ready admission still requires profile-root binding plus independent
+cross-platform conformance for signed-zero, subnormal, overflow, aliasing,
+effort, and atomic writeback behavior. This also keeps these opcodes from being
+mislabeled as fixed-point authority.
 
 LiteNode also reports `CAUSAL_DEPTHWISE_CONV1D_FP` under the current
 `host-fp-local-candidate` runtime profile. The local profile covers finite

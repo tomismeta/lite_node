@@ -812,26 +812,83 @@ let check_vector_arithmetic_profile_gates () =
       check
         (opcode ^ " runtime profile")
         (match Profile.current_runtime_profile ~opcode with
-         | Some "host-fp-local-candidate" -> true
+         | Some "deterministic-fp64-elementwise" -> true
          | _ -> false);
       let gate = profile_gate opcode in
+      check
+        (opcode ^ " consensus candidate")
+        (String.equal
+           (string_value "consensus_status" gate)
+           "consensus_candidate");
       check
         (opcode ^ " local semantics")
         (list_contains_substring
            local_needle
            (string_list_value "local_semantics" gate));
       check
+        (opcode ^ " records no host math")
+        (list_contains_substring
+           "no native host math"
+           (string_list_value "local_semantics" gate));
+      check
         (opcode ^ " consensus obligations")
         (list_contains_substring
            obligation_needle
            (string_list_value "consensus_obligations" gate));
+      check
+        (opcode ^ " profile root obligation")
+        (list_contains_substring
+           "profile root"
+           (string_list_value "consensus_obligations" gate));
+      let blockers = string_list_value "consensus_blocker_codes" gate in
+      check
+        (opcode ^ " no host arithmetic blocker")
+        (not (List.mem "host_fp_arithmetic" blockers));
+      (match List.assoc_opt "profile_contract" gate with
+       | Some (`Assoc contract) ->
+         check
+           (opcode ^ " profile name")
+           (String.equal
+              (string_value "profile_name" contract)
+              "deterministic-fp64-elementwise");
+         check
+           (opcode ^ " rounding mode")
+           (String.equal
+              (string_value "rounding_mode" contract)
+              "deterministic-binary64-roundTiesToEven")
+       | _ -> failwith ("missing " ^ opcode ^ " profile contract"));
+      (match
+         Profile.validate_for_opcode
+           ~opcode
+           ~profile:"deterministic-fp64-elementwise"
+       with
+       | Ok profile ->
+         check
+           (opcode ^ " deterministic profile accepted")
+           (String.equal profile.Profile.name "deterministic-fp64-elementwise")
+       | Error error -> failwith (Profile.error_message error));
+      (match
+         Profile.validate_for_opcode
+           ~opcode
+           ~profile:"host-fp-local-candidate"
+       with
+       | Error (Profile.Unsupported_opcode_profile { opcode = actual; profile; expected }) ->
+         check (opcode ^ " old host profile opcode") (String.equal actual opcode);
+         check
+           (opcode ^ " old host profile rejected")
+           (String.equal profile "host-fp-local-candidate");
+         check
+           (opcode ^ " old host profile expected")
+           (String.equal expected "deterministic-fp64-elementwise")
+       | Error error -> failwith (Profile.error_message error)
+       | Ok _ -> failwith (opcode ^ " should reject old host profile"));
       match Profile.validate_for_opcode ~opcode ~profile:"q16-exact" with
       | Error (Profile.Unsupported_opcode_profile { opcode = actual; profile; expected }) ->
         check (opcode ^ " overclaim opcode") (String.equal actual opcode);
         check (opcode ^ " overclaim profile") (String.equal profile "q16-exact");
         check
           (opcode ^ " overclaim expected")
-          (String.equal expected "host-fp-local-candidate")
+          (String.equal expected "deterministic-fp64-elementwise")
       | Error error -> failwith (Profile.error_message error)
       | Ok _ -> failwith (opcode ^ " should reject profile overclaim"))
     [
