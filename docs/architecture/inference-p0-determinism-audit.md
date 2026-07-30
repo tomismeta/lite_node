@@ -242,6 +242,7 @@ profile_gate.name
 profile_gate.consensus_status
 profile_gate.local_semantics
 profile_gate.consensus_obligations
+profile_gate.consensus_blocker_codes
 ```
 
 Checker reports also include `profile_gate_count` and
@@ -255,6 +256,8 @@ Passing `--require-consensus-ready` rejects any report with unprofiled,
 are emitted as stable strings in `consensus_ready_gate.blockers`.
 `schema_status` remains the producer/template shape result in both normal and
 strict mode; top-level `status` additionally includes the active readiness gate.
+`consensus_blocker_codes` is the stable, machine-readable list of primitive
+math/profile blockers behind the prose obligations.
 
 `local_semantics` records what the current VM does today.
 `consensus_obligations` records what must become protocol-owned before the

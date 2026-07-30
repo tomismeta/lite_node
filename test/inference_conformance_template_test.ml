@@ -165,6 +165,9 @@ let check_accepts_template () =
            && list_contains_substring
                 "minimum positive subnormal epsilon"
                 (string_list_value "local_semantics" gate)
+           && List.mem
+                "host_fp_sqrt"
+                (string_list_value "consensus_blocker_codes" gate)
          | _ -> false)
     | _ -> failwith "template json must be object"
 
@@ -199,7 +202,17 @@ let check_q1_profile_obligations () =
             "q1 consensus binary16 obligation"
             (list_contains_substring
                "binary16 scale"
-               (string_list_value "consensus_obligations" gate))
+               (string_list_value "consensus_obligations" gate));
+          check
+            "q1 blocker code"
+            (List.mem
+               "binary16_scale_decode"
+               (string_list_value "consensus_blocker_codes" gate));
+          check
+            "q1 host fp blocker code"
+            (List.mem
+               "host_fp_multiply_add"
+               (string_list_value "consensus_blocker_codes" gate))
         | _ -> failwith "missing q1 profile gate")
      | _ -> failwith "template json must be object")
 
@@ -289,6 +302,9 @@ let check_p0_profile_gate_coverage () =
       check
         (opcode ^ " consensus obligations present")
         (consensus_obligations <> []);
+      check
+        (opcode ^ " consensus blocker codes present")
+        (string_list_value "consensus_blocker_codes" gate <> []);
       check
         (opcode ^ " consensus obligations are specific")
         (not

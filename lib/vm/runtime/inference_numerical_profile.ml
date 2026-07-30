@@ -455,6 +455,87 @@ let consensus_obligations ~opcode =
       "write primitive-specific deterministic math obligations before promotion";
     ]
 
+let consensus_blocker_codes ~opcode =
+  match opcode with
+  | "LOAD_F32_LE_FP"
+  | "LOAD_F64_LE_FP" ->
+    [
+      "float_byte_decode";
+      "finite_rejection";
+      "authenticated_range_binding";
+      "atomic_writeback";
+      "cross_platform_conformance";
+    ]
+  | "LINEAR_Q1_G128_FP" ->
+    [
+      "binary16_scale_decode";
+      "q1_sign_mapping";
+      "host_fp_multiply_add";
+      "accumulation_order";
+      "finite_overflow_policy";
+      "atomic_writeback";
+      "cross_platform_conformance";
+    ]
+  | "RMSNORM_FP_EPS" ->
+    [
+      "epsilon_bit_interpretation";
+      "host_fp_reduction";
+      "host_fp_sqrt";
+      "host_fp_divide_multiply";
+      "signed_zero_subnormal_policy";
+      "alias_rejection";
+      "atomic_writeback";
+      "cross_platform_conformance";
+    ]
+  | "L2NORM_FP" ->
+    [
+      "epsilon_bit_interpretation";
+      "host_fp_reduction";
+      "host_fp_sqrt";
+      "host_fp_divide";
+      "signed_zero_subnormal_policy";
+      "atomic_writeback";
+      "cross_platform_conformance";
+    ]
+  | "SOFTMAX_FP" ->
+    [
+      "host_fp_comparison";
+      "host_fp_exp";
+      "host_fp_reduction";
+      "host_fp_divide";
+      "probability_ordering";
+      "overlap_policy";
+      "cross_platform_conformance";
+    ]
+  | "GATED_DELTA_RULE_FP" ->
+    [
+      "host_fp_recurrence";
+      "state_transition_order";
+      "host_fp_dot_product";
+      "host_fp_exp_sqrt";
+      "alias_rejection";
+      "atomic_writeback";
+      "cross_platform_conformance";
+    ]
+  | opcode ->
+    match current_runtime_profile ~opcode with
+    | Some "host-fp-local-candidate" ->
+      [
+        "host_fp_arithmetic";
+        "edge_value_policy";
+        "atomic_writeback";
+        "cross_platform_conformance";
+      ]
+    | Some "byte-ingress-exact" ->
+      [
+        "float_byte_decode";
+        "finite_rejection";
+        "authenticated_range_binding";
+        "atomic_writeback";
+        "cross_platform_conformance";
+      ]
+    | _ -> []
+
 let to_json profile =
   `Assoc [
     "name", `String profile.name;
@@ -481,5 +562,10 @@ let to_json_for_opcode ~opcode profile =
            (List.map
               (fun value -> `String value)
               (consensus_obligations ~opcode));
+         "consensus_blocker_codes",
+         `List
+           (List.map
+              (fun value -> `String value)
+              (consensus_blocker_codes ~opcode));
        ])
   | value -> value
