@@ -502,29 +502,54 @@ let check_p0_profile_gate_coverage () =
 let check_inference_profile_surface_coverage () =
   let surface =
     [
-      "LOAD_F32_LE_FP", "byte-ingress-exact", "consensus_candidate";
-      "LOAD_F64_LE_FP", "byte-ingress-exact", "consensus_candidate";
-      "LINEAR_Q1_G128_FP", "deterministic-q1-g128-fp64-linear", "consensus_candidate";
-      "SIGMOID_FP", "host-fp-exp-local-candidate", "local_only";
-      "SOFTPLUS_FP", "host-fp-exp-local-candidate", "local_only";
-      "SILU_FP", "host-fp-exp-local-candidate", "local_only";
-      "CAUSAL_DEPTHWISE_CONV1D_FP", "deterministic-fp64-accumulation", "consensus_candidate";
-      "GATED_DELTA_RULE_FP", "host-fp-exp-local-candidate", "local_only";
-      "RMSNORM_FP_EPS", "deterministic-fp64-normalization", "consensus_candidate";
-      "L2NORM_FP", "deterministic-fp64-normalization", "consensus_candidate";
-      "ELEMWISE_MUL_FP", "deterministic-fp64-elementwise", "consensus_candidate";
-      "RESIDUAL_ADD_FP", "deterministic-fp64-elementwise", "consensus_candidate";
-      "ROPE_APPLY_INDEXED_FP", "host-fp-trig-local-candidate", "local_only";
-      "ATTENTION_SCORES_FP", "deterministic-fp64-accumulation", "consensus_candidate";
-      "SOFTMAX_FP", "host-fp-exp-local-candidate", "local_only";
-      "ATTENTION_WEIGHTED_SUM_FP", "deterministic-fp64-accumulation", "consensus_candidate";
-      "ARGMAX_FP", "deterministic-fp64-comparison", "consensus_candidate";
+      "LOAD_F32_LE_FP", "byte-ingress-exact", "consensus_candidate",
+      "ec3f31d8a2cc8c4f390c372c6d489e5e3418b544967285e24efbb6aef65cacc2";
+      "LOAD_F64_LE_FP", "byte-ingress-exact", "consensus_candidate",
+      "d9c2a61f7e058320bef47cd240c6193b2c3b00426ce50ee61556b41779da0c45";
+      "LINEAR_Q1_G128_FP", "deterministic-q1-g128-fp64-linear",
+      "consensus_candidate",
+      "d6ff86c8d50f24ba3313a73b03e4348cc8ba8c76e8759ada6cdb3b81c731b835";
+      "SIGMOID_FP", "host-fp-exp-local-candidate", "local_only",
+      "7fdfb04d5c91a7f2b5e80e88c753eb4c16a5d302d52d25374bdccc8cada5bd24";
+      "SOFTPLUS_FP", "host-fp-exp-local-candidate", "local_only",
+      "33dbffcb96885c65c1f91b55442e0883541f4867d8eee4d76dd4559ed7d72423";
+      "SILU_FP", "host-fp-exp-local-candidate", "local_only",
+      "be07fd30c1a90dda2ea4aafaaa3f938749af5fe04bcd4b75f4b7852a525ff854";
+      "CAUSAL_DEPTHWISE_CONV1D_FP", "deterministic-fp64-accumulation",
+      "consensus_candidate",
+      "df645d83fe5fa0e32a7d5349b9b230de9002c0a980e32eb3d6582852fa05d545";
+      "GATED_DELTA_RULE_FP", "host-fp-exp-local-candidate", "local_only",
+      "aeed9783cd2d88b8078aa66f154a658d609c31bed048fcd05259264f152f4225";
+      "RMSNORM_FP_EPS", "deterministic-fp64-normalization",
+      "consensus_candidate",
+      "a77dc41d33540e3c6872f830b4c0df1280d23ea9f0a8e1ff2273039c23fe88f9";
+      "L2NORM_FP", "deterministic-fp64-normalization",
+      "consensus_candidate",
+      "dacd9b51945432a4e025510c67edc28c65706de345c5770c2d0a2da4ab396875";
+      "ELEMWISE_MUL_FP", "deterministic-fp64-elementwise",
+      "consensus_candidate",
+      "e2d242453af8bc36fb42d0083c97d3cffff38d9ad1c4c364385e52b84cb898d3";
+      "RESIDUAL_ADD_FP", "deterministic-fp64-elementwise",
+      "consensus_candidate",
+      "a1d1bc7242bcca11b31395d8313b552eec80e5174651637df0690adec41cd32f";
+      "ROPE_APPLY_INDEXED_FP", "host-fp-trig-local-candidate", "local_only",
+      "a36d7dad881a763dab58fdd62b12a3ba7adddcc021c979d86372583559f0a0f4";
+      "ATTENTION_SCORES_FP", "deterministic-fp64-accumulation",
+      "consensus_candidate",
+      "20bfb100d037cb05d3208ed6c35bb36deae747ff2aa9fc1ac78f1078f19b56e5";
+      "SOFTMAX_FP", "host-fp-exp-local-candidate", "local_only",
+      "490d7d3e871e3cecfdeeeebba26ee85c0689fb5cba0801f5aeb0a4f6e10561cc";
+      "ATTENTION_WEIGHTED_SUM_FP", "deterministic-fp64-accumulation",
+      "consensus_candidate",
+      "31ccd36c648f33a0d1adabed83db830100090a49ad956a625cc53be21d2bc3fd";
+      "ARGMAX_FP", "deterministic-fp64-comparison", "consensus_candidate",
+      "0b48c255fab38cd3a3ffe3fc57ab626532bafa3b54ffd690d4582625c58f1b42";
     ]
   in
   check "inference profile surface count" (List.length surface = 17);
   let gates =
     List.map
-      (fun (opcode, expected_profile, expected_status) ->
+      (fun (opcode, expected_profile, expected_status, expected_root) ->
          (match Profile.current_runtime_profile ~opcode with
           | Some actual ->
             check
@@ -541,6 +566,9 @@ let check_inference_profile_surface_coverage () =
          check
            (opcode ^ " gate status")
            (String.equal (string_value "consensus_status" gate) expected_status);
+         check
+           (opcode ^ " gate profile root")
+           (String.equal (string_value "profile_root" gate) expected_root);
          check
            (opcode ^ " local semantics present")
            (string_list_value "local_semantics" gate <> []);

@@ -274,7 +274,9 @@ parsing every template body. The conformance-template test also pins every
 currently admitted inference runtime opcode to an explicit profile bucket. The
 current surface has seventeen profiled opcodes: eleven `consensus_candidate`
 gates and six `local_only` gates. No current inference opcode may fall back
-silently to the generic `host-fp-local-candidate` bucket. The companion
+silently to the generic `host-fp-local-candidate` bucket. The same test pins
+each opcode's current `profile_root`, so profile-contract changes require an
+intentional reviewed root update rather than quiet fixture churn. The companion
 `profile_consensus_status_counts` object summarizes how many present profile
 gates are `local_only`, `consensus_candidate`, `consensus_ready`, or unknown.
 Unknown covers malformed gates or unrecognized `consensus_status` values.
