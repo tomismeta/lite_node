@@ -341,6 +341,12 @@ floating-point math in the admitted compute path. They still are not
 consensus-ready until profile roots, independent scalar-oracle coverage, and
 cross-platform conformance are bound.
 
+The shared finite binary64 helper is covered by a dedicated
+`inference_fp64_test` edge-vector test. Primitive tests continue to cover their
+own layout, aliasing, effort, and atomicity rules, while common add, multiply,
+divide, square-root, and comparison behavior is checked once at the math
+substrate boundary.
+
 ## Current Positive Execution Gate
 
 Status on 2026-07-30, using the effort-authority artifact:

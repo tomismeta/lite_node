@@ -23,7 +23,6 @@ module Plan = Octra_vm.Inference_plan
 module Program_effects = Octra_vm.Program_effects
 module Req = Octra_vm.Execution_requirement
 module Request = Octra_vm.Inference_request
-module Fp64 = Octra_vm.Inference_fp64
 module Store = Octra_vm.Inference_store
 module Target = Octra_vm.Inference_target
 module VM = Octra_vm.Contract_vm
@@ -218,110 +217,6 @@ let check_fp16_scale_decode_exhaustive () =
   done;
   check "fp16 finite encoding count" (!finite = 63488);
   check "fp16 rejected encoding count" (!rejected = 2048)
-
-let expect_bits label actual expected =
-  match actual with
-  | Some bits -> check label (Int64.equal bits expected)
-  | None -> failwith (label ^ " returned non-finite")
-
-let expect_compare label actual expected =
-  match actual with
-  | Some value -> check label (value = expected)
-  | None -> failwith (label ^ " returned non-finite")
-
-let check_fp64_core_edges () =
-  let bits value = Int64.bits_of_float value in
-  expect_bits "fp64 int conversion"
-    (Fp64.of_int 3)
-    (bits 3.0);
-  expect_bits "fp64 add min-subnormal"
-    (Fp64.add 1L 1L)
-    2L;
-  expect_bits "fp64 mul underflow tie to even"
-    (Fp64.mul 1L (bits 0.5))
-    0L;
-  expect_bits "fp64 mul finite"
-    (Fp64.mul (bits 1.5) (bits 2.0))
-    (bits 3.0);
-  expect_bits "fp64 div finite"
-    (Fp64.div (bits 3.0) (bits 2.0))
-    (bits 1.5);
-  expect_bits "fp64 div one third"
-    (Fp64.div (bits 1.0) (bits 3.0))
-    (bits (1.0 /. 3.0));
-  expect_bits "fp64 div signed zero"
-    (Fp64.div Int64.min_int (bits 2.0))
-    Int64.min_int;
-  expect_bits "fp64 div min-subnormal underflow tie to even"
-    (Fp64.div 1L (bits 2.0))
-    0L;
-  List.iter
-    (fun (label, left, right) ->
-       expect_bits
-         ("fp64 div " ^ label)
-         (Fp64.div (bits left) (bits right))
-         (bits (left /. right)))
-    [
-      "negative third", -1.0, 3.0;
-      "min normal to subnormal", Float.min_float, 2.0;
-      "min normal by half", Float.min_float, 0.5;
-      "max by max", Float.max_float, Float.max_float;
-      "one by max", 1.0, Float.max_float;
-      "negative zero by negative", -0.0, -2.0;
-    ];
-  expect_bits "fp64 positive zero plus negative zero"
-    (Fp64.add 0L Int64.min_int)
-    0L;
-  expect_bits "fp64 negative zero plus negative zero"
-    (Fp64.add Int64.min_int Int64.min_int)
-    Int64.min_int;
-  check "fp64 add overflow rejects"
-    (Fp64.add 0x7fefffffffffffffL 0x7fefffffffffffffL = None);
-  check "fp64 mul overflow rejects"
-    (Fp64.mul 0x7fefffffffffffffL (bits 2.0) = None);
-  check "fp64 div by zero rejects"
-    (Fp64.div (bits 1.0) 0L = None);
-  check "fp64 div overflow rejects"
-    (Fp64.div 0x7fefffffffffffffL (bits 0.5) = None);
-  expect_bits "fp64 sqrt four"
-    (Fp64.sqrt (bits 4.0))
-    (bits 2.0);
-  expect_bits "fp64 sqrt two"
-    (Fp64.sqrt (bits 2.0))
-    (bits (sqrt 2.0));
-  expect_bits "fp64 sqrt positive zero"
-    (Fp64.sqrt 0L)
-    0L;
-  expect_bits "fp64 sqrt negative zero"
-    (Fp64.sqrt Int64.min_int)
-    Int64.min_int;
-  expect_bits "fp64 sqrt min-subnormal"
-    (Fp64.sqrt 1L)
-    (bits (sqrt (Int64.float_of_bits 1L)));
-  expect_bits "fp64 sqrt max finite"
-    (Fp64.sqrt 0x7fefffffffffffffL)
-    (bits (sqrt Float.max_float));
-  check "fp64 sqrt negative finite rejects"
-    (Fp64.sqrt (bits (-1.0)) = None);
-  check "fp64 sqrt non-finite rejects"
-    (Fp64.sqrt 0x7ff0000000000000L = None);
-  expect_compare "fp64 compare equal zeros"
-    (Fp64.compare 0L Int64.min_int)
-    0;
-  expect_compare "fp64 compare min-subnormal greater zero"
-    (Fp64.compare 1L 0L)
-    1;
-  expect_compare "fp64 compare negative subnormal less negative zero"
-    (Fp64.compare (Int64.logor Int64.min_int 1L) Int64.min_int)
-    (-1);
-  expect_compare "fp64 compare max finite greater one"
-    (Fp64.compare 0x7fefffffffffffffL (bits 1.0))
-    1;
-  expect_compare "fp64 compare negative order"
-    (Fp64.compare (bits (-2.0)) (bits (-1.0)))
-    (-1);
-  check "fp64 compare non-finite rejects"
-    (Fp64.compare 0x7ff0000000000000L (bits 1.0) = None)
 
 let check_golden_fixture () =
   let input = f64_bytes input_values in
@@ -782,7 +677,6 @@ let check_fload_session () =
 let () =
   check_golden_fixture ();
   check_fp16_scale_decode_exhaustive ();
-  check_fp64_core_edges ();
   check_sign_and_scale_edges ();
   check_accumulation_order_stress ();
   check_output_overflow_reverts ();

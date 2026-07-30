@@ -9,6 +9,11 @@
  (libraries octra_vm inference_test_support digestif digestif.c))
 
 (test
+ (name inference_fp64_test)
+ (modules inference_fp64_test)
+ (libraries octra_vm))
+
+(test
  (name f32_load_primitive_test)
  (modules f32_load_primitive_test)
  (libraries octra_vm inference_test_support digestif digestif.c))
