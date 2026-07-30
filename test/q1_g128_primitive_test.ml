@@ -157,6 +157,30 @@ let q1_state
   set_f64_memory state lhs input;
   state, dst, lhs
 
+let q1_block scale sign_bytes =
+  scale ^ sign_bytes
+
+let one_block_state q1 =
+  let state =
+    VM.create_state
+      ~limit:1_000_000
+      ~caller:"caller"
+      ~origin:"origin"
+      ~address:"contract"
+      ~value:Z.zero
+      ~storage:(Hashtbl.create 0)
+      ()
+  in
+  set_int_reg state 0 10000;
+  set_int_reg state 1 20000;
+  state.VM.regs.(2) <- VM.VString q1;
+  set_int_reg state 3 0;
+  set_int_reg state 4 1;
+  set_int_reg state 5 128;
+  set_int_reg state 6 1;
+  set_f64_memory state 20000 (List.init 128 (fun _ -> 1.0));
+  state
+
 let check_golden_fixture () =
   let input = f64_bytes input_values in
   check
@@ -178,6 +202,31 @@ let check_golden_fixture () =
     (String.equal
        (sha256 output)
        "43411283d083bd6e959bca6aa7edbebc55d8ad251510d992bd52046ac71d9d22")
+
+let check_sign_and_scale_edges () =
+  let scale_one = "\000\060" in
+  let scale_minus_one = "\000\188" in
+  List.iter
+    (fun (name, q1, expected) ->
+      let state = one_block_state q1 in
+      check (name ^ " runs") (VM.run state q1_code);
+      check
+        (name ^ " output")
+        (output_bytes state 10000 1 = f64_bytes [expected]))
+    [
+      "all positive signs",
+      q1_block scale_one (String.make 16 '\255'),
+      128.0;
+      "all negative signs",
+      q1_block scale_one (String.make 16 '\000'),
+      -128.0;
+      "negative scale",
+      q1_block scale_minus_one (String.make 16 '\255'),
+      -128.0;
+      "balanced signs",
+      q1_block scale_one (String.make 8 '\255' ^ String.make 8 '\000'),
+      0.0;
+    ]
 
 let check_profiled_run_equivalence () =
   let state, dst, _ = q1_state () in
@@ -520,6 +569,7 @@ let check_fload_session () =
 
 let () =
   check_golden_fixture ();
+  check_sign_and_scale_edges ();
   check_profiled_run_equivalence ();
   check_invalid_input_reverts ();
   check_bad_q1_reverts ();

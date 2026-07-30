@@ -162,6 +162,14 @@ let single_expected_epsilon_1e_5 =
   bytes_of_hex
     "289c3e41965ec73f1ef5eeb0f086f1bf1ef5eeb0f086f1bf289c3e41965e07c0"
 
+let signed_zero_subnormal_input =
+  bytes_of_hex
+    "0000000000000000000000000000008001000000000000000100000000000080"
+
+let signed_zero_subnormal_gamma =
+  bytes_of_hex
+    "000000000000f03f000000000000f03f000000000000f03f000000000000f03f"
+
 let l2_single_input =
   bytes_of_hex
     "0000000000000840000000000000104000000000000000000000000000000000"
@@ -207,6 +215,15 @@ let single_epsilon_1e_5 = {
   expected = single_expected_epsilon_1e_5;
 }
 
+let signed_zero_subnormal = {
+  name = "signed zero and subnormal";
+  count = 4;
+  epsilon_bits = Int64.bits_of_float 1.0;
+  input = signed_zero_subnormal_input;
+  gamma = signed_zero_subnormal_gamma;
+  expected = signed_zero_subnormal_input;
+}
+
 let rms_op =
   VM.RMSNORM_FP_EPS (0, 1, 2, 3)
 
@@ -241,6 +258,15 @@ let check_rms_golden () =
       check (fixture.name ^ " succeeds") (VM.run state rms_code);
       check_cells fixture.name state 100 (fixture_bits fixture.expected))
     [single_model_epsilon; single_epsilon_1e_5]
+
+let check_rms_signed_zero_and_subnormal () =
+  let state = make_rms_state signed_zero_subnormal in
+  check "rms signed zero and subnormal succeeds" (VM.run state rms_code);
+  check_cells
+    "rms signed zero and subnormal"
+    state
+    100
+    (fixture_bits signed_zero_subnormal.expected)
 
 let check_rms_row_composition () =
   let state =
@@ -748,19 +774,19 @@ let check_epsilon_type_flow () =
     Array.copy rms_admission_code
   in
   code.(4) <- VM.LDI (3, VM.VU64 (Z.of_int64 model_epsilon_bits));
-  match
-    Admission.of_inference_code_with_requirement
-      ~support:(support [cap])
-      ~requirement:(requirement [cap])
-      code
-  with
-  | Error (Admission.Verify_error message) ->
-    check
-      "unsigned epsilon carrier rejected by type flow"
-      (starts_with
-         "Program type flow: expected int in r3 at pc 5, got u64"
-         message)
-  | _ -> failwith "expected epsilon type-flow rejection";
+  (match
+     Admission.of_inference_code_with_requirement
+       ~support:(support [cap])
+       ~requirement:(requirement [cap])
+       code
+   with
+   | Error (Admission.Verify_error message) ->
+     check
+       "unsigned epsilon carrier rejected by type flow"
+       (starts_with
+          "Program type flow: expected int in r3 at pc 5, got u64"
+          message)
+   | _ -> failwith "expected epsilon type-flow rejection");
   let code =
     Array.copy l2_admission_code
   in
@@ -921,6 +947,7 @@ let check_full_binding_if_available () =
 
 let () =
   check_rms_golden ();
+  check_rms_signed_zero_and_subnormal ();
   check_rms_row_composition ();
   check_rms_missing_and_nonfinite_revert ();
   check_rms_invalid_epsilon_reverts ();
