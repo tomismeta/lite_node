@@ -162,6 +162,59 @@ let profile_gate_present = function
      | Some _ -> true)
   | _ -> false
 
+type profile_status_counts = {
+  local_only : int;
+  consensus_candidate : int;
+  consensus_ready : int;
+  unknown : int;
+}
+
+let empty_profile_status_counts = {
+  local_only = 0;
+  consensus_candidate = 0;
+  consensus_ready = 0;
+  unknown = 0;
+}
+
+let profile_gate_status = function
+  | `Assoc fields ->
+    let gate_fields =
+      match field "profile_gate" fields with
+      | Some (`Assoc gate) -> Some gate
+      | Some `Null -> None
+      | _ -> Some fields
+    in
+    (match gate_fields with
+     | Some gate ->
+       (match field "consensus_status" gate with
+        | Some (`String value) -> Some value
+        | _ -> None)
+     | None -> None)
+  | _ -> None
+
+let add_profile_status counts value =
+  match profile_gate_status value with
+  | Some "local_only" ->
+    { counts with local_only = counts.local_only + 1 }
+  | Some "consensus_candidate" ->
+    { counts with consensus_candidate = counts.consensus_candidate + 1 }
+  | Some "consensus_ready" ->
+    { counts with consensus_ready = counts.consensus_ready + 1 }
+  | Some _ ->
+    { counts with unknown = counts.unknown + 1 }
+  | None -> counts
+
+let profile_status_counts values =
+  List.fold_left add_profile_status empty_profile_status_counts values
+
+let profile_status_counts_json counts =
+  `Assoc [
+    "local_only", `Int counts.local_only;
+    "consensus_candidate", `Int counts.consensus_candidate;
+    "consensus_ready", `Int counts.consensus_ready;
+    "unknown", `Int counts.unknown;
+  ]
+
 let result_profile_gate_count result =
   if profile_gate_present result then 1 else 0
 
@@ -1076,6 +1129,19 @@ let run_p0_plus_pack path =
       0
       results
   in
+  let status_counts =
+    List.fold_left
+      (fun counts (_, result) ->
+         match result with
+         | `Assoc fields ->
+           (match field "profile_gates" fields with
+            | Some (`List gates) ->
+              List.fold_left add_profile_status counts gates
+            | _ -> counts)
+         | _ -> counts)
+      empty_profile_status_counts
+      results
+  in
   `Assoc [
     "status", `String (if accepted then "accepted" else "rejected");
     "diagnostic_only", `Bool true;
@@ -1086,6 +1152,8 @@ let run_p0_plus_pack path =
     "rejected_count",
     `Int (List.length (List.filter (fun (ok, _) -> not ok) results));
     "profile_gate_count", `Int profile_gate_count;
+    "profile_consensus_status_counts",
+    profile_status_counts_json status_counts;
     "results", `List (List.map snd results);
   ]
 
@@ -1111,6 +1179,9 @@ let run_index path =
       0
       results
   in
+  let status_counts =
+    profile_status_counts (List.map snd results)
+  in
   `Assoc [
     "status", `String status;
     "diagnostic_only", `Bool true;
@@ -1120,6 +1191,8 @@ let run_index path =
     "profile_gate_count", `Int profile_gate_count;
     "unprofiled_template_count",
     `Int (List.length results - profile_gate_count);
+    "profile_consensus_status_counts",
+    profile_status_counts_json status_counts;
     "accepted_count",
     `Int (List.length (List.filter fst results));
     "rejected_count",

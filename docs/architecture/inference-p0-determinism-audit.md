@@ -102,7 +102,9 @@ declared output span. The saved LiteNode reports live beside the indexes as
 `litenode-positive-execution-report.cjson`.
 Positive execution reports also include `profile_gate_count` and
 `unprofiled_template_count` so an accepted VM run can be audited for profile
-coverage without walking every per-template result.
+coverage without walking every per-template result. They also include
+`profile_consensus_status_counts`, which should remain `local_only` for the
+current host-FP P0 math until a deterministic runtime profile lands.
 
 Failure/atomicity mode is available for definitive rejection cases:
 
@@ -239,7 +241,9 @@ profile_gate.consensus_obligations
 
 Checker reports also include `profile_gate_count` and
 `unprofiled_template_count` so producer indexes, single templates, and template
-directories can be audited without parsing every template body.
+directories can be audited without parsing every template body. The companion
+`profile_consensus_status_counts` object summarizes how many present profile
+gates are `local_only`, `consensus_candidate`, `consensus_ready`, or unknown.
 
 `local_semantics` records what the current VM does today.
 `consensus_obligations` records what must become protocol-owned before the
@@ -402,8 +406,9 @@ composition. `ARGMAX_FP` only returns the selected index, so producer top-k
 ordering manifests are preserved as `producer_only` evidence. The explicit
 P0-plus runner now reports per-fixture `profile_gates` plus an aggregate
 `profile_gate_count`; the composite logits-tail case reports the component
-profiles for `RMSNORM_FP_EPS`, `LINEAR_Q1_G128_FP`, and `ARGMAX_FP`. The
-explicit top-k boundary is:
+profiles for `RMSNORM_FP_EPS`, `LINEAR_Q1_G128_FP`, and `ARGMAX_FP`. Its
+`profile_consensus_status_counts` should also remain `local_only` for the
+current host-FP pack. The explicit top-k boundary is:
 
 LiteNode now reports `ARGMAX_FP` under the current `host-fp-local-candidate`
 runtime profile. Its local semantics are finite binary64 input reads,
