@@ -16,6 +16,7 @@ module VM = Octra_vm.Contract_vm
 
 let template_index = ref None
 let strict_effort = ref false
+let include_failures = ref false
 
 let fail message =
   prerr_endline message;
@@ -28,10 +29,14 @@ let args = [
   "--strict-effort",
   Arg.Set strict_effort,
   "fail when observed VM effort differs from expected_effort";
+  "--include-failures",
+  Arg.Set include_failures,
+  "execute definitive failure/atomicity cases where the direct VM runner can";
 ]
 
 let usage =
-  "inference_conformance_run --template-index <path> [--strict-effort]"
+  "inference_conformance_run --template-index <path> [--strict-effort] \
+   [--include-failures]"
 
 let read_file path =
   let input = open_in_bin path in
@@ -64,6 +69,17 @@ let int_field name fields =
   match field name fields with
   | Some (`Int value) -> value
   | Some (`Intlit value) -> int_of_string value
+  | _ -> fail ("missing int field: " ^ name)
+
+let z_of_unsigned_i64_string value =
+  let z = Z.of_string value in
+  let max_i64 = Z.of_int64 Int64.max_int in
+  if Z.gt z max_i64 then Z.sub z (Z.shift_left Z.one 64) else z
+
+let z_field name fields =
+  match field name fields with
+  | Some (`Int value) -> Z.of_int value
+  | Some (`Intlit value) -> z_of_unsigned_i64_string value
   | _ -> fail ("missing int field: " ^ name)
 
 let assoc_field name fields =
@@ -154,9 +170,9 @@ let output_bytes state base cells =
   done;
   Bytes.to_string raw
 
-let state () =
+let state ?(limit = 1_000_000_000) () =
   VM.create_state
-    ~limit:1_000_000_000
+    ~limit
     ~strict_values:true
     ~caller:"caller"
     ~origin:"origin"
@@ -168,6 +184,9 @@ let state () =
 let set_int_reg state reg value =
   state.VM.regs.(reg) <- VM.VInt (Z.of_int value)
 
+let set_z_reg state reg value =
+  state.VM.regs.(reg) <- VM.VInt value
+
 let set_raw_reg state reg raw =
   state.VM.regs.(reg) <- VM.VString raw
 
@@ -177,9 +196,16 @@ let value_for name values =
 let reg_for name registers =
   register_index (string_field name registers)
 
+type input_binding = {
+  input_name : string;
+  base : int;
+  cells : int option;
+  raw_register : int option;
+}
+
 let load_inputs root_dir state fields registers =
   list_field "input_memory_ranges" fields
-  |> List.iter (function
+  |> List.map (function
     | `Assoc range_fields ->
       let name = string_field "name" range_fields in
       let source = assoc_field "source" range_fields in
@@ -206,11 +232,15 @@ let load_inputs root_dir state fields registers =
              expected_sha
              actual_sha);
       let memory = assoc_field "vm_memory" range_fields in
+      let base = int_field "base_address" memory in
       (match opt_int_field "length_f64_cells" memory with
        | Some cells ->
-         set_f64le state (int_field "base_address" memory) cells raw
+         set_f64le state base cells raw;
+         { input_name = name; base; cells = Some cells; raw_register = None }
        | None ->
-         set_raw_reg state (reg_for name registers) raw)
+         let raw_register = reg_for name registers in
+         set_raw_reg state raw_register raw;
+         { input_name = name; base; cells = None; raw_register = Some raw_register })
     | _ -> fail "input_memory_ranges entries must be objects")
 
 let set_registers state registers values =
@@ -222,11 +252,136 @@ let set_registers state registers values =
          | _ -> fail ("register binding must be a string: " ^ name)
        in
        match field name values with
-       | Some (`Int value) -> set_int_reg state reg value
-       | Some (`Intlit value) -> set_int_reg state reg (int_of_string value)
+       | Some (`Int _)
+       | Some (`Intlit _) -> set_z_reg state reg (z_field name values)
        | None -> ()
        | _ -> fail ("register value must be an int: " ^ name))
     registers
+
+let find_input name inputs =
+  match List.find_opt (fun input -> String.equal input.input_name name) inputs with
+  | Some input -> input
+  | None -> fail ("unknown input target: " ^ name)
+
+let set_f64_cell_bits state addr bits =
+  Hashtbl.replace state.VM.memory.data addr (VM.VInt bits)
+
+let hex_value = function
+  | '0'..'9' as c -> Char.code c - Char.code '0'
+  | 'a'..'f' as c -> 10 + Char.code c - Char.code 'a'
+  | 'A'..'F' as c -> 10 + Char.code c - Char.code 'A'
+  | c -> fail (Printf.sprintf "invalid hex: %c" c)
+
+let bytes_of_hex value =
+  let compact =
+    value
+    |> String.to_seq
+    |> Seq.filter (function ' ' | '\n' | '\r' | '\t' -> false | _ -> true)
+    |> String.of_seq
+  in
+  if String.length compact mod 2 <> 0 then fail "odd hex length";
+  String.init (String.length compact / 2) (fun index ->
+    Char.chr
+      ((hex_value compact.[index * 2] lsl 4)
+       lor hex_value compact.[(index * 2) + 1]))
+
+let replace_raw_prefix state reg replacement =
+  match state.VM.regs.(reg) with
+  | VM.VString raw ->
+    if String.length raw < String.length replacement then
+      fail "raw range too short for mutation";
+    let bytes = Bytes.of_string raw in
+    String.iteri (fun index char -> Bytes.set bytes index char) replacement;
+    state.VM.regs.(reg) <- VM.VString (Bytes.to_string bytes)
+  | _ -> fail "mutation target is not raw bytes"
+
+let float_bits value =
+  Z.of_int64 (Int64.bits_of_float value)
+
+let apply_mutation state registers values inputs mutation =
+  match mutation with
+  | `Assoc fields ->
+    let name = string_field "mutation" fields in
+    let target = string_field "target" fields in
+    (match name with
+     | "replace_first_f64_input_cell" ->
+       let input = find_input target inputs in
+       set_f64_cell_bits state input.base (z_field "value_bits" fields);
+       `Executed
+     | "replace_all_score_cells" ->
+       let input = find_input target inputs in
+       let cells =
+         match input.cells with
+         | Some cells -> cells
+         | None -> fail "score mutation target must be f64 cells"
+       in
+       let bits = z_field "value_bits" fields in
+       for index = 0 to cells - 1 do
+         set_f64_cell_bits state (input.base + index) bits
+       done;
+       `Executed
+     | "replace_scores_with_large_finite_values" ->
+       let input = find_input target inputs in
+       let values_json = list_field "values_decimal" fields in
+       let values =
+         List.map
+           (function
+             | `String value -> float_of_string value
+             | _ -> fail "values_decimal entries must be strings")
+           values_json
+       in
+       List.iteri
+         (fun index value -> set_f64_cell_bits state (input.base + index) (float_bits value))
+         values;
+       `Executed
+     | "set_count_to_zero" ->
+       set_int_reg state (reg_for "count" registers) 0;
+       `Executed
+     | "set_epsilon_bits" ->
+       set_z_reg state (reg_for "epsilon_bits" registers) (z_field "value_bits" fields);
+       `Executed
+     | "set_scalar_param" ->
+       let param =
+         match List.rev (String.split_on_char '.' target) with
+         | param :: _ -> param
+         | [] -> fail "bad scalar mutation target"
+       in
+       set_int_reg state (reg_for param registers) (int_field "value" fields);
+       `Executed
+     | "set_state_dst_to_output_base" ->
+       set_int_reg
+         state
+         (reg_for "state_dst" registers)
+         (value_for "output" values);
+       `Executed
+     | "set_output_base_to_first_input_base" ->
+       let first =
+         match inputs with
+         | input :: _ -> input
+         | [] -> fail "no inputs available for alias mutation"
+       in
+       let output_param =
+         if List.mem_assoc "dst" registers then Some "dst"
+         else if List.mem_assoc "output" registers then Some "output"
+         else if List.mem_assoc "addr" registers then Some "addr"
+         else None
+       in
+       (match output_param with
+        | Some param -> set_int_reg state (reg_for param registers) first.base
+        | None -> ());
+       `Executed
+     | "replace_q1_scale_bits" ->
+       let input = find_input "q1_owner" inputs in
+       (match input.raw_register with
+        | Some reg ->
+          replace_raw_prefix state reg (bytes_of_hex (string_field "value_hex_le" fields));
+          `Executed
+        | None -> fail "q1_owner must be raw bytes")
+     | "truncate_input_manifest" -> `Ingress_rejected
+     | "lower_effort_limit" ->
+       `Executed
+     | _ -> fail ("unsupported mutation: " ^ name))
+  | _ -> fail "mutation must be an object"
 
 let op_linear registers =
   VM.LINEAR_Q1_G128_FP
@@ -307,6 +462,123 @@ let subspan_result state value =
     ]
   | _ -> fail "output subspan must be an object"
 
+let starts_with prefix value =
+  String.length value >= String.length prefix
+  && String.sub value 0 (String.length prefix) = prefix
+
+let span_fields value =
+  match value with
+  | `Assoc fields -> fields
+  | _ -> fail "span must be an object"
+
+let seed_span_if_missing state base cells =
+  for index = 0 to cells - 1 do
+    if not (Hashtbl.mem state.VM.memory.data (base + index)) then
+      set_f64_cell_bits
+        state
+        (base + index)
+        (float_bits (42.0 +. float_of_int index))
+  done
+
+let capture_span state span =
+  let fields = span_fields span in
+  let name = string_field "name" fields in
+  let base = int_field "base_address" fields in
+  let cells = int_field "length_f64_cells" fields in
+  seed_span_if_missing state base cells;
+  name, base, cells, output_bytes state base cells
+
+let unchanged_result state (name, base, cells, before) =
+  let after = output_bytes state base cells in
+  let matched = String.equal before after in
+  matched,
+  `Assoc [
+    "name", `String name;
+    "base_address", `Int base;
+    "length_f64_cells", `Int cells;
+    "before_sha256", `String (sha256 before);
+    "after_sha256", `String (sha256 after);
+    "unchanged", `Bool matched;
+  ]
+
+let failure_expectation expected =
+  if starts_with "reject_before_write" expected then `Must_reject
+  else if starts_with "reject_or_documented_safe_copy" expected then `Observation
+  else `Observation
+
+let failure_case_result root_dir opcode template registers values op case =
+  match case with
+  | `Assoc fields ->
+    let case_name = string_field "case" fields in
+    let expected = string_field "expected" fields in
+    let mutations = list_field "executable_mutations" fields in
+    let effort_limit =
+      List.fold_left
+        (fun limit mutation ->
+           match mutation with
+           | `Assoc mutation_fields
+             when String.equal
+                    (string_field "mutation" mutation_fields)
+                    "lower_effort_limit" ->
+             int_field "value" mutation_fields
+           | _ -> limit)
+        1_000_000_000
+        mutations
+    in
+    let state = state ~limit:effort_limit () in
+    let inputs = load_inputs root_dir state template registers in
+    set_registers state registers values;
+    let mutation_results =
+      List.map (apply_mutation state registers values inputs) mutations
+    in
+    let ingress_rejected =
+      List.exists (( = ) `Ingress_rejected) mutation_results
+    in
+    let unchanged_spans =
+      list_field "unchanged_spans" fields
+      |> List.map (capture_span state)
+    in
+    let ran = if ingress_rejected then false else VM.run state [|op; VM.STOP|] in
+    let unchanged =
+      List.map (unchanged_result state) unchanged_spans
+    in
+    let unchanged_ok = List.for_all fst unchanged in
+    let observed =
+      if ingress_rejected then "ingress_rejected"
+      else if ran then "vm_accepted"
+      else "vm_rejected"
+    in
+    let expectation = failure_expectation expected in
+    let counted, passed =
+      match expectation with
+      | `Must_reject -> true, ((not ran) && unchanged_ok)
+      | `Observation -> false, true
+    in
+    passed,
+    counted,
+    `Assoc [
+      "opcode", `String opcode;
+      "case", `String case_name;
+      "expected", `String expected;
+      "status", `String (if passed then "accepted" else "rejected");
+      "counted", `Bool counted;
+      "observed", `String observed;
+      "unchanged_status",
+      `String (if unchanged_ok then "matched" else "changed");
+      "unchanged_spans", `List (List.map snd unchanged);
+    ]
+  | _ -> fail "failure case must be an object"
+
+let failure_case_results root_dir opcode template registers values op =
+  if not !include_failures then []
+  else
+    match field "expected_failure_atomicity_behavior" template with
+    | Some (`List cases) ->
+      List.map
+        (failure_case_result root_dir opcode template registers values op)
+        cases
+    | _ -> []
+
 let execute_template root_dir entry =
   let opcode = string_field "opcode" entry in
   let template_path = string_field "vm_execution_template" entry in
@@ -321,7 +593,7 @@ let execute_template root_dir entry =
   let registers = assoc_field "registers" params in
   let values = assoc_field "values" params in
   let state = state () in
-  load_inputs root_dir state template registers;
+  ignore (load_inputs root_dir state template registers);
   set_registers state registers values;
   let op = op_for opcode registers in
   let ran = VM.run state [|op; VM.STOP|] in
@@ -349,6 +621,16 @@ let execute_template root_dir entry =
     && spans_matched
     && ((not !strict_effort) || effort_match)
   in
+  let failure_results =
+    failure_case_results root_dir opcode template registers values op
+  in
+  let counted_failures =
+    List.filter (fun (_, counted, _) -> counted) failure_results
+  in
+  let failure_passed =
+    List.for_all (fun (passed, _, _) -> passed) counted_failures
+  in
+  let accepted = accepted && failure_passed in
   accepted,
   `Assoc [
     "opcode", `String opcode;
@@ -362,6 +644,14 @@ let execute_template root_dir entry =
     "effort_match", `Bool effort_match;
     "strict_effort", `Bool !strict_effort;
     "subspans", `List (List.map snd span_results);
+    "failure_cases_included", `Bool !include_failures;
+    "failure_case_count", `Int (List.length failure_results);
+    "counted_failure_case_count", `Int (List.length counted_failures);
+    "accepted_counted_failure_case_count",
+    `Int
+      (List.length
+         (List.filter (fun (passed, _, _) -> passed) counted_failures));
+    "failure_cases", `List (List.map (fun (_, _, json) -> json) failure_results);
   ]
 
 let run_index path =
