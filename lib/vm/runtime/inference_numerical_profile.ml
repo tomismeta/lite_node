@@ -308,7 +308,9 @@ let local_semantics ~opcode =
     [
       "score cells are finite binary64 values";
       "maximum score is selected left-to-right before exponentiation";
-      "exp is applied to each score minus the selected maximum score";
+      "score-minus-maximum shifts use deterministic finite binary64 subtraction";
+      "exp is applied to each shifted score using native binary64";
+      "exponentials are summed left-to-right with deterministic finite binary64 addition";
       "probabilities are divided by the native binary64 sum of exponentials";
       "destination may equal scores exactly, but partial overlap is rejected";
     ]
@@ -435,7 +437,8 @@ let consensus_obligations ~opcode =
     ]
   | "SOFTMAX_FP" ->
     [
-      "replace or qualify native binary64 exp, division, summation, and comparison behavior";
+      "replace or qualify native binary64 exp, division, and comparison behavior";
+      "qualify deterministic binary64 score shifting and exponential summation";
       "pin max-subtract semantics, ties, underflow, overflow, and non-finite rejection";
       "define exact output encoding and overlap/writeback atomicity";
       "pass independent cross-platform conformance for probability and ordering edge vectors";
@@ -570,8 +573,9 @@ let consensus_blocker_codes ~opcode =
   | "SOFTMAX_FP" ->
     [
       "host_fp_comparison";
+      "fp64_subtract_conformance";
       "host_fp_exp";
-      "host_fp_reduction";
+      "fp64_reduction_conformance";
       "host_fp_divide";
       "probability_ordering";
       "overlap_policy";
@@ -640,6 +644,8 @@ let arithmetic_domain ~profile ~opcode =
     "deterministic-binary64-elementwise-multiply"
   | "host-fp-local-candidate", "RESIDUAL_ADD_FP" ->
     "deterministic-binary64-elementwise-add"
+  | "host-fp-local-candidate", "SOFTMAX_FP" ->
+    "deterministic-binary64-shift-sum-host-exp-divide"
   | "host-fp-local-candidate", _ -> "native-binary64-host-floating-point"
   | name, _ -> name
 
@@ -697,9 +703,9 @@ let operation_sequence ~opcode =
     [
       "snapshot_scores";
       "select_max_left_to_right";
-      "subtract_max";
+      "subtract_max_deterministic";
       "exp_each_score";
-      "sum_exponentials_left_to_right";
+      "sum_exponentials_left_to_right_deterministic";
       "divide_each_exponential_by_sum";
       "finite_output_check";
       "atomic_output_writeback";
@@ -805,6 +811,18 @@ let oracle_vector_root ~opcode =
         "nonfinite_operand_revert";
         "partial_overlap_revert";
         "overflow_revert";
+        "effort_revert";
+      ]
+    | "SOFTMAX_FP" ->
+      [
+        "equal_scores";
+        "exact_inplace";
+        "equal_max_scores";
+        "dominated_score_underflow";
+        "missing_score_revert";
+        "nonfinite_score_revert";
+        "partial_overlap_revert";
+        "bad_count_revert";
         "effort_revert";
       ]
     | _ -> ["profile_gate_only"]

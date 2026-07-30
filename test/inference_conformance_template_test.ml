@@ -466,6 +466,19 @@ let check_remaining_p0_profile_obligations () =
   check
     "l2 inverse-root blocker"
     (List.mem "host_fp_sqrt" l2_blockers);
+  let softmax_gate = profile_gate "SOFTMAX_FP" in
+  let softmax_blockers =
+    string_list_value "consensus_blocker_codes" softmax_gate
+  in
+  check
+    "softmax subtract blocker"
+    (List.mem "fp64_subtract_conformance" softmax_blockers);
+  check
+    "softmax reduction blocker"
+    (List.mem "fp64_reduction_conformance" softmax_blockers);
+  check
+    "softmax exp blocker"
+    (List.mem "host_fp_exp" softmax_blockers);
   let oracle_root gate =
     match List.assoc_opt "profile_contract" gate with
     | Some (`Assoc contract) -> string_value "oracle_vector_root" contract

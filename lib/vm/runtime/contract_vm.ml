@@ -3047,44 +3047,62 @@ let exec_one st op =
        if not (add_dyn_product st [count; 8] 1) then
          revert st
        else
-         (match read_fp64_array st.memory.data scores count with
+         (match read_fp64_bits_array st.memory.data scores count with
          | Some score_values ->
-            let max_score = ref (Array.unsafe_get score_values 0) in
+            let max_score_bits = ref (Array.unsafe_get score_values 0) in
+            let max_score = ref (Int64.float_of_bits !max_score_bits) in
             for index = 1 to count - 1 do
-              let value = Array.unsafe_get score_values index in
-              if value > !max_score then max_score := value
+              let value_bits = Array.unsafe_get score_values index in
+              let value = Int64.float_of_bits value_bits in
+              if value > !max_score then begin
+                max_score_bits := value_bits;
+                max_score := value
+              end
             done;
-            let exps = Array.make count 0.0 in
-            let sum_exp = ref 0.0 in
+            let exps = Array.make count 0L in
+            let sum_exp_bits = ref 0L in
             let ok = ref true in
             for index = 0 to count - 1 do
-              let shifted =
-                Array.unsafe_get score_values index -. !max_score
-              in
-              let value = exp shifted in
-              Array.unsafe_set exps index value;
-              sum_exp := !sum_exp +. value;
-              if not
-                   (finite_fp64 shifted
-                    && finite_fp64 value
-                    && finite_fp64 !sum_exp)
-              then
-                ok := false
+              match
+                Inference_fp64.add
+                  (Array.unsafe_get score_values index)
+                  (Inference_fp64.negate !max_score_bits)
+              with
+              | Some shifted_bits ->
+                let shifted = Int64.float_of_bits shifted_bits in
+                let value = exp shifted in
+                let value_bits = Int64.bits_of_float value in
+                Array.unsafe_set exps index value_bits;
+                if not (finite_fp64 shifted && finite_fp64 value) then
+                  ok := false
+                else
+                  (match Inference_fp64.add !sum_exp_bits value_bits with
+                   | Some next -> sum_exp_bits := next
+                   | None -> ok := false)
+              | None -> ok := false
             done;
-            if (not !ok) || !sum_exp <= 0.0 then
+            let sum_exp = Int64.float_of_bits !sum_exp_bits in
+            if (not !ok) || not (finite_fp64 sum_exp) || sum_exp <= 0.0 then
               revert st
             else begin
-              let output = Array.make count 0.0 in
+              let output = Array.make count None in
               for index = 0 to count - 1 do
-                let value = Array.unsafe_get exps index /. !sum_exp in
-                Array.unsafe_set output index value;
-                if not (finite_fp64 value) then ok := false
+                let value =
+                  Int64.float_of_bits (Array.unsafe_get exps index) /. sum_exp
+                in
+                if finite_fp64 value then
+                  Array.unsafe_set output index (Some (Int64.bits_of_float value))
+                else
+                  ok := false
               done;
               if not !ok then
                 revert st
               else begin
                 for index = 0 to count - 1 do
-                  mem_set_fp64 st.memory.data (dst + index) output.(index)
+                  mem_set_fp64_bits
+                    st.memory.data
+                    (dst + index)
+                    (Option.get (Array.unsafe_get output index))
                 done;
                 true
               end
