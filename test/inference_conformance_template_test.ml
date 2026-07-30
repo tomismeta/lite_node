@@ -154,11 +154,14 @@ let check_accepts_template () =
       check
         "diagnostic only"
         (List.mem_assoc "diagnostic_only" fields);
+      let consensus_status =
+        match List.assoc_opt "consensus_status" fields with
+        | Some (`String status) -> status
+        | _ -> "missing"
+      in
       check
-        "consensus status"
-        (match List.assoc_opt "consensus_status" fields with
-         | Some (`String "local_only") -> true
-         | _ -> false);
+        ("consensus status " ^ consensus_status)
+        (String.equal consensus_status "local_only");
       check
         "profile root binding"
         (match List.assoc_opt "profile_root_binding" fields with
@@ -479,6 +482,19 @@ let check_remaining_p0_profile_obligations () =
   check
     "softmax exp blocker"
     (List.mem "host_fp_exp" softmax_blockers);
+  let delta_gate = profile_gate "GATED_DELTA_RULE_FP" in
+  let delta_blockers =
+    string_list_value "consensus_blocker_codes" delta_gate
+  in
+  check
+    "delta recurrence blocker"
+    (List.mem "fp64_recurrence_add_mul_conformance" delta_blockers);
+  check
+    "delta exp sqrt blocker"
+    (List.mem "host_fp_exp_sqrt" delta_blockers);
+  check
+    "delta divide blocker"
+    (List.mem "host_fp_divide" delta_blockers);
   let oracle_root gate =
     match List.assoc_opt "profile_contract" gate with
     | Some (`Assoc contract) -> string_value "oracle_vector_root" contract

@@ -2513,19 +2513,25 @@ let exec_one st op =
               | None -> revert st
               | Some effort when not (add_dyn_effort st effort) -> revert st
               | Some _ ->
-                (match read_fp64_array st.memory.data q q_n,
-                       read_fp64_array st.memory.data k k_n,
-                       read_fp64_array st.memory.data v v_n,
-                       read_fp64_array st.memory.data log_decay gate_n,
-                       read_fp64_array st.memory.data beta gate_n,
-                       read_fp64_array st.memory.data state_src state_n with
+                (match read_fp64_bits_array st.memory.data q q_n,
+                       read_fp64_bits_array st.memory.data k k_n,
+                       read_fp64_bits_array st.memory.data v v_n,
+                       read_fp64_bits_array st.memory.data log_decay gate_n,
+                       read_fp64_bits_array st.memory.data beta gate_n,
+                       read_fp64_bits_array st.memory.data state_src state_n with
                  | Some q_values, Some k_values, Some v_values,
                    Some log_decay_values, Some beta_values, Some state_values ->
                    let state_values = Array.copy state_values in
-                   let output_values = Array.make output_n 0.0 in
+                   let output_values = Array.make output_n 0L in
                    let state_per_head = value_dim * key_dim in
                    let scale = 1.0 /. sqrt (float_of_int key_dim) in
+                   let scale_bits = Int64.bits_of_float scale in
                    let ok = ref true in
+                   let mul_add acc left right =
+                     match Inference_fp64.mul left right with
+                     | Some product -> Inference_fp64.add acc product
+                     | None -> None
+                   in
                    for timestep = 0 to timesteps - 1 do
                      let q_t = timestep * q_heads * key_dim in
                      let k_t = timestep * k_heads * key_dim in
@@ -2539,60 +2545,105 @@ let exec_one st op =
                        let k_base = k_t + (k_head * key_dim) in
                        let v_base = v_t + (head * value_dim) in
                        let state_base = head * state_per_head in
-                       let decay = exp log_decay_values.(gate_t + head) in
+                       let decay =
+                         exp
+                           (Int64.float_of_bits
+                              log_decay_values.(gate_t + head))
+                       in
+                       let decay_bits = Int64.bits_of_float decay in
                        if not (finite_fp64 decay) then ok := false;
                        for i = 0 to state_per_head - 1 do
-                         state_values.(state_base + i) <-
-                           state_values.(state_base + i) *. decay
+                         match
+                           Inference_fp64.mul
+                             state_values.(state_base + i)
+                             decay_bits
+                         with
+                         | Some value ->
+                           state_values.(state_base + i) <- value
+                         | None -> ok := false
                        done;
-                       let delta = Array.make value_dim 0.0 in
+                       let delta = Array.make value_dim 0L in
                        for row = 0 to value_dim - 1 do
                          let row_base = state_base + (row * key_dim) in
-                         let memory = ref 0.0 in
+                         let memory = ref 0L in
                          for col = 0 to key_dim - 1 do
-                           memory :=
-                             !memory +. (state_values.(row_base + col)
-                                         *. k_values.(k_base + col))
+                           match
+                             mul_add
+                               !memory
+                               state_values.(row_base + col)
+                               k_values.(k_base + col)
+                           with
+                           | Some value -> memory := value
+                           | None -> ok := false
                          done;
                          let value =
-                           (v_values.(v_base + row) -. !memory)
-                           *. beta_values.(gate_t + head)
+                           match
+                             Inference_fp64.add
+                               v_values.(v_base + row)
+                               (Inference_fp64.negate !memory)
+                           with
+                           | Some diff ->
+                             Inference_fp64.mul
+                               diff
+                               beta_values.(gate_t + head)
+                           | None -> None
                          in
-                         if not (finite_fp64 !memory && finite_fp64 value) then
-                           ok := false;
-                         delta.(row) <- value
+                         (match value with
+                          | Some value -> delta.(row) <- value
+                          | None -> ok := false)
                        done;
                        for row = 0 to value_dim - 1 do
                          let row_base = state_base + (row * key_dim) in
                          for col = 0 to key_dim - 1 do
-                           state_values.(row_base + col) <-
-                             state_values.(row_base + col)
-                             +. (k_values.(k_base + col) *. delta.(row))
+                           match
+                             mul_add
+                               state_values.(row_base + col)
+                               k_values.(k_base + col)
+                               delta.(row)
+                           with
+                           | Some value ->
+                             state_values.(row_base + col) <- value
+                           | None -> ok := false
                          done
                        done;
                        let out_base = out_t + (head * value_dim) in
                        for row = 0 to value_dim - 1 do
                          let row_base = state_base + (row * key_dim) in
-                         let value = ref 0.0 in
+                         let value = ref 0L in
                          for col = 0 to key_dim - 1 do
-                           value :=
-                             !value +. (state_values.(row_base + col)
-                                        *. q_values.(q_base + col))
+                           match
+                             mul_add
+                               !value
+                               state_values.(row_base + col)
+                               q_values.(q_base + col)
+                           with
+                           | Some next -> value := next
+                           | None -> ok := false
                          done;
-                         output_values.(out_base + row) <- !value *. scale
+                         (match Inference_fp64.mul !value scale_bits with
+                          | Some scaled ->
+                            output_values.(out_base + row) <- scaled
+                          | None -> ok := false)
                        done
                      done
                    done;
                    if not !ok
-                      || not (Array.for_all finite_fp64 state_values)
-                      || not (Array.for_all finite_fp64 output_values) then
+                      || not (Array.for_all Inference_fp64.finite state_values)
+                      || not (Array.for_all Inference_fp64.finite output_values)
+                      || not (finite_fp64 scale) then
                      revert st
                    else begin
                      for i = 0 to output_n - 1 do
-                       mem_set_fp64 st.memory.data (output + i) output_values.(i)
+                       mem_set_fp64_bits
+                         st.memory.data
+                         (output + i)
+                         output_values.(i)
                      done;
                      for i = 0 to state_n - 1 do
-                       mem_set_fp64 st.memory.data (state_dst + i) state_values.(i)
+                       mem_set_fp64_bits
+                         st.memory.data
+                         (state_dst + i)
+                         state_values.(i)
                      done;
                      true
                    end

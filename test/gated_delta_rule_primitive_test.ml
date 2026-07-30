@@ -369,6 +369,48 @@ let irregular_dimensions =
          c1fc6b459d56ca3f";
   }
 
+let signed_zero_subnormal_one_timestep =
+  {
+    name = "signed zero subnormal one timestep";
+    dims = {
+      timesteps = 1;
+      q_heads = 1;
+      k_heads = 1;
+      v_heads = 1;
+      key_dim = 1;
+      value_dim = 1;
+    };
+    q = bytes_of_hex "000000000000f03f";
+    k = bytes_of_hex "0100000000000000";
+    v = bytes_of_hex "0000000000000080";
+    log_decay = bytes_of_hex "0000000000000000";
+    beta = bytes_of_hex "000000000000f03f";
+    initial_state = bytes_of_hex "0000000000000080";
+    expected_output = bytes_of_hex "0000000000000000";
+    expected_state = bytes_of_hex "0000000000000080";
+  }
+
+let late_add_mul_overflow =
+  {
+    name = "late add/mul overflow";
+    dims = {
+      timesteps = 1;
+      q_heads = 1;
+      k_heads = 1;
+      v_heads = 1;
+      key_dim = 1;
+      value_dim = 1;
+    };
+    q = bytes_of_hex "0000000000000040";
+    k = bytes_of_hex "000000000000f03f";
+    v = bytes_of_hex "ffffffffffffef7f";
+    log_decay = bytes_of_hex "0000000000000000";
+    beta = bytes_of_hex "000000000000f03f";
+    initial_state = bytes_of_hex "0000000000000000";
+    expected_output = bytes_of_hex "0000000000000000";
+    expected_state = bytes_of_hex "ffffffffffffef7f";
+  }
+
 let fixtures =
   [
     zero_state_one_timestep;
@@ -376,6 +418,7 @@ let fixtures =
     zero_state_multiple_timesteps;
     nonzero_state_multiple_timesteps;
     irregular_dimensions;
+    signed_zero_subnormal_one_timestep;
   ]
 
 let output_cells fixture =
@@ -559,6 +602,24 @@ let check_invalid_shape_and_effort_revert () =
   set_int_reg state 0 max_int;
   check "address overflow rejects" (not (VM.run state code));
   check "address overflow keeps sentinel" (f64_bits state 100 = Int64.bits_of_float 42.0)
+
+let check_late_add_mul_overflow_reverts () =
+  let fixture = late_add_mul_overflow in
+  let state = make_state fixture in
+  set_result_sentinel state fixture;
+  check "late add/mul overflow rejects" (not (VM.run state code));
+  check_result_sentinel "late add/mul overflow" state fixture;
+  let state = make_state ~state_dst_base:800 fixture in
+  set_f64_bits state 100 (Int64.bits_of_float 42.0);
+  check "late add/mul overflow rejects with in-place state" (not (VM.run state code));
+  check
+    "late add/mul overflow keeps output"
+    (f64_bits state 100 = Int64.bits_of_float 42.0);
+  check_cells
+    "late add/mul overflow keeps in-place state"
+    state
+    800
+    (fixture_bits fixture.initial_state)
 
 let check_strict_operands () =
   let state = make_state ~strict_values:true zero_state_one_timestep in
@@ -948,6 +1009,7 @@ let () =
   check_alias_rejections ();
   check_missing_and_nonfinite_reverts ();
   check_invalid_shape_and_effort_revert ();
+  check_late_add_mul_overflow_reverts ();
   check_strict_operands ();
   check_capability_gate ();
   check_generic_admission_rejection ();

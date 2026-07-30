@@ -350,7 +350,8 @@ let local_semantics ~opcode =
     [
       "query, key, value, decay, beta, and recurrent-state cells are finite binary64 values";
       "value heads map to query and key heads by modulo";
-      "state decay uses exp(log_decay) and scale uses 1.0 / sqrt(key_dim)";
+      "state decay uses native exp(log_decay) and scale uses native 1.0 / sqrt(key_dim)";
+      "state decay, memory dot products, beta-delta updates, state updates, output dot products, and output scaling use deterministic finite binary64 add/mul";
       "loop order is timestep, value head, value row, key column";
       "output and next-state cells are written only after both buffers are finite";
     ]
@@ -480,9 +481,10 @@ let consensus_obligations ~opcode =
     ]
   | "GATED_DELTA_RULE_FP" ->
     [
-      "replace or qualify native binary64 exp, sqrt, dot-product, and recurrence behavior";
+      "replace or qualify native binary64 exp plus query-scale sqrt/division";
+      "qualify deterministic binary64 recurrence add/mul and dot-product behavior";
       "pin head mapping, decay order, beta application, state update order, and scaling";
-      "define exact output plus next-state encoding, alias rejection, effort, and atomicity";
+      "define exact output plus next-state encoding, alias rejection, software-fp effort, and atomicity";
       "pass independent cross-platform conformance for recurrent state-transition edge vectors";
     ]
   | "CAUSAL_DEPTHWISE_CONV1D_FP" ->
@@ -583,10 +585,10 @@ let consensus_blocker_codes ~opcode =
     ]
   | "GATED_DELTA_RULE_FP" ->
     [
-      "host_fp_recurrence";
+      "fp64_recurrence_add_mul_conformance";
       "state_transition_order";
-      "host_fp_dot_product";
       "host_fp_exp_sqrt";
+      "host_fp_divide";
       "alias_rejection";
       "atomic_writeback";
       "cross_platform_conformance";
@@ -646,6 +648,8 @@ let arithmetic_domain ~profile ~opcode =
     "deterministic-binary64-elementwise-add"
   | "host-fp-local-candidate", "SOFTMAX_FP" ->
     "deterministic-binary64-shift-sum-host-exp-divide"
+  | "host-fp-local-candidate", "GATED_DELTA_RULE_FP" ->
+    "deterministic-binary64-recurrence-host-exp-sqrt-divide"
   | "host-fp-local-candidate", _ -> "native-binary64-host-floating-point"
   | name, _ -> name
 
@@ -715,12 +719,13 @@ let operation_sequence ~opcode =
       "snapshot_operands_and_state";
       "iterate_timestep_value_head_row_column";
       "compute_decay";
-      "apply_state_decay";
-      "compute_memory_dot";
-      "apply_beta_delta";
-      "update_state";
-      "compute_output_dot";
-      "apply_query_scale";
+      "compute_query_scale_host";
+      "apply_state_decay_deterministic";
+      "compute_memory_dot_deterministic";
+      "apply_beta_delta_deterministic";
+      "update_state_deterministic";
+      "compute_output_dot_deterministic";
+      "apply_query_scale_multiply_deterministic";
       "finite_output_and_state_check";
       "atomic_output_and_state_writeback";
     ]
@@ -824,6 +829,20 @@ let oracle_vector_root ~opcode =
         "partial_overlap_revert";
         "bad_count_revert";
         "effort_revert";
+      ]
+    | "GATED_DELTA_RULE_FP" ->
+      [
+        "zero_state_one_timestep";
+        "nonzero_state_one_timestep";
+        "zero_state_multiple_timesteps";
+        "nonzero_state_multiple_timesteps";
+        "irregular_dimensions";
+        "signed_zero_subnormal_one_timestep";
+        "state_in_place_alias";
+        "alias_rejections";
+        "missing_nonfinite_reverts";
+        "invalid_shape_effort_revert";
+        "late_add_mul_overflow_revert";
       ]
     | _ -> ["profile_gate_only"]
   in

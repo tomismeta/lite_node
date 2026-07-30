@@ -24,7 +24,12 @@ with a scalar oracle and VM conformance gate.
 | `RMSNORM_FP_EPS` | Reads explicit epsilon bits, computes sum of squares and output multiply with LiteNode's finite binary64 core, then uses native epsilon-add/divide/`sqrt` for inverse RMS. | Inverse-root behavior, signed-zero/subnormal treatment, and independent reduction qualification are not yet consensus-owned. | Define exact epsilon input, reduction order, inverse-root implementation, gamma read/order, non-finite policy, and rollback behavior. |
 | `L2NORM_FP` | Same deterministic reduction/output multiply shape as RMSNorm without gamma. | Same as RMSNorm; smaller surface but still depends on the native inverse-root path. | Define exact inverse-norm semantics, edge vectors near zero, signed-zero/subnormal behavior, and failure atomicity. |
 | `SOFTMAX_FP` | Uses left-to-right max selection, deterministic finite binary64 score shift and exponential sum, then native `exp` and probability division. | Highest math risk in this set because `exp`, comparison, and division can change probabilities and token/order behavior. | Replace or pin `exp`, division, tie behavior, overflow/underflow, in-place behavior, and finite-result rules. |
-| `GATED_DELTA_RULE_FP` | Stateful recurrence with native `exp`, `sqrt`, repeated dot products, decay, state update, and output writeback. | Highest state risk: small numeric drift compounds; output and next-state rollback must be all-or-nothing. | Pin layout, head mapping, loop nesting, decay math, scale math, state update order, aliasing, effort, and atomicity. |
+| `GATED_DELTA_RULE_FP` | Stateful recurrence with native decay `exp` and native query-scale division/`sqrt`; recurrence dot products, beta-delta updates, state updates, and output scaling multiply use LiteNode's finite binary64 core. | Highest state risk: small numeric drift compounds; decay/scale and recurrence ordering are not yet consensus-owned. | Pin layout, head mapping, loop nesting, decay math, scale math, state update order, aliasing, software-fp effort, and atomicity. |
+
+The Gated Delta effort charge is intentionally unchanged in this local-only
+hardening slice. Consensus promotion must recalibrate the charge for the
+software-fp recurrence work before treating the profile as a validator cost
+contract.
 
 ## Blocking Semantic Question
 
@@ -66,8 +71,8 @@ The current branch already has useful controls:
 - an ingestion checker for the producer-side determinism corpus.
 
 These are necessary controls. They are not sufficient for consensus
-determinism because native `float`, `sqrt`, and `exp` are still active in the
-P0 path.
+determinism because native `float`, `sqrt`, `exp`, and division are still active
+in the P0 path.
 
 ## Runner Shape
 
