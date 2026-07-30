@@ -165,6 +165,17 @@ let checked_template_json checked =
       "template", Template.to_json checked.template;
     ]
 
+let profile_gate_present = function
+  | `Assoc fields ->
+    (match List.assoc_opt "profile_gate" fields with
+     | Some `Null
+     | None -> false
+     | Some _ -> true)
+  | _ -> false
+
+let template_profile_gate_present (checked : checked_template) =
+  profile_gate_present (Template.to_json checked.template)
+
 let template_files dir =
   if not (Sys.file_exists dir) then fail ("missing template dir: " ^ dir);
   if not (Sys.is_directory dir) then fail ("not a directory: " ^ dir);
@@ -587,6 +598,12 @@ let producer_index_report index_path =
     let profile_gates =
       List.filter_map (fun (_, _, profile_gate) -> profile_gate) entries
     in
+    let profile_gate_count =
+      List.length (List.filter profile_gate_present profile_gates)
+    in
+    let unprofiled_template_count =
+      List.length templates - profile_gate_count
+    in
     let missing =
       Template.p0_opcodes
       |> List.filter
@@ -614,6 +631,8 @@ let producer_index_report index_path =
       "p0_opcodes",
       `List (List.map (fun opcode -> `String opcode) Template.p0_opcodes);
       "profile_gates", `List profile_gates;
+      "profile_gate_count", `Int profile_gate_count;
+      "unprofiled_template_count", `Int unprofiled_template_count;
       "issue_count", `Int (List.length issues);
       "issues", `List (List.map issue_json issues);
     ]
@@ -652,10 +671,16 @@ let () =
           print_report_and_exit (producer_index_report path)
         | _ ->
           let checked = check_template path in
+          let profile_gate_count =
+            if template_profile_gate_present checked then 1 else 0
+          in
           print_report_and_exit
             (`Assoc [
               "status", `String "accepted";
               "diagnostic_only", `Bool true;
+              "template_count", `Int 1;
+              "profile_gate_count", `Int profile_gate_count;
+              "unprofiled_template_count", `Int (1 - profile_gate_count);
               "templates", `List [checked_template_json checked];
             ]))
      | _ -> fail (path ^ ": template must be an object"))
@@ -668,11 +693,17 @@ let () =
     let duplicates = duplicate_opcodes templates in
     if duplicates <> [] then
       fail ("duplicate P0 templates: " ^ String.concat "," duplicates);
+    let profile_gate_count =
+      List.length (List.filter template_profile_gate_present templates)
+    in
     print_report_and_exit
       (`Assoc [
         "status", `String "accepted";
         "diagnostic_only", `Bool true;
         "template_count", `Int (List.length templates);
+        "profile_gate_count", `Int profile_gate_count;
+        "unprofiled_template_count",
+        `Int (List.length templates - profile_gate_count);
         "p0_opcodes",
         `List (List.map (fun opcode -> `String opcode) Template.p0_opcodes);
         "templates", `List (List.map checked_template_json templates);

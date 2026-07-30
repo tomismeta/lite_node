@@ -234,6 +234,10 @@ profile_gate.local_semantics
 profile_gate.consensus_obligations
 ```
 
+Checker reports also include `profile_gate_count` and
+`unprofiled_template_count` so producer indexes, single templates, and template
+directories can be audited without parsing every template body.
+
 `local_semantics` records what the current VM does today.
 `consensus_obligations` records what must become protocol-owned before the
 opcode can be promoted out of `local_only`.
