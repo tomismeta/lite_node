@@ -151,6 +151,9 @@ Minimum vectors:
 5. Preserve existing opcode policy until every P0 primitive has a semantic root
    and conformance gate.
 
+The current implementation audit and conformance template schema are in
+`docs/architecture/inference-p0-determinism-audit.md`.
+
 ## Corpus Intake Tool
 
 LiteNode includes a diagnostic corpus consumer:
@@ -163,15 +166,16 @@ The tool does not execute math and does not make the corpus normative. It
 validates the producer-side corpus shape, checks P0 operation and fixture
 coverage, and emits a machine-readable P0 worklist for LiteNode engineering.
 
-The first accepted corpus readout was:
+The checker accepts both the initial qualification corpus and the newer
+ingestion corpus. The latest accepted ingestion readout was:
 
 ```text
-operation_count = 18
-fixture_count = 19
-failure_case_count = 11
-bonsai_cutpoint_count = 32
-selected_token_changes_under_q16_16_candidate = 0
-first_divergent_cutpoint = fixtures:expected-final-norm.f64le
+corpus_type = determinism_ingestion_corpus
+fixture_count = 5
+failure_case_count = 35
+cutpoint_count = 48
+logit_cutpoint_count = 2
+selected_token_changes_under_q16_16_candidate = 1
 P0 worklist = LINEAR_Q1_G128_FP, RMSNORM_FP_EPS, L2NORM_FP, SOFTMAX_FP, GATED_DELTA_RULE_FP
 ```
 

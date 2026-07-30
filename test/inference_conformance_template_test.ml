@@ -1,0 +1,205 @@
+(*
+Octra Labs 2026
+
+Lite node, for internal use only (pre-release build 0x1067dzc2)
+
+Include at startup:
+- compiler
+- env-constructor
+- binary-proto consensus for updates
+- PVAC (optimized version, build 0f24dd-2025)
+- libp2p
+- gRPC (version 9738fdy44-2025)
+*)
+
+module Template = Octra_vm.Inference_conformance_template
+
+let check label condition =
+  if not condition then failwith label
+
+let hex_root char =
+  String.make 64 char
+
+let register register name kind value =
+  `Assoc [
+    "register", `Int register;
+    "name", `String name;
+    "kind", `String kind;
+    "value", `String value;
+  ]
+
+let memory name access =
+  `Assoc [
+    "name", `String name;
+    "path", `String ("fixtures/" ^ name ^ ".bin");
+    "root", `String (hex_root 'a');
+    "byte_length", `Int 32;
+    "sha256", `String (hex_root 'c');
+    "encoding", `String "f64le";
+    "base", `Int 100;
+    "cells", `Int 4;
+    "access", `String access;
+  ]
+
+let failure case =
+  `Assoc [
+    "case", `String case;
+    "expected", `String "reject_before_write";
+    "mutations", `List [`String "input[0]=nan"];
+    "unchanged_spans", `List [`String "output"];
+  ]
+
+let template ?(opcode = "RMSNORM_FP_EPS") ?(primitive = "rmsnorm_fp_eps")
+    ?(effects = ["memory_read"; "memory_write"]) ?(memory_access = "read_write")
+    ?(failure_cases = [failure "nonfinite_input_nan"]) () =
+  `Assoc [
+    "type", `String "litenode_vm_conformance_template";
+    "schema", `Int 1;
+    "opcode", `String opcode;
+    "primitive", `String primitive;
+    "profile", `String "host-fp-local-candidate";
+    "vm_semantics_root", `String (hex_root 'd');
+    "numerical_profile_root", `String (hex_root 'e');
+    "expected_effort", `Int 16;
+    "effects", `List (List.map (fun effect -> `String effect) effects);
+    "registers",
+    `List [
+      register 0 "addr" "address" "100";
+      register 1 "count" "usize" "4";
+      register 2 "gamma" "address" "200";
+      register 3 "epsilon_bits" "u64" "4517329193108106637";
+    ];
+    "memory", `List [memory "input" memory_access];
+    "expected",
+    `Assoc [
+      "spans",
+      `List [
+        `Assoc [
+          "name", `String "output";
+          "base", `Int 100;
+          "cells", `Int 4;
+          "output_root", `String (hex_root 'b');
+          "output_sha256", `Null;
+        ];
+      ];
+    ];
+    "failure_cases", `List failure_cases;
+  ]
+
+let check_accepts_template () =
+  match Template.of_json (template ()) with
+  | Error error -> failwith (Template.error_message error)
+  | Ok result ->
+    check "p0 opcode count" (List.length Template.p0_opcodes = 5);
+    check "opcode" (String.equal result.Template.opcode "RMSNORM_FP_EPS");
+    check "register count" (List.length result.registers = 4);
+    check "memory count" (List.length result.memory = 1);
+    check "expected span count" (List.length result.expected = 1);
+    check "failure count" (List.length result.failure_cases = 1);
+    match Template.to_json result with
+    | `Assoc fields ->
+      check
+        "diagnostic only"
+        (List.mem_assoc "diagnostic_only" fields)
+    | _ -> failwith "template json must be object"
+
+let check_rejects_unknown_opcode () =
+  match Template.of_json (template ~opcode:"MODEL_SPECIFIC_FASTPATH" ()) with
+  | Error (Template.Template_error message) ->
+    check
+      "unknown opcode"
+      (String.equal message "unsupported P0 opcode: MODEL_SPECIFIC_FASTPATH")
+  | Error error -> failwith (Template.error_message error)
+  | Ok _ -> failwith "expected unknown opcode rejection"
+
+let check_rejects_effect_drift () =
+  match Template.of_json (template ~effects:["memory_read"] ()) with
+  | Error (Template.Template_error message) ->
+    check
+      "effect drift"
+      (String.equal message "missing required effects: memory_write")
+  | Error error -> failwith (Template.error_message error)
+  | Ok _ -> failwith "expected effect rejection"
+
+let check_rejects_missing_failure_cases () =
+  match Template.of_json (template ~failure_cases:[] ()) with
+  | Error (Template.Template_error message) ->
+    check
+      "missing failures"
+      (String.equal message "failure cases are required")
+  | Error error -> failwith (Template.error_message error)
+  | Ok _ -> failwith "expected failure-case rejection"
+
+let check_rejects_non_writable_template () =
+  match Template.of_json (template ~memory_access:"read" ()) with
+  | Error (Template.Template_error message) ->
+    check
+      "missing writable memory"
+      (String.equal message "at least one writable memory binding is required")
+  | Error error -> failwith (Template.error_message error)
+  | Ok _ -> failwith "expected writable-memory rejection"
+
+let check_rejects_wide_register () =
+  match
+    Template.of_json
+      (`Assoc [
+        "type", `String "litenode_vm_conformance_template";
+        "schema", `Int 1;
+        "opcode", `String "RMSNORM_FP_EPS";
+        "primitive", `String "rmsnorm_fp_eps";
+        "profile", `String "host-fp-local-candidate";
+        "vm_semantics_root", `String (hex_root 'd');
+        "numerical_profile_root", `String (hex_root 'e');
+        "expected_effort", `Int 16;
+        "effects", `List [`String "memory_read"; `String "memory_write"];
+        "registers",
+        `List [register 64 "bad" "address" "100"];
+        "memory", `List [memory "input" "read_write"];
+        "expected",
+        `Assoc [
+          "spans",
+          `List [
+            `Assoc [
+              "name", `String "output";
+              "base", `Int 100;
+              "cells", `Int 4;
+              "output_root", `String (hex_root 'b');
+              "output_sha256", `Null;
+            ];
+          ];
+        ];
+        "failure_cases", `List [failure "nonfinite_input_nan"];
+      ])
+  with
+  | Error (Template.Template_error message) ->
+    check
+      "wide register"
+      (String.equal message "register out of range: 64")
+  | Error error -> failwith (Template.error_message error)
+  | Ok _ -> failwith "expected register rejection"
+
+let check_rejects_single_delta_expected_span () =
+  match
+    Template.of_json
+      (template
+         ~opcode:"GATED_DELTA_RULE_FP"
+         ~primitive:"gated_delta_rule_fp"
+         ())
+  with
+  | Error (Template.Template_error message) ->
+    check
+      "delta span count"
+      (String.equal
+         message
+         "GATED_DELTA_RULE_FP requires output and next-state expected spans")
+  | Error error -> failwith (Template.error_message error)
+  | Ok _ -> failwith "expected delta span rejection"
+
+let () =
+  check_accepts_template ();
+  check_rejects_unknown_opcode ();
+  check_rejects_effect_drift ();
+  check_rejects_missing_failure_cases ();
+  check_rejects_non_writable_template ();
+  check_rejects_wide_register ();
+  check_rejects_single_delta_expected_span ()

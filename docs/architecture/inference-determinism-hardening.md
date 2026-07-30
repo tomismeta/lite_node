@@ -115,6 +115,12 @@ for Bonsai-class inference. The next LiteNode work should prioritize exact
 software math or wider fixed-point contracts for the P0 operations rather than
 forcing the whole path into Q16.16.
 
+The latest ingestion corpus narrows the P0 intake to five minimized fixtures
+and thirty-five failure/atomicity cases. It also shows the important ranking
+warning: Q16.16 changes one synthetic near-tie token selection while Q32.32
+does not. That does not reject fixed point categorically, but it does reject a
+blanket Q16.16 migration for the P0 path.
+
 ## Q16 Strategy
 
 Q16 is the most deterministic existing numerical substrate in the VM. It should
@@ -172,6 +178,9 @@ LiteNode should own:
 - conformance runner;
 - failure atomicity and edge-case VM tests;
 - policy that continues to keep generic host-float opcodes unsafe.
+
+The current P0 runtime audit is tracked in
+`docs/architecture/inference-p0-determinism-audit.md`.
 
 `octra-inference` should own:
 

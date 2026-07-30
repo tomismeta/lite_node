@@ -110,5 +110,10 @@
  (libraries octra_vm))
 
 (test
+ (name inference_conformance_template_test)
+ (modules inference_conformance_template_test)
+ (libraries octra_vm))
+
+(test
  (name runtime_ontology_test)
  (modules runtime_ontology_test))

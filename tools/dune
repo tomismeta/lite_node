@@ -7,3 +7,8 @@
  (name inference_determinism_check)
  (modules inference_determinism_check)
  (libraries octra_vm yojson))
+
+(executable
+ (name inference_conformance_check)
+ (modules inference_conformance_check)
+ (libraries octra_vm yojson digestif digestif.c))
