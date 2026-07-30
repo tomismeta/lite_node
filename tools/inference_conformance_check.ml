@@ -433,14 +433,47 @@ let gated_delta_semantic_issues path opcode fields =
          | None -> [issue ~opcode path
                      "missing Gated Delta operation_order"])
 
-let profile_issues path opcode fields =
+let profile_gate_result opcode fields =
+  let add_source source = function
+    | `Assoc gate -> `Assoc (gate @ ["profile_source", `String source])
+    | value -> value
+  in
   match string_field "profile" fields with
-  | None -> []
   | Some profile ->
     (match Profile.validate_for_opcode ~opcode ~profile with
-     | Ok _ -> []
+     | Ok gate ->
+       Ok
+         (Profile.to_json_for_opcode ~opcode gate
+          |> add_source "template")
      | Error error ->
-       [issue ~opcode path (Profile.error_message error)])
+       Error (Profile.error_message error))
+  | None ->
+    (match Profile.current_runtime_profile ~opcode with
+     | None -> Ok `Null
+     | Some profile ->
+       (match Profile.validate_for_opcode ~opcode ~profile with
+        | Ok gate ->
+          Ok
+            (Profile.to_json_for_opcode ~opcode gate
+             |> add_source "current_runtime_profile")
+        | Error error ->
+          Error (Profile.error_message error)))
+
+let profile_issues path opcode fields =
+  match profile_gate_result opcode fields with
+  | Ok _ -> []
+  | Error message -> [issue ~opcode path message]
+
+let profile_gate_entry path opcode fields =
+  match profile_gate_result opcode fields with
+  | Ok profile_gate ->
+    Some
+      (`Assoc [
+        "path", `String path;
+        "opcode", `String opcode;
+        "profile_gate", profile_gate;
+      ])
+  | Error _ -> None
 
 let producer_template_issues path opcode json =
   match json with
@@ -505,24 +538,38 @@ let producer_index_report index_path =
               | Some _ -> []
               | None -> [issue ?opcode index_path "missing vm_execution_template"]
             in
-            let template_issues =
+            let template_issues, profile_gate =
               match template_path with
-              | None -> []
+              | None -> [], None
               | Some raw_path ->
                 let resolved = resolve_template_path index_path raw_path in
                 (match read_template_for_diagnostics resolved with
-                 | None -> [issue ?opcode resolved "template file is unreadable"]
+                 | None ->
+                   [issue ?opcode resolved "template file is unreadable"], None
                  | Some json ->
                    let opcode_value =
                      match opcode with Some value -> value | None -> "<unknown>"
                    in
-                   producer_template_issues resolved opcode_value json)
+                   let issues =
+                     producer_template_issues resolved opcode_value json
+                   in
+                   let profile_gate =
+                     match opcode, json with
+                     | Some opcode, `Assoc fields ->
+                       profile_gate_entry resolved opcode fields
+                     | _ -> None
+                   in
+                   issues, profile_gate)
             in
-            opcode, path_issues @ template_issues
-          | _ -> None, [issue index_path "template index entry must be object"])
+            opcode, path_issues @ template_issues, profile_gate
+          | _ ->
+            None, [issue index_path "template index entry must be object"], None)
         templates
     in
-    let opcodes = List.filter_map fst entries in
+    let opcodes = List.filter_map (fun (opcode, _, _) -> opcode) entries in
+    let profile_gates =
+      List.filter_map (fun (_, _, profile_gate) -> profile_gate) entries
+    in
     let missing =
       Template.p0_opcodes
       |> List.filter
@@ -536,7 +583,11 @@ let producer_index_report index_path =
         if Hashtbl.mem seen opcode then Some (issue ~opcode index_path "duplicate P0 template")
         else begin Hashtbl.add seen opcode (); None end)
     in
-    let issues = List.concat (List.map snd entries) @ missing @ duplicates in
+    let issues =
+      List.concat (List.map (fun (_, issues, _) -> issues) entries)
+      @ missing
+      @ duplicates
+    in
     let status = if issues = [] then "accepted" else "rejected" in
     `Assoc [
       "status", `String status;
@@ -545,6 +596,7 @@ let producer_index_report index_path =
       "template_count", `Int (List.length templates);
       "p0_opcodes",
       `List (List.map (fun opcode -> `String opcode) Template.p0_opcodes);
+      "profile_gates", `List profile_gates;
       "issue_count", `Int (List.length issues);
       "issues", `List (List.map issue_json issues);
     ]

@@ -200,6 +200,10 @@ Acceptance means only:
 - required effects match the opcode class; and
 - failure cases are present.
 
+Producer-index reports include diagnostic `profile_gates`, using a declared
+template profile when present and the opcode's current runtime profile when the
+template is profile-less.
+
 After that, LiteNode can execute templates without negotiating schema again.
 
 ## Numerical Profile Gate
