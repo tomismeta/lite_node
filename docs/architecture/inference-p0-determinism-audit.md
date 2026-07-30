@@ -244,6 +244,7 @@ Status on 2026-07-30:
 
 ```text
 /home/exedev/evidence/octra-inference/determinism-p0-plus-corpus-20260730-022653/p0-plus-fixture-pack.cjson
+/home/exedev/evidence/octra-inference/determinism-p0-plus-topk-boundary-20260730-025306/p0-plus-fixture-pack.cjson
 ```
 
 LiteNode executes this pack with:
@@ -268,10 +269,19 @@ The saved report is:
 
 ```text
 /home/exedev/evidence/octra-inference/determinism-p0-plus-corpus-20260730-022653/litenode-p0-plus-execution-report.cjson
+/home/exedev/evidence/octra-inference/determinism-p0-plus-topk-boundary-20260730-025306/litenode-p0-plus-execution-report.cjson
 ```
 
 The P0-plus pack is still diagnostic and model-neutral. It adds coverage for
 attention math, indexed RoPE, argmax tie behavior, and the final logits-tail
 composition. `ARGMAX_FP` only returns the selected index, so producer top-k
-ordering manifests are preserved as `producer_only` evidence until the VM
-exposes a top-k primitive.
+ordering manifests are preserved as `producer_only` evidence. The explicit
+top-k boundary is:
+
+```text
+/home/exedev/evidence/octra-inference/determinism-p0-plus-topk-boundary-20260730-025306/p0-plus-topk-boundary.cjson
+```
+
+It declares `topk_vm_authority = false` and `topk_opcode_proposal =
+not_emitted`. A future `TOPK_FP` must be a separate primitive/spec; it must not
+be inferred from `ARGMAX_FP` fixtures.
