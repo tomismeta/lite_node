@@ -85,6 +85,12 @@ let status_counts_are_consensus_ready counts =
   && counts.consensus_candidate = 0
   && counts.unknown = 0
 
+let consensus_ready ~profile_gate_count ~unprofiled_count counts =
+  profile_gate_count > 0
+  && classified_gate_count counts = profile_gate_count
+  && unprofiled_count = 0
+  && status_counts_are_consensus_ready counts
+
 let add_if condition value values =
   if condition then value :: values else values
 

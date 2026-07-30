@@ -273,6 +273,12 @@ let check_profile_status_counts () =
        "ready-only counts are consensus-ready"
        (Profile.status_counts_are_consensus_ready ready_counts);
      check
+       "ready-only gate is consensus-ready"
+       (Profile.consensus_ready
+          ~profile_gate_count:1
+          ~unprofiled_count:0
+          ready_counts);
+     check
        "ready-only blockers empty"
        (Profile.consensus_ready_blockers
           ~profile_gate_count:1
@@ -286,6 +292,13 @@ let check_profile_status_counts () =
           ~unprofiled_count:0
           ready_counts
         = ["unclassified_profile_gates"]);
+     check
+       "unclassified gate is not consensus-ready"
+       (not
+          (Profile.consensus_ready
+             ~profile_gate_count:2
+             ~unprofiled_count:0
+             ready_counts));
      check
        "empty counts are not consensus-ready"
        (not

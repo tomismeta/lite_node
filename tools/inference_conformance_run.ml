@@ -180,10 +180,10 @@ let profile_status_counts values =
 
 let consensus_ready_gate ~profile_gate_count ~unprofiled_count status_counts =
   let ready =
-    profile_gate_count > 0
-    && Profile.classified_gate_count status_counts = profile_gate_count
-    && unprofiled_count = 0
-    && Profile.status_counts_are_consensus_ready status_counts
+    Profile.consensus_ready
+      ~profile_gate_count
+      ~unprofiled_count
+      status_counts
   in
   `Assoc [
     "required", `Bool !require_consensus_ready;
@@ -205,10 +205,10 @@ let consensus_ready_gate ~profile_gate_count ~unprofiled_count status_counts =
 let consensus_ready_required_passes ~profile_gate_count ~unprofiled_count status_counts =
   (not !require_consensus_ready)
   ||
-  (profile_gate_count > 0
-   && Profile.classified_gate_count status_counts = profile_gate_count
-   && unprofiled_count = 0
-   && Profile.status_counts_are_consensus_ready status_counts)
+  Profile.consensus_ready
+    ~profile_gate_count
+    ~unprofiled_count
+    status_counts
 
 let result_profile_gate_count result =
   if profile_gate_present result then 1 else 0

@@ -49,6 +49,8 @@ val to_json_for_opcode : opcode:string -> t -> Yojson.Safe.t
 val status_counts_of_json_gates : Yojson.Safe.t list -> status_counts
 val classified_gate_count : status_counts -> int
 val status_counts_are_consensus_ready : status_counts -> bool
+val consensus_ready :
+  profile_gate_count:int -> unprofiled_count:int -> status_counts -> bool
 val consensus_ready_blockers :
   profile_gate_count:int -> unprofiled_count:int -> status_counts -> string list
 val status_counts_json : status_counts -> Yojson.Safe.t
