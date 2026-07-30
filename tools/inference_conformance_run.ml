@@ -13,6 +13,7 @@ Include at startup:
 *)
 
 module VM = Octra_vm.Contract_vm
+module Fp64 = Octra_vm.Inference_fp64
 module Profile = Octra_vm.Inference_numerical_profile
 
 let template_index = ref None
@@ -677,12 +678,32 @@ let unchanged_result state (name, base, cells, before) =
     "unchanged", `Bool matched;
   ]
 
+let finite_span_result state (name, base, cells, _) =
+  let finite = ref true in
+  for index = 0 to cells - 1 do
+    match Hashtbl.find_opt state.VM.memory.data (base + index) with
+    | Some (VM.VInt bits) when Z.fits_int64 bits ->
+      if not (Fp64.finite (Z.to_int64 bits)) then finite := false
+    | _ -> finite := false
+  done;
+  !finite,
+  `Assoc [
+    "name", `String name;
+    "base_address", `Int base;
+    "length_f64_cells", `Int cells;
+    "finite", `Bool !finite;
+  ]
+
 let failure_expectation expected =
   if starts_with "reject_before_write" expected then `Must_reject
   else if starts_with
             "deterministic_profile_must_define_reject_or_infinite_reduction"
             expected then
     `Must_reject
+  else if starts_with
+            "implementation_must_use_stable_max_subtract"
+            expected then
+    `Must_accept_changed_finite
   else if starts_with "reject_or_documented_safe_copy" expected then `Observation
   else `Observation
 
@@ -723,6 +744,11 @@ let failure_case_result root_dir opcode template registers values op case =
       List.map (unchanged_result state) unchanged_spans
     in
     let unchanged_ok = List.for_all fst unchanged in
+    let finite_spans = List.map (finite_span_result state) unchanged_spans in
+    let finite_ok = List.for_all fst finite_spans in
+    let changed_ok =
+      unchanged <> [] && List.for_all (fun (unchanged, _) -> not unchanged) unchanged
+    in
     let observed =
       if ingress_rejected then "ingress_rejected"
       else if ran then "vm_accepted"
@@ -732,6 +758,8 @@ let failure_case_result root_dir opcode template registers values op case =
     let counted, passed =
       match expectation with
       | `Must_reject -> true, ((not ran) && unchanged_ok)
+      | `Must_accept_changed_finite ->
+        true, (ran && changed_ok && finite_ok)
       | `Observation -> false, true
     in
     passed,
@@ -745,7 +773,12 @@ let failure_case_result root_dir opcode template registers values op case =
       "observed", `String observed;
       "unchanged_status",
       `String (if unchanged_ok then "matched" else "changed");
+      "changed_status",
+      `String (if changed_ok then "changed" else "not_changed");
+      "finite_status",
+      `String (if finite_ok then "finite" else "nonfinite_or_missing");
       "unchanged_spans", `List (List.map snd unchanged);
+      "finite_spans", `List (List.map snd finite_spans);
     ]
   | _ -> fail "failure case must be an object"
 
