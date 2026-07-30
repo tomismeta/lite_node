@@ -423,6 +423,12 @@ helper. The helper is deliberately defined through the same deterministic
 finite binary64 `add` plus sign-bit negation path used before, so this documents
 and tests the subtraction profile without changing runtime arithmetic.
 
+`binary16_scale_decode` is represented by `Inference_fp64.of_binary16`. The
+contract VM still reads Q1 scale bytes little-endian, but all binary16
+zero/subnormal/normal/non-finite interpretation now lives in the shared
+deterministic fp64 substrate and is exhaustively tested over all 65,536
+encodings.
+
 LiteNode reports `GATED_DELTA_RULE_FP` under the same
 `host-fp-exp-local-candidate` profile. The recurrence shape, query-scale
 sqrt/division, dot products, beta updates, state mutation order, and output

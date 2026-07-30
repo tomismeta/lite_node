@@ -34,6 +34,42 @@ let zero negative =
 let negate bits =
   Int64.logxor bits sign_mask
 
+let of_binary16 bits =
+  if bits < 0 || bits > 0xffff then
+    None
+  else
+    let sign =
+      if bits land 0x8000 = 0 then 0L else sign_mask
+    in
+    let exponent = (bits lsr 10) land 0x1f in
+    let fraction = bits land 0x03ff in
+    match exponent, fraction with
+    | 0, 0 -> Some sign
+    | 0, _ ->
+      let top = ref 0 in
+      for bit = 1 to 9 do
+        if fraction land (1 lsl bit) <> 0 then top := bit
+      done;
+      let exponent_bits =
+        Int64.shift_left (Int64.of_int (!top + 999)) 52
+      in
+      let significand =
+        Int64.shift_left (Int64.of_int fraction) (52 - !top)
+      in
+      let fraction_bits =
+        Int64.logand significand fraction_mask
+      in
+      Some (Int64.logor sign (Int64.logor exponent_bits fraction_bits))
+    | 31, _ -> None
+    | _ ->
+      let exponent_bits =
+        Int64.shift_left (Int64.of_int (exponent + 1008)) 52
+      in
+      let fraction_bits =
+        Int64.shift_left (Int64.of_int fraction) 42
+      in
+      Some (Int64.logor sign (Int64.logor exponent_bits fraction_bits))
+
 let decode bits =
   let exponent = exponent_bits bits in
   if exponent = 0x7ff then

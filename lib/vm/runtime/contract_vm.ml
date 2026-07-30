@@ -608,37 +608,7 @@ let fp16_le_to_fp64_bits data offset =
     Char.code data.[offset]
     lor (Char.code data.[offset + 1] lsl 8)
   in
-  let sign =
-    if bits land 0x8000 = 0 then 0L else Int64.min_int
-  in
-  let exponent = (bits lsr 10) land 0x1f in
-  let fraction = bits land 0x03ff in
-  match exponent, fraction with
-  | 0, 0 -> Some sign
-  | 0, _ ->
-    let top = ref 0 in
-    for bit = 1 to 9 do
-      if fraction land (1 lsl bit) <> 0 then top := bit
-    done;
-    let exponent_bits =
-      Int64.shift_left (Int64.of_int (!top + 999)) 52
-    in
-    let significand =
-      Int64.shift_left (Int64.of_int fraction) (52 - !top)
-    in
-    let fraction_bits =
-      Int64.logand significand 0x000fffffffffffffL
-    in
-    Some (Int64.logor sign (Int64.logor exponent_bits fraction_bits))
-  | 31, _ -> None
-  | _ ->
-    let exponent_bits =
-      Int64.shift_left (Int64.of_int (exponent + 1008)) 52
-    in
-    let fraction_bits =
-      Int64.shift_left (Int64.of_int fraction) 42
-    in
-    Some (Int64.logor sign (Int64.logor exponent_bits fraction_bits))
+  Inference_fp64.of_binary16 bits
 
 let fp16_le_to_fp64 data offset =
   Option.map

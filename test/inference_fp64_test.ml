@@ -28,6 +28,75 @@ let expect_compare label actual expected =
   | Some value -> check label (value = expected)
   | None -> failwith (label ^ " returned non-finite")
 
+let expected_binary16 bits =
+  let sign = if bits land 0x8000 = 0 then 1.0 else -1.0 in
+  let exponent = (bits lsr 10) land 0x1f in
+  let fraction = bits land 0x03ff in
+  match exponent, fraction with
+  | 31, _ -> None
+  | 0, 0 -> Some (Int64.bits_of_float (sign *. 0.0))
+  | 0, _ ->
+    Some (Int64.bits_of_float (sign *. ldexp (float_of_int fraction) (-24)))
+  | _ ->
+    Some
+      (Int64.bits_of_float
+         (sign *. ldexp (1024.0 +. float_of_int fraction) (exponent - 25)))
+
+let check_binary16_edges () =
+  List.iter
+    (fun (label, bits, expected) ->
+      expect_bits label (Fp64.of_binary16 bits) expected)
+    [
+      "binary16 positive zero",
+      0x0000,
+      0L;
+      "binary16 negative zero",
+      0x8000,
+      Int64.min_int;
+      "binary16 min subnormal",
+      0x0001,
+      0x3e70000000000000L;
+      "binary16 negative min subnormal",
+      0x8001,
+      0xbe70000000000000L;
+      "binary16 one",
+      0x3c00,
+      0x3ff0000000000000L;
+      "binary16 max finite",
+      0x7bff,
+      0x40effc0000000000L;
+    ];
+  check
+    "binary16 positive infinity rejects"
+    (Fp64.of_binary16 0x7c00 = None);
+  check
+    "binary16 negative infinity rejects"
+    (Fp64.of_binary16 0xfc00 = None);
+  check
+    "binary16 nan rejects"
+    (Fp64.of_binary16 0x7e00 = None);
+  check
+    "binary16 negative input rejects"
+    (Fp64.of_binary16 (-1) = None);
+  check
+    "binary16 wide input rejects"
+    (Fp64.of_binary16 0x10000 = None)
+
+let check_binary16_exhaustive () =
+  let finite = ref 0 in
+  let rejected = ref 0 in
+  for bits = 0 to 0xffff do
+    match expected_binary16 bits, Fp64.of_binary16 bits with
+    | None, None -> incr rejected
+    | Some expected, Some observed when Int64.equal expected observed ->
+      incr finite
+    | _ ->
+      failwith
+        (Printf.sprintf "binary16 decode mismatch for 0x%04x" bits)
+  done;
+  check "binary16 finite encoding count" (!finite = 63488);
+  check "binary16 rejected encoding count" (!rejected = 2048)
+
 let check_arithmetic_edges () =
   expect_bits
     "fp64 int conversion"
@@ -187,6 +256,8 @@ let check_compare_edges () =
     (Fp64.compare 0x7ff0000000000000L 0x3ff0000000000000L = None)
 
 let () =
+  check_binary16_edges ();
+  check_binary16_exhaustive ();
   check_arithmetic_edges ();
   check_division_edges ();
   check_sqrt_edges ();

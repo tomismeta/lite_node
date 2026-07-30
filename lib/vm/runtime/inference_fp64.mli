@@ -2,6 +2,7 @@
 (* Copyright (c) 2023-2026 Octra Labs <dev@octra.org> *)
 
 val finite : int64 -> bool
+val of_binary16 : int -> int64 option
 val add : int64 -> int64 -> int64 option
 val sub : int64 -> int64 -> int64 option
 val mul : int64 -> int64 -> int64 option
