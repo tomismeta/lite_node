@@ -309,7 +309,10 @@ handoff convenience; it does not make an artifact consensus-ready unless its
 declared roots also bind and the readiness gate accepts. Reports also include
 `consensus_blocker_catalog`, a deduplicated mapping from blocker code to the
 opcodes carrying that blocker. This is the machine-readable remaining-math
-worklist after local execution succeeds.
+worklist after local execution succeeds. Each entry also carries an advisory
+`blocker_class`, separating software-fp64 qualification, host-native math,
+encoding/layout, execution order, safety policy, storage binding, and external
+qualification work without changing the stable blocker codes.
 
 `local_semantics` records what the current VM does today.
 `consensus_obligations` records what must become protocol-owned before the

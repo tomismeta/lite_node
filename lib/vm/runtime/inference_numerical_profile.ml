@@ -339,10 +339,59 @@ let add_blocker_pair groups (blocker, opcode) =
   in
   loop [] groups
 
+let blocker_class = function
+  | "host_fp_exp"
+  | "host_fp_exponentiation"
+  | "host_fp_trig" ->
+    "host_native_math"
+  | "fp64_add_conformance"
+  | "fp64_add_sub_conformance"
+  | "fp64_comparison_conformance"
+  | "fp64_divide_conformance"
+  | "fp64_epsilon_add_conformance"
+  | "fp64_mul_add_conformance"
+  | "fp64_multiply_conformance"
+  | "fp64_output_multiply_conformance"
+  | "fp64_recurrence_add_mul_conformance"
+  | "fp64_reduction_conformance"
+  | "fp64_sqrt_conformance"
+  | "fp64_subtract_conformance" ->
+    "software_fp64_conformance"
+  | "accumulation_order"
+  | "kernel_accumulation_order"
+  | "probability_ordering"
+  | "score_accumulation_order"
+  | "state_transition_order"
+  | "weighted_sum_accumulation_order" ->
+    "execution_order"
+  | "alias_rejection"
+  | "atomic_writeback"
+  | "finite_overflow_policy"
+  | "finite_rejection"
+  | "overlap_policy"
+  | "signed_zero_subnormal_policy" ->
+    "safety_policy"
+  | "authenticated_range_binding" ->
+    "storage_binding"
+  | "binary16_scale_decode"
+  | "epsilon_bit_interpretation"
+  | "first_max_tie_policy"
+  | "float_byte_decode"
+  | "position_base_policy"
+  | "q1_sign_mapping"
+  | "selected_index_encoding"
+  | "tail_preservation" ->
+    "encoding_or_layout"
+  | "activation_branch_policy"
+  | "cross_platform_conformance" ->
+    "external_qualification"
+  | _ -> "unknown"
+
 let blocker_entry_json (blocker, opcodes) =
   let opcodes = List.sort_uniq String.compare opcodes in
   `Assoc [
     "blocker_code", `String blocker;
+    "blocker_class", `String (blocker_class blocker);
     "opcode_count", `Int (List.length opcodes);
     "opcodes", `List (List.map (fun opcode -> `String opcode) opcodes);
   ]

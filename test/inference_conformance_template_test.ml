@@ -680,17 +680,37 @@ let check_inference_profile_surface_coverage () =
            expected
        | _ -> failwith ("missing blocker catalog entry: " ^ code)
      in
+     let check_blocker_class code expected =
+       match blocker_entry code with
+       | Some (`Assoc fields) ->
+         check
+           (code ^ " blocker class")
+           (String.equal (string_value "blocker_class" fields) expected)
+       | _ -> failwith ("missing blocker catalog entry: " ^ code)
+     in
      check_blocker
        "binary16_scale_decode"
        ["LINEAR_Q1_G128_FP"];
+     check_blocker_class
+       "binary16_scale_decode"
+       "encoding_or_layout";
      check_blocker
        "host_fp_exp"
        ["SIGMOID_FP"; "SOFTPLUS_FP"; "SILU_FP"; "SOFTMAX_FP";
         "GATED_DELTA_RULE_FP"];
+     check_blocker_class
+       "host_fp_exp"
+       "host_native_math";
      check_blocker
        "fp64_sqrt_conformance"
        ["RMSNORM_FP_EPS"; "L2NORM_FP"; "GATED_DELTA_RULE_FP";
-        "ATTENTION_SCORES_FP"]
+        "ATTENTION_SCORES_FP"];
+     check_blocker_class
+       "fp64_sqrt_conformance"
+       "software_fp64_conformance";
+     check_blocker_class
+       "atomic_writeback"
+       "safety_policy"
    | _ -> failwith "surface consensus blocker catalog must be list")
 
 let check_remaining_p0_profile_obligations () =
