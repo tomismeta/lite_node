@@ -75,6 +75,10 @@ let string_list_value name fields =
       values
   | _ -> failwith ("json field must be a list: " ^ name)
 
+let list_equal left right =
+  List.length left = List.length right
+  && List.for_all2 String.equal left right
+
 let contains_substring needle value =
   let needle_len = String.length needle in
   let value_len = String.length value in
@@ -234,13 +238,33 @@ let check_profile_status_counts () =
      check
        "mixed counts are not consensus-ready"
        (not (Profile.status_counts_are_consensus_ready counts));
+     check
+       "mixed consensus-ready blockers"
+       (list_equal
+          (Profile.consensus_ready_blockers
+             ~profile_gate_count:5
+             ~unprofiled_count:2
+             counts)
+          [
+            "unprofiled_profile_gates";
+            "local_only_profile_gates";
+            "consensus_candidate_profile_gates";
+            "unknown_profile_gates";
+          ]);
      let ready_counts =
        Profile.status_counts_of_json_gates
          [`Assoc ["consensus_status", `String "consensus_ready"]]
      in
      check
        "ready-only counts are consensus-ready"
-       (Profile.status_counts_are_consensus_ready ready_counts)
+       (Profile.status_counts_are_consensus_ready ready_counts);
+     check
+       "ready-only blockers empty"
+       (Profile.consensus_ready_blockers
+          ~profile_gate_count:1
+          ~unprofiled_count:0
+          ready_counts
+        = [])
    | _ -> failwith "status counts json must be object")
 
 let check_p0_profile_gate_coverage () =

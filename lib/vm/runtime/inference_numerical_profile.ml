@@ -78,6 +78,17 @@ let status_counts_are_consensus_ready counts =
   && counts.consensus_candidate = 0
   && counts.unknown = 0
 
+let add_if condition value values =
+  if condition then value :: values else values
+
+let consensus_ready_blockers ~profile_gate_count ~unprofiled_count counts =
+  []
+  |> add_if (counts.unknown > 0) "unknown_profile_gates"
+  |> add_if (counts.consensus_candidate > 0) "consensus_candidate_profile_gates"
+  |> add_if (counts.local_only > 0) "local_only_profile_gates"
+  |> add_if (unprofiled_count > 0) "unprofiled_profile_gates"
+  |> add_if (profile_gate_count = 0) "no_profile_gates"
+
 let status_counts_json counts =
   `Assoc [
     "local_only", `Int counts.local_only;

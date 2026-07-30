@@ -191,6 +191,14 @@ let consensus_ready_gate ~profile_gate_count ~unprofiled_count status_counts =
       (if not !require_consensus_ready then "not_required"
        else if ready then "accepted"
        else "rejected");
+    "blockers",
+    `List
+      (List.map
+         (fun blocker -> `String blocker)
+         (Profile.consensus_ready_blockers
+            ~profile_gate_count
+            ~unprofiled_count
+            status_counts));
   ]
 
 let consensus_ready_required_passes ~profile_gate_count ~unprofiled_count status_counts =
