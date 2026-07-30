@@ -462,6 +462,14 @@ let check_remaining_p0_profile_obligations () =
       "GATED_DELTA_RULE_FP", "next-state cells", "state-transition";
     ];
   let l2_gate = profile_gate "L2NORM_FP" in
+  (match List.assoc_opt "profile_contract" l2_gate with
+   | Some (`Assoc contract) ->
+     check
+       "l2 mixed rounding mode"
+       (String.equal
+          (string_value "rounding_mode" contract)
+          "deterministic-binary64-roundTiesToEven-with-host-math")
+   | _ -> failwith "missing l2 profile contract");
   let l2_blockers = string_list_value "consensus_blocker_codes" l2_gate in
   check
     "l2 reduction blocker"
@@ -469,6 +477,9 @@ let check_remaining_p0_profile_obligations () =
   check
     "l2 inverse-root blocker"
     (List.mem "host_fp_sqrt" l2_blockers);
+  check
+    "l2 divide conformance blocker"
+    (List.mem "fp64_divide_conformance" l2_blockers);
   let softmax_gate = profile_gate "SOFTMAX_FP" in
   let softmax_blockers =
     string_list_value "consensus_blocker_codes" softmax_gate
@@ -482,6 +493,9 @@ let check_remaining_p0_profile_obligations () =
   check
     "softmax exp blocker"
     (List.mem "host_fp_exp" softmax_blockers);
+  check
+    "softmax divide conformance blocker"
+    (List.mem "fp64_divide_conformance" softmax_blockers);
   let delta_gate = profile_gate "GATED_DELTA_RULE_FP" in
   let delta_blockers =
     string_list_value "consensus_blocker_codes" delta_gate
@@ -493,8 +507,8 @@ let check_remaining_p0_profile_obligations () =
     "delta exp sqrt blocker"
     (List.mem "host_fp_exp_sqrt" delta_blockers);
   check
-    "delta divide blocker"
-    (List.mem "host_fp_divide" delta_blockers);
+    "delta divide conformance blocker"
+    (List.mem "fp64_divide_conformance" delta_blockers);
   let oracle_root gate =
     match List.assoc_opt "profile_contract" gate with
     | Some (`Assoc contract) -> string_value "oracle_vector_root" contract

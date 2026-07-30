@@ -67,6 +67,21 @@ let round_scaled_integer significand shift =
   else
     round_shift_right_even significand (-shift)
 
+let round_ratio_even numerator denominator =
+  let quotient, remainder = Z.ediv_rem numerator denominator in
+  let doubled = Z.shift_left remainder 1 in
+  match Z.compare doubled denominator with
+  | -1 -> quotient
+  | 1 -> Z.succ quotient
+  | _ ->
+    if Z.testbit quotient 0 then Z.succ quotient else quotient
+
+let shifted_ratio numerator denominator shift =
+  if shift >= 0 then
+    Z.shift_left numerator shift, denominator
+  else
+    numerator, Z.shift_left denominator (-shift)
+
 let compose ~negative ~exponent significand =
   let exponent_bits = Int64.shift_left (Int64.of_int exponent) 52 in
   let fraction = Z.sub significand min_normal_significand in
@@ -99,6 +114,51 @@ let round_positive ~negative significand exponent =
         round_scaled_integer significand (exponent - floor_log2 + 52)
       in
       if Z.gt rounded max_significand then
+        let encoded_exponent = encoded_exponent + 1 in
+        if encoded_exponent >= 0x7ff then
+          None
+        else
+          Some (compose ~negative ~exponent:encoded_exponent min_normal_significand)
+      else
+        Some (compose ~negative ~exponent:encoded_exponent rounded)
+
+let floor_log2_ratio numerator denominator =
+  let candidate = Z.numbits numerator - Z.numbits denominator in
+  let cmp =
+    if candidate >= 0 then
+      Z.compare numerator (Z.shift_left denominator candidate)
+    else
+      Z.compare (Z.shift_left numerator (-candidate)) denominator
+  in
+  if cmp < 0 then candidate - 1 else candidate
+
+let round_positive_ratio ~negative numerator denominator exponent =
+  if Z.sign numerator = 0 then
+    Some (zero negative)
+  else
+    let floor_log2 = floor_log2_ratio numerator denominator + exponent in
+    if floor_log2 > 1023 then
+      None
+    else if floor_log2 < -1022 then
+      let numerator, denominator =
+        shifted_ratio numerator denominator (exponent + 1074)
+      in
+      let fraction = round_ratio_even numerator denominator in
+      if Z.sign fraction = 0 then
+        Some (zero negative)
+      else if Z.lt fraction min_normal_significand then
+        Some (compose_subnormal ~negative fraction)
+      else
+        Some (compose ~negative ~exponent:1 min_normal_significand)
+    else
+      let encoded_exponent = floor_log2 + 1023 in
+      let numerator, denominator =
+        shifted_ratio numerator denominator (exponent - floor_log2 + 52)
+      in
+      let rounded = round_ratio_even numerator denominator in
+      if Z.sign rounded = 0 then
+        Some (zero negative)
+      else if Z.gt rounded max_significand then
         let encoded_exponent = encoded_exponent + 1 in
         if encoded_exponent >= 0x7ff then
           None
@@ -145,3 +205,29 @@ let mul left right =
         (Z.mul left.significand right.significand)
         (left.exponent + right.exponent)
   | _ -> None
+
+let div left right =
+  match decode left, decode right with
+  | Some left, Some right ->
+    let negative = left.negative <> right.negative in
+    if Z.sign right.significand = 0 then
+      None
+    else if Z.sign left.significand = 0 then
+      Some (zero negative)
+    else
+      round_positive_ratio
+        ~negative
+        left.significand
+        right.significand
+        (left.exponent - right.exponent)
+  | _ -> None
+
+let of_int value =
+  let value = Z.of_int value in
+  if Z.sign value = 0 then
+    Some (zero false)
+  else
+    round_positive
+      ~negative:(Z.sign value < 0)
+      (Z.abs value)
+      0

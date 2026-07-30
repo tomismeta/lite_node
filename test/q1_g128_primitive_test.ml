@@ -223,6 +223,9 @@ let expect_bits label actual expected =
 
 let check_fp64_core_edges () =
   let bits value = Int64.bits_of_float value in
+  expect_bits "fp64 int conversion"
+    (Fp64.of_int 3)
+    (bits 3.0);
   expect_bits "fp64 add min-subnormal"
     (Fp64.add 1L 1L)
     2L;
@@ -232,6 +235,32 @@ let check_fp64_core_edges () =
   expect_bits "fp64 mul finite"
     (Fp64.mul (bits 1.5) (bits 2.0))
     (bits 3.0);
+  expect_bits "fp64 div finite"
+    (Fp64.div (bits 3.0) (bits 2.0))
+    (bits 1.5);
+  expect_bits "fp64 div one third"
+    (Fp64.div (bits 1.0) (bits 3.0))
+    (bits (1.0 /. 3.0));
+  expect_bits "fp64 div signed zero"
+    (Fp64.div Int64.min_int (bits 2.0))
+    Int64.min_int;
+  expect_bits "fp64 div min-subnormal underflow tie to even"
+    (Fp64.div 1L (bits 2.0))
+    0L;
+  List.iter
+    (fun (label, left, right) ->
+       expect_bits
+         ("fp64 div " ^ label)
+         (Fp64.div (bits left) (bits right))
+         (bits (left /. right)))
+    [
+      "negative third", -1.0, 3.0;
+      "min normal to subnormal", Float.min_float, 2.0;
+      "min normal by half", Float.min_float, 0.5;
+      "max by max", Float.max_float, Float.max_float;
+      "one by max", 1.0, Float.max_float;
+      "negative zero by negative", -0.0, -2.0;
+    ];
   expect_bits "fp64 positive zero plus negative zero"
     (Fp64.add 0L Int64.min_int)
     0L;
@@ -241,7 +270,11 @@ let check_fp64_core_edges () =
   check "fp64 add overflow rejects"
     (Fp64.add 0x7fefffffffffffffL 0x7fefffffffffffffL = None);
   check "fp64 mul overflow rejects"
-    (Fp64.mul 0x7fefffffffffffffL (bits 2.0) = None)
+    (Fp64.mul 0x7fefffffffffffffL (bits 2.0) = None);
+  check "fp64 div by zero rejects"
+    (Fp64.div (bits 1.0) 0L = None);
+  check "fp64 div overflow rejects"
+    (Fp64.div 0x7fefffffffffffffL (bits 0.5) = None)
 
 let check_golden_fixture () =
   let input = f64_bytes input_values in

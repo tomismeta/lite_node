@@ -1077,6 +1077,26 @@ let read_fp64_reg st reg =
     if finite_fp64 value then Some value else None
   | _ -> None
 
+let read_fp64_reg_bits st reg =
+  match getr st reg with
+  | VInt z when Z.fits_int64 z ->
+    let bits = Z.to_int64 z in
+    if Inference_fp64.finite bits then Some bits else None
+  | _ -> None
+
+let fp64_one_bits = Int64.bits_of_float 1.0
+
+let fp64_inverse_sqrt_bits bits =
+  let value = Int64.float_of_bits bits in
+  if value > 0.0 && finite_fp64 value then
+    let root = sqrt value in
+    if finite_fp64 root then
+      Inference_fp64.div fp64_one_bits (Int64.bits_of_float root)
+    else
+      None
+  else
+    None
+
 let gated_delta_rule_effort timesteps v_heads value_dim key_dim =
   let scale_product factors scale =
     match Cost.product factors with
@@ -2524,9 +2544,15 @@ let exec_one st op =
                    let state_values = Array.copy state_values in
                    let output_values = Array.make output_n 0L in
                    let state_per_head = value_dim * key_dim in
-                   let scale = 1.0 /. sqrt (float_of_int key_dim) in
-                   let scale_bits = Int64.bits_of_float scale in
-                   let ok = ref true in
+                   let scale_bits, scale_ok =
+                     match Inference_fp64.of_int key_dim with
+                     | Some key_dim_bits ->
+                       (match fp64_inverse_sqrt_bits key_dim_bits with
+                        | Some bits -> bits, true
+                        | None -> 0L, false)
+                     | None -> 0L, false
+                   in
+                   let ok = ref scale_ok in
                    let mul_add acc left right =
                      match Inference_fp64.mul left right with
                      | Some product -> Inference_fp64.add acc product
@@ -2630,7 +2656,7 @@ let exec_one st op =
                    if not !ok
                       || not (Array.for_all Inference_fp64.finite state_values)
                       || not (Array.for_all Inference_fp64.finite output_values)
-                      || not (finite_fp64 scale) then
+                      || not (Inference_fp64.finite scale_bits) then
                      revert st
                    else begin
                      for i = 0 to output_n - 1 do
@@ -2709,9 +2735,9 @@ let exec_one st op =
     end
   | RMSNORM_FP_EPS (rs_addr, rs_n, rs_gamma, rs_epsilon) ->
     (match read_int st rs_addr, read_int st rs_n, read_int st rs_gamma,
-           read_fp64_reg st rs_epsilon with
-     | Some addr, Some n, Some gamma, Some epsilon
-       when n > 0 && epsilon > 0.0 ->
+           read_fp64_reg_bits st rs_epsilon with
+     | Some addr, Some n, Some gamma, Some epsilon_bits
+       when n > 0 && Int64.float_of_bits epsilon_bits > 0.0 ->
        if not
             (List.for_all
                (fun (addr, n) -> valid_large_mem_span addr n)
@@ -2735,24 +2761,30 @@ let exec_one st op =
                     | None -> ok := false)
                  | None -> ok := false)
               input_values;
-            let sum_sq = Int64.float_of_bits !sum_sq_bits in
-            let mean_sq = sum_sq /. float_of_int n in
-            let inverse_input = mean_sq +. epsilon in
-            let inv_rms = 1.0 /. sqrt inverse_input in
-            let inv_rms_bits = Int64.bits_of_float inv_rms in
+            let inv_rms_bits =
+              match Inference_fp64.of_int n with
+              | Some count_bits ->
+                (match Inference_fp64.div !sum_sq_bits count_bits with
+                 | Some mean_sq_bits ->
+                   (match Inference_fp64.add mean_sq_bits epsilon_bits with
+                    | Some inverse_input_bits ->
+                      fp64_inverse_sqrt_bits inverse_input_bits
+                    | None -> None)
+                 | None -> None)
+              | None -> None
+            in
             let output =
               Array.init n (fun i ->
-                match Inference_fp64.mul input_values.(i) inv_rms_bits with
-                | Some scaled ->
-                  Inference_fp64.mul scaled gamma_values.(i)
+                match inv_rms_bits with
+                | Some inv_rms_bits ->
+                  (match Inference_fp64.mul input_values.(i) inv_rms_bits with
+                   | Some scaled ->
+                     Inference_fp64.mul scaled gamma_values.(i)
+                   | None -> None)
                 | None -> None)
             in
             if not !ok
-               || not
-                    (finite_fp64 sum_sq
-                     && finite_fp64 mean_sq
-                     && finite_fp64 inverse_input
-                     && finite_fp64 inv_rms)
+               || Option.is_none inv_rms_bits
                || not (Array.for_all Option.is_some output) then
               revert st
             else begin
@@ -2767,8 +2799,10 @@ let exec_one st op =
           | _ -> revert st)
      | _ -> revert st)
   | L2NORM_FP (rs_addr, rs_n, rs_epsilon) ->
-    (match read_int st rs_addr, read_int st rs_n, read_fp64_reg st rs_epsilon with
-     | Some addr, Some n, Some epsilon when n > 0 && epsilon > 0.0 ->
+    (match read_int st rs_addr, read_int st rs_n,
+           read_fp64_reg_bits st rs_epsilon with
+     | Some addr, Some n, Some epsilon_bits
+       when n > 0 && Int64.float_of_bits epsilon_bits > 0.0 ->
        if not (valid_large_mem_span addr n) then
          revert st
        else if not (add_dyn_product st [n; 3] 1) then
@@ -2787,19 +2821,20 @@ let exec_one st op =
                    | None -> ok := false)
                 | None -> ok := false)
              input_values;
-           let sum_sq = Int64.float_of_bits !sum_sq_bits in
-           let inverse_input = sum_sq +. epsilon in
-           let inv_norm = 1.0 /. sqrt inverse_input in
-           let inv_norm_bits = Int64.bits_of_float inv_norm in
+           let inv_norm_bits =
+             match Inference_fp64.add !sum_sq_bits epsilon_bits with
+             | Some inverse_input_bits -> fp64_inverse_sqrt_bits inverse_input_bits
+             | None -> None
+           in
            let output =
              Array.init n (fun i ->
-               Inference_fp64.mul input_values.(i) inv_norm_bits)
+               match inv_norm_bits with
+               | Some inv_norm_bits ->
+                 Inference_fp64.mul input_values.(i) inv_norm_bits
+               | None -> None)
            in
            if not !ok
-              || not
-                   (finite_fp64 sum_sq
-                    && finite_fp64 inverse_input
-                    && finite_fp64 inv_norm)
+              || Option.is_none inv_norm_bits
               || not (Array.for_all Option.is_some output) then
              revert st
            else begin
@@ -3138,13 +3173,14 @@ let exec_one st op =
             else begin
               let output = Array.make count None in
               for index = 0 to count - 1 do
-                let value =
-                  Int64.float_of_bits (Array.unsafe_get exps index) /. sum_exp
-                in
-                if finite_fp64 value then
-                  Array.unsafe_set output index (Some (Int64.bits_of_float value))
-                else
-                  ok := false
+                match
+                  Inference_fp64.div
+                    (Array.unsafe_get exps index)
+                    !sum_exp_bits
+                with
+                | Some value ->
+                  Array.unsafe_set output index (Some value)
+                | None -> ok := false
               done;
               if not !ok then
                 revert st

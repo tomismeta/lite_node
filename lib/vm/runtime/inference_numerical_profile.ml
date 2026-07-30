@@ -291,7 +291,8 @@ let local_semantics ~opcode =
       "minimum positive subnormal epsilon is accepted by the current host-fp profile";
       "input and gamma cells are finite binary64 values and their ranges must not overlap";
       "sum of squares is accumulated left-to-right with deterministic finite binary64 multiply/add";
-      "inverse RMS is computed as 1.0 / sqrt((sum_sq / count) + epsilon)";
+      "mean-square division, epsilon addition, reciprocal division, and output multiply use deterministic finite binary64";
+      "sqrt in the inverse RMS path uses native binary64";
       "output multiply uses deterministic finite binary64 multiply";
       "outputs are written only after the complete finite output vector is computed";
     ]
@@ -300,7 +301,8 @@ let local_semantics ~opcode =
       "epsilon is read from an integer register as binary64 bits and must be finite and positive";
       "input cells are finite binary64 values";
       "sum of squares is accumulated left-to-right with deterministic finite binary64 multiply/add";
-      "inverse norm is computed as 1.0 / sqrt(sum_sq + epsilon)";
+      "epsilon addition, reciprocal division, and output multiply use deterministic finite binary64";
+      "sqrt in the inverse norm path uses native binary64";
       "output multiply uses deterministic finite binary64 multiply";
       "outputs are written only after the complete finite output vector is computed";
     ]
@@ -311,7 +313,7 @@ let local_semantics ~opcode =
       "score-minus-maximum shifts use deterministic finite binary64 subtraction";
       "exp is applied to each shifted score using native binary64";
       "exponentials are summed left-to-right with deterministic finite binary64 addition";
-      "probabilities are divided by the native binary64 sum of exponentials";
+      "probabilities are divided by the binary64 sum of exponentials using deterministic finite binary64 division";
       "destination may equal scores exactly, but partial overlap is rejected";
     ]
   | "SIGMOID_FP" ->
@@ -350,8 +352,8 @@ let local_semantics ~opcode =
     [
       "query, key, value, decay, beta, and recurrent-state cells are finite binary64 values";
       "value heads map to query and key heads by modulo";
-      "state decay uses native exp(log_decay) and scale uses native 1.0 / sqrt(key_dim)";
-      "state decay, memory dot products, beta-delta updates, state updates, output dot products, and output scaling use deterministic finite binary64 add/mul";
+      "state decay uses native exp(log_decay) and query-scale sqrt uses native binary64";
+      "integer key-dimension conversion, query-scale reciprocal division, recurrence add/mul, and output scaling multiply use deterministic finite binary64";
       "loop order is timestep, value head, value row, key column";
       "output and next-state cells are written only after both buffers are finite";
     ]
@@ -422,24 +424,24 @@ let consensus_obligations ~opcode =
     ]
   | "RMSNORM_FP_EPS" ->
     [
-      "replace or qualify native binary64 division, epsilon addition, and sqrt in the inverse-root path";
-      "qualify deterministic binary64 reduction and output multiplication";
+      "replace or qualify native binary64 sqrt in the inverse-root path";
+      "qualify deterministic binary64 reduction, division, epsilon addition, and output multiplication";
       "pin signed-zero, subnormal, overflow, underflow, and non-finite behavior";
       "define exact epsilon-bit interpretation and range-overlap rejection";
       "pass independent cross-platform conformance for reduction and sqrt edge vectors";
     ]
   | "L2NORM_FP" ->
     [
-      "replace or qualify native binary64 division, epsilon addition, and sqrt in the inverse-root path";
-      "qualify deterministic binary64 reduction and output multiplication";
+      "replace or qualify native binary64 sqrt in the inverse-root path";
+      "qualify deterministic binary64 reduction, division, epsilon addition, and output multiplication";
       "pin epsilon-bit interpretation, signed-zero, subnormal, overflow, and non-finite behavior";
       "define exact output encoding and in-place writeback atomicity";
       "pass independent cross-platform conformance for inverse-norm edge vectors";
     ]
   | "SOFTMAX_FP" ->
     [
-      "replace or qualify native binary64 exp, division, and comparison behavior";
-      "qualify deterministic binary64 score shifting and exponential summation";
+      "replace or qualify native binary64 exp and comparison behavior";
+      "qualify deterministic binary64 score shifting, exponential summation, and probability division";
       "pin max-subtract semantics, ties, underflow, overflow, and non-finite rejection";
       "define exact output encoding and overlap/writeback atomicity";
       "pass independent cross-platform conformance for probability and ordering edge vectors";
@@ -481,8 +483,8 @@ let consensus_obligations ~opcode =
     ]
   | "GATED_DELTA_RULE_FP" ->
     [
-      "replace or qualify native binary64 exp plus query-scale sqrt/division";
-      "qualify deterministic binary64 recurrence add/mul and dot-product behavior";
+      "replace or qualify native binary64 exp plus query-scale sqrt";
+      "qualify deterministic binary64 recurrence add/mul, dot-product, and reciprocal division behavior";
       "pin head mapping, decay order, beta application, state update order, and scaling";
       "define exact output plus next-state encoding, alias rejection, software-fp effort, and atomicity";
       "pass independent cross-platform conformance for recurrent state-transition edge vectors";
@@ -551,9 +553,9 @@ let consensus_blocker_codes ~opcode =
     [
       "epsilon_bit_interpretation";
       "fp64_reduction_conformance";
-      "host_fp_epsilon_add";
+      "fp64_epsilon_add_conformance";
       "host_fp_sqrt";
-      "host_fp_divide";
+      "fp64_divide_conformance";
       "fp64_output_multiply_conformance";
       "signed_zero_subnormal_policy";
       "alias_rejection";
@@ -564,9 +566,9 @@ let consensus_blocker_codes ~opcode =
     [
       "epsilon_bit_interpretation";
       "fp64_reduction_conformance";
-      "host_fp_epsilon_add";
+      "fp64_epsilon_add_conformance";
       "host_fp_sqrt";
-      "host_fp_divide";
+      "fp64_divide_conformance";
       "fp64_output_multiply_conformance";
       "signed_zero_subnormal_policy";
       "atomic_writeback";
@@ -578,7 +580,7 @@ let consensus_blocker_codes ~opcode =
       "fp64_subtract_conformance";
       "host_fp_exp";
       "fp64_reduction_conformance";
-      "host_fp_divide";
+      "fp64_divide_conformance";
       "probability_ordering";
       "overlap_policy";
       "cross_platform_conformance";
@@ -588,7 +590,7 @@ let consensus_blocker_codes ~opcode =
       "fp64_recurrence_add_mul_conformance";
       "state_transition_order";
       "host_fp_exp_sqrt";
-      "host_fp_divide";
+      "fp64_divide_conformance";
       "alias_rejection";
       "atomic_writeback";
       "cross_platform_conformance";
@@ -639,27 +641,32 @@ let arithmetic_domain ~profile ~opcode =
   | "host-fp-local-candidate", "LINEAR_Q1_G128_FP" ->
     "q1-g128-binary16-scale-deterministic-binary64-accumulator"
   | "host-fp-local-candidate", "RMSNORM_FP_EPS" ->
-    "deterministic-binary64-reduction-output-mul-host-inverse-root"
+    "deterministic-binary64-reduction-divide-epsilon-output-mul-host-sqrt"
   | "host-fp-local-candidate", "L2NORM_FP" ->
-    "deterministic-binary64-reduction-output-mul-host-inverse-root"
+    "deterministic-binary64-reduction-epsilon-divide-output-mul-host-sqrt"
   | "host-fp-local-candidate", "ELEMWISE_MUL_FP" ->
     "deterministic-binary64-elementwise-multiply"
   | "host-fp-local-candidate", "RESIDUAL_ADD_FP" ->
     "deterministic-binary64-elementwise-add"
   | "host-fp-local-candidate", "SOFTMAX_FP" ->
-    "deterministic-binary64-shift-sum-host-exp-divide"
+    "deterministic-binary64-shift-sum-divide-host-exp-comparison"
   | "host-fp-local-candidate", "GATED_DELTA_RULE_FP" ->
-    "deterministic-binary64-recurrence-host-exp-sqrt-divide"
+    "deterministic-binary64-recurrence-divide-host-exp-sqrt"
   | "host-fp-local-candidate", _ -> "native-binary64-host-floating-point"
   | name, _ -> name
 
 let rounding_mode ~profile ~opcode =
   match profile.name, opcode with
+  | "host-fp-local-candidate", "LINEAR_Q1_G128_FP" ->
+    "ieee754-roundTiesToEven"
   | ( "host-fp-local-candidate",
-      ( "LINEAR_Q1_G128_FP"
+      ( "RMSNORM_FP_EPS"
+      | "L2NORM_FP"
+      | "SOFTMAX_FP"
+      | "GATED_DELTA_RULE_FP"
       | "ELEMWISE_MUL_FP"
       | "RESIDUAL_ADD_FP" ) ) ->
-    "ieee754-roundTiesToEven"
+    "deterministic-binary64-roundTiesToEven-with-host-math"
   | ("q16-exact" | "q32-exact"), _ -> "integer-profile-defined"
   | "soft-fp-exact", _ -> "software-profile-defined"
   | "byte-ingress-exact", _ -> "exact-byte-decode"
@@ -683,11 +690,11 @@ let operation_sequence ~opcode =
       "read_epsilon_binary64_bits";
       "snapshot_input_and_gamma";
       "sum_squares_left_to_right";
-      "divide_by_count";
-      "add_epsilon";
-      "sqrt";
-      "reciprocal";
-      "multiply_input_inverse_gamma";
+      "divide_by_count_deterministic";
+      "add_epsilon_deterministic";
+      "sqrt_host";
+      "reciprocal_divide_deterministic";
+      "multiply_input_inverse_gamma_deterministic";
       "finite_output_check";
       "atomic_output_writeback";
     ]
@@ -696,10 +703,10 @@ let operation_sequence ~opcode =
       "read_epsilon_binary64_bits";
       "snapshot_input";
       "sum_squares_left_to_right";
-      "add_epsilon";
-      "sqrt";
-      "reciprocal";
-      "multiply_input_inverse";
+      "add_epsilon_deterministic";
+      "sqrt_host";
+      "reciprocal_divide_deterministic";
+      "multiply_input_inverse_deterministic";
       "finite_output_check";
       "atomic_output_writeback";
     ]
@@ -710,7 +717,7 @@ let operation_sequence ~opcode =
       "subtract_max_deterministic";
       "exp_each_score";
       "sum_exponentials_left_to_right_deterministic";
-      "divide_each_exponential_by_sum";
+      "divide_each_exponential_by_sum_deterministic";
       "finite_output_check";
       "atomic_output_writeback";
     ]
@@ -719,7 +726,8 @@ let operation_sequence ~opcode =
       "snapshot_operands_and_state";
       "iterate_timestep_value_head_row_column";
       "compute_decay";
-      "compute_query_scale_host";
+      "compute_query_scale_sqrt_host";
+      "compute_query_scale_reciprocal_deterministic";
       "apply_state_decay_deterministic";
       "compute_memory_dot_deterministic";
       "apply_beta_delta_deterministic";
