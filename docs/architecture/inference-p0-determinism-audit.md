@@ -75,7 +75,31 @@ The LiteNode-side conformance runner should advance in three steps:
    oracle emitted by `octra-inference`.
 
 The template checker is intentionally diagnostic-only. It rejects drift before
-execution, but it does not execute math yet.
+execution, but it does not execute math. The companion positive runner executes
+the current P0 templates directly through `Contract_vm` and compares each output
+span byte-for-byte:
+
+```text
+tools/inference_conformance_run.exe \
+  --template-index <p0-vm-execution-templates.cjson>
+```
+
+The first accepted producer indexes are:
+
+```text
+/home/exedev/evidence/octra-inference/determinism-ingestion-corpus-vm-templates-20260730-004544/p0-vm-execution-templates.cjson
+/home/exedev/evidence/octra-inference/determinism-ingestion-corpus-vm-templates-corrected-20260730-011945/p0-vm-execution-templates.cjson
+```
+
+Both indexes currently execute all five positive P0 templates and match every
+declared output span. The saved LiteNode reports live beside the indexes as
+`litenode-positive-execution-report.cjson`.
+
+Observed VM effort does not match producer `expected_effort` yet. Treat that
+field as a producer estimate until `octra-inference` either emits exact
+`Contract_vm` effort or renames the field to make the estimate boundary
+unambiguous. `--strict-effort` is available when exact effort becomes part of
+the contract.
 
 Required template schema:
 
@@ -166,3 +190,21 @@ Acceptance means only:
 - failure cases are present.
 
 After that, LiteNode can wire execution without negotiating schema again.
+
+## Current Positive Execution Gate
+
+Status on 2026-07-30:
+
+| Opcode | VM run | Output spans | Producer effort vs observed effort |
+| --- | --- | --- | --- |
+| `LINEAR_Q1_G128_FP` | accepted | matched | `256` vs `201` |
+| `RMSNORM_FP_EPS` | accepted | matched | `32` vs `67` |
+| `L2NORM_FP` | accepted | matched | `24` vs `53` |
+| `SOFTMAX_FP` | accepted | matched | `64` vs `133` |
+| `GATED_DELTA_RULE_FP` | accepted | matched | `96` vs `222` |
+
+This is a positive arithmetic ingestion gate, not a validator-grade
+determinism claim. It proves the producer fixtures now agree with the current
+LiteNode VM implementation for the five P0 positive cases. The next gap is
+failure/atomicity execution over the declared mutations, followed by replacing
+host-FP semantics where protocol determinism requires it.
