@@ -37,6 +37,13 @@ type root_binding_counts = {
   unavailable : int;
 }
 
+type root_binding_classification_counts = {
+  none : int;
+  profile_root_mismatch : int;
+  profile_root_unavailable : int;
+  root_binding_unknown : int;
+}
+
 type error =
   | Unknown_profile of string
   | Unsupported_opcode_profile of {
@@ -66,7 +73,11 @@ val consensus_ready :
 val consensus_ready_blockers :
   profile_gate_count:int -> unprofiled_count:int -> status_counts -> string list
 val root_binding_counts_of_json : Yojson.Safe.t list -> root_binding_counts
+val root_binding_classification_counts_of_json :
+  Yojson.Safe.t list -> root_binding_classification_counts
 val root_bindings_are_consensus_ready : root_binding_counts -> bool
 val root_binding_blockers : root_binding_counts -> string list
 val root_binding_counts_json : root_binding_counts -> Yojson.Safe.t
+val root_binding_classification_counts_json :
+  root_binding_classification_counts -> Yojson.Safe.t
 val status_counts_json : status_counts -> Yojson.Safe.t

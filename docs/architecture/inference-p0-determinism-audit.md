@@ -300,6 +300,9 @@ Template and P0 execution reports expose that diagnostic as
 They also expose `profile_root_binding.classification`, where `none` means the
 root is bound, `profile_root_mismatch` means the producer supplied a different
 numerical root, and `profile_root_unavailable` means the gate root was missing.
+Conformance reports summarize those values in
+`profile_root_binding_classification_counts` so consumers can detect stale
+profile roots without walking every template row.
 
 `local_semantics` records what the current VM does today.
 `consensus_obligations` records what must become protocol-owned before the

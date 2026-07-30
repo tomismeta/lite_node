@@ -378,6 +378,10 @@ let check_profile_root_binding_counts () =
       Profile.root_binding_counts_of_json
         [matched; unbound; unavailable]
     in
+    let classification_counts =
+      Profile.root_binding_classification_counts_of_json
+        [matched; unbound; unavailable]
+    in
     let classification = function
       | `Assoc fields -> string_value "classification" fields
       | _ -> failwith "root binding json must be object"
@@ -406,7 +410,20 @@ let check_profile_root_binding_counts () =
          (list_equal
             (Profile.root_binding_blockers counts)
             ["unbound_profile_roots"; "unavailable_profile_roots"])
-     | _ -> failwith "root binding counts json must be object")
+     | _ -> failwith "root binding counts json must be object");
+    (match Profile.root_binding_classification_counts_json classification_counts with
+     | `Assoc fields ->
+       check "none root binding count" (int_value "none" fields = 1);
+       check
+         "profile root mismatch count"
+         (int_value "profile_root_mismatch" fields = 1);
+       check
+         "profile root unavailable count"
+         (int_value "profile_root_unavailable" fields = 1);
+       check
+         "root binding unknown count"
+         (int_value "root_binding_unknown" fields = 0)
+     | _ -> failwith "root binding classification counts json must be object")
 
 let check_profile_status_counts () =
   let runtime_gate opcode = `Assoc (profile_gate opcode) in

@@ -194,6 +194,11 @@ let profile_root_binding_status_counts values =
   |> List.filter_map profile_root_binding_value
   |> Profile.root_binding_counts_of_json
 
+let profile_root_binding_classification_counts values =
+  values
+  |> List.filter_map profile_root_binding_value
+  |> Profile.root_binding_classification_counts_of_json
+
 let consensus_ready_gate
     ~profile_gate_count
     ~unprofiled_count
@@ -1201,6 +1206,9 @@ let run_p0_plus_pack path =
   let root_binding_counts =
     Profile.root_binding_counts_of_json profile_root_bindings
   in
+  let root_binding_classification_counts =
+    Profile.root_binding_classification_counts_of_json profile_root_bindings
+  in
   let classified_profile_gate_count =
     Profile.classified_gate_count status_counts
   in
@@ -1229,6 +1237,9 @@ let run_p0_plus_pack path =
     Profile.status_counts_json status_counts;
     "profile_root_binding_status_counts",
     Profile.root_binding_counts_json root_binding_counts;
+    "profile_root_binding_classification_counts",
+    Profile.root_binding_classification_counts_json
+      root_binding_classification_counts;
     "consensus_ready_gate",
     consensus_ready_gate
       ~profile_gate_count
@@ -1268,6 +1279,9 @@ let run_index path =
   let root_binding_counts =
     profile_root_binding_status_counts (List.map snd results)
   in
+  let root_binding_classification_counts =
+    profile_root_binding_classification_counts (List.map snd results)
+  in
   let classified_profile_gate_count =
     Profile.classified_gate_count status_counts
   in
@@ -1296,6 +1310,9 @@ let run_index path =
     Profile.status_counts_json status_counts;
     "profile_root_binding_status_counts",
     Profile.root_binding_counts_json root_binding_counts;
+    "profile_root_binding_classification_counts",
+    Profile.root_binding_classification_counts_json
+      root_binding_classification_counts;
     "consensus_ready_gate",
     consensus_ready_gate
       ~profile_gate_count

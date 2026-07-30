@@ -37,6 +37,13 @@ type root_binding_counts = {
   unavailable : int;
 }
 
+type root_binding_classification_counts = {
+  none : int;
+  profile_root_mismatch : int;
+  profile_root_unavailable : int;
+  root_binding_unknown : int;
+}
+
 type error =
   | Unknown_profile of string
   | Unsupported_opcode_profile of {
@@ -61,6 +68,13 @@ let empty_root_binding_counts = {
   matched = 0;
   unbound = 0;
   unavailable = 0;
+}
+
+let empty_root_binding_classification_counts = {
+  none = 0;
+  profile_root_mismatch = 0;
+  profile_root_unavailable = 0;
+  root_binding_unknown = 0;
 }
 
 let gate_status = function
@@ -136,6 +150,43 @@ let add_root_binding_status counts binding =
 let root_binding_counts_of_json bindings =
   List.fold_left add_root_binding_status empty_root_binding_counts bindings
 
+let root_binding_classification = function
+  | `Assoc fields ->
+    (match List.assoc_opt "classification" fields with
+     | Some (`String "none") -> "none"
+     | Some (`String "profile_root_mismatch") -> "profile_root_mismatch"
+     | Some (`String "profile_root_unavailable") -> "profile_root_unavailable"
+     | Some (`String _) -> "root_binding_unknown"
+     | _ ->
+       (match root_binding_status (`Assoc fields) with
+        | "matched" -> "none"
+        | "unbound" -> "profile_root_mismatch"
+        | "unavailable" -> "profile_root_unavailable"
+        | _ -> "root_binding_unknown"))
+  | _ -> "profile_root_unavailable"
+
+let add_root_binding_classification counts binding =
+  match root_binding_classification binding with
+  | "none" -> { counts with none = counts.none + 1 }
+  | "profile_root_mismatch" ->
+    { counts with profile_root_mismatch = counts.profile_root_mismatch + 1 }
+  | "profile_root_unavailable" ->
+    {
+      counts with
+      profile_root_unavailable = counts.profile_root_unavailable + 1;
+    }
+  | _ ->
+    {
+      counts with
+      root_binding_unknown = counts.root_binding_unknown + 1;
+    }
+
+let root_binding_classification_counts_of_json bindings =
+  List.fold_left
+    add_root_binding_classification
+    empty_root_binding_classification_counts
+    bindings
+
 let root_bindings_are_consensus_ready counts =
   counts.unbound = 0 && counts.unavailable = 0
 
@@ -149,6 +200,14 @@ let root_binding_counts_json counts =
     "matched", `Int counts.matched;
     "unbound", `Int counts.unbound;
     "unavailable", `Int counts.unavailable;
+  ]
+
+let root_binding_classification_counts_json counts =
+  `Assoc [
+    "none", `Int counts.none;
+    "profile_root_mismatch", `Int counts.profile_root_mismatch;
+    "profile_root_unavailable", `Int counts.profile_root_unavailable;
+    "root_binding_unknown", `Int counts.root_binding_unknown;
   ]
 
 let status_counts_json counts =

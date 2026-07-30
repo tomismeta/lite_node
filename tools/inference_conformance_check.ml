@@ -205,6 +205,11 @@ let profile_root_binding_status_counts values =
   |> List.filter_map profile_root_binding_value
   |> Profile.root_binding_counts_of_json
 
+let profile_root_binding_classification_counts values =
+  values
+  |> List.filter_map profile_root_binding_value
+  |> Profile.root_binding_classification_counts_of_json
+
 let consensus_ready_gate
     ~profile_gate_count
     ~unprofiled_count
@@ -690,6 +695,9 @@ let producer_index_report index_path =
     let profile_root_binding_counts =
       profile_root_binding_status_counts profile_gates
     in
+    let profile_root_binding_classification_counts =
+      profile_root_binding_classification_counts profile_gates
+    in
     let classified_profile_gate_count =
       Profile.classified_gate_count profile_status_counts
     in
@@ -739,6 +747,9 @@ let producer_index_report index_path =
       Profile.status_counts_json profile_status_counts;
       "profile_root_binding_status_counts",
       Profile.root_binding_counts_json profile_root_binding_counts;
+      "profile_root_binding_classification_counts",
+      Profile.root_binding_classification_counts_json
+        profile_root_binding_classification_counts;
       "consensus_ready_gate",
       consensus_ready_gate
         ~profile_gate_count
@@ -791,6 +802,9 @@ let () =
           let profile_root_binding_counts =
             profile_root_binding_status_counts [template_json]
           in
+          let profile_root_binding_classification_counts =
+            profile_root_binding_classification_counts [template_json]
+          in
           let classified_profile_gate_count =
             Profile.classified_gate_count profile_status_counts
           in
@@ -819,6 +833,9 @@ let () =
               Profile.status_counts_json profile_status_counts;
               "profile_root_binding_status_counts",
               Profile.root_binding_counts_json profile_root_binding_counts;
+              "profile_root_binding_classification_counts",
+              Profile.root_binding_classification_counts_json
+                profile_root_binding_classification_counts;
               "consensus_ready_gate",
               consensus_ready_gate
                 ~profile_gate_count
@@ -846,6 +863,9 @@ let () =
     let status_counts = profile_status_counts template_jsons in
     let root_binding_counts =
       profile_root_binding_status_counts template_jsons
+    in
+    let root_binding_classification_counts =
+      profile_root_binding_classification_counts template_jsons
     in
     let classified_profile_gate_count =
       Profile.classified_gate_count status_counts
@@ -875,6 +895,9 @@ let () =
         Profile.status_counts_json status_counts;
         "profile_root_binding_status_counts",
         Profile.root_binding_counts_json root_binding_counts;
+        "profile_root_binding_classification_counts",
+        Profile.root_binding_classification_counts_json
+          root_binding_classification_counts;
         "consensus_ready_gate",
         consensus_ready_gate
           ~profile_gate_count
