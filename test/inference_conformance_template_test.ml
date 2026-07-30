@@ -178,6 +178,11 @@ let check_q1_profile_obligations () =
                "sign bit"
                (string_list_value "local_semantics" gate));
           check
+            "q1 local scale semantics"
+            (list_contains_substring
+               "signed zero"
+               (string_list_value "local_semantics" gate));
+          check
             "q1 consensus binary16 obligation"
             (list_contains_substring
                "binary16 scale"

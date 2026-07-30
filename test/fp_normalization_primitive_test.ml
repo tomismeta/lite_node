@@ -170,6 +170,14 @@ let signed_zero_subnormal_gamma =
   bytes_of_hex
     "000000000000f03f000000000000f03f000000000000f03f000000000000f03f"
 
+let min_subnormal_epsilon_input =
+  bytes_of_hex
+    "0000000000000000000000000000008001000000000000000100000000000080"
+
+let min_subnormal_epsilon_expected =
+  bytes_of_hex
+    "00000000000000000000000000000080000000000000601e000000000000609e"
+
 let l2_single_input =
   bytes_of_hex
     "0000000000000840000000000000104000000000000000000000000000000000"
@@ -224,6 +232,15 @@ let signed_zero_subnormal = {
   expected = signed_zero_subnormal_input;
 }
 
+let min_subnormal_epsilon = {
+  name = "minimum subnormal epsilon";
+  count = 4;
+  epsilon_bits = 1L;
+  input = min_subnormal_epsilon_input;
+  gamma = signed_zero_subnormal_gamma;
+  expected = min_subnormal_epsilon_expected;
+}
+
 let rms_op =
   VM.RMSNORM_FP_EPS (0, 1, 2, 3)
 
@@ -267,6 +284,15 @@ let check_rms_signed_zero_and_subnormal () =
     state
     100
     (fixture_bits signed_zero_subnormal.expected)
+
+let check_rms_min_subnormal_epsilon () =
+  let state = make_rms_state min_subnormal_epsilon in
+  check "rms minimum subnormal epsilon succeeds" (VM.run state rms_code);
+  check_cells
+    "rms minimum subnormal epsilon"
+    state
+    100
+    (fixture_bits min_subnormal_epsilon.expected)
 
 let check_rms_row_composition () =
   let state =
@@ -948,6 +974,7 @@ let check_full_binding_if_available () =
 let () =
   check_rms_golden ();
   check_rms_signed_zero_and_subnormal ();
+  check_rms_min_subnormal_epsilon ();
   check_rms_row_composition ();
   check_rms_missing_and_nonfinite_revert ();
   check_rms_invalid_epsilon_reverts ();
