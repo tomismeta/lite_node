@@ -334,14 +334,14 @@ let local_semantics ~opcode =
     [
       "destination and source cells are finite binary64 values";
       "destination may equal source exactly, but partial overlap is rejected";
-      "each output cell is computed with native binary64 multiplication";
+      "each output cell is computed with deterministic finite binary64 multiplication";
       "outputs are written only after the complete finite output vector is computed";
     ]
   | "RESIDUAL_ADD_FP" ->
     [
       "destination and source cells are finite binary64 values";
       "destination may equal source exactly, but partial overlap is rejected";
-      "each output cell is computed with native binary64 addition";
+      "each output cell is computed with deterministic finite binary64 addition";
       "outputs are written only after the complete finite output vector is computed";
     ]
   | "GATED_DELTA_RULE_FP" ->
@@ -463,14 +463,14 @@ let consensus_obligations ~opcode =
     ]
   | "ELEMWISE_MUL_FP" ->
     [
-      "replace or qualify native binary64 multiplication";
+      "qualify deterministic binary64 multiplication";
       "pin signed-zero, subnormal, overflow, and non-finite behavior";
       "define same-range aliasing, partial-overlap rejection, writeback atomicity, and effort";
       "pass independent cross-platform conformance for elementwise multiply edge vectors";
     ]
   | "RESIDUAL_ADD_FP" ->
     [
-      "replace or qualify native binary64 addition";
+      "qualify deterministic binary64 addition";
       "pin signed-zero, subnormal, overflow, and non-finite behavior";
       "define same-range aliasing, partial-overlap rejection, writeback atomicity, and effort";
       "pass independent cross-platform conformance for residual add edge vectors";
@@ -587,6 +587,24 @@ let consensus_blocker_codes ~opcode =
       "atomic_writeback";
       "cross_platform_conformance";
     ]
+  | "ELEMWISE_MUL_FP" ->
+    [
+      "fp64_multiply_conformance";
+      "signed_zero_subnormal_policy";
+      "finite_overflow_policy";
+      "overlap_policy";
+      "atomic_writeback";
+      "cross_platform_conformance";
+    ]
+  | "RESIDUAL_ADD_FP" ->
+    [
+      "fp64_add_conformance";
+      "signed_zero_subnormal_policy";
+      "finite_overflow_policy";
+      "overlap_policy";
+      "atomic_writeback";
+      "cross_platform_conformance";
+    ]
   | opcode ->
     match current_runtime_profile ~opcode with
     | Some "host-fp-local-candidate" ->
@@ -618,12 +636,19 @@ let arithmetic_domain ~profile ~opcode =
     "deterministic-binary64-reduction-output-mul-host-inverse-root"
   | "host-fp-local-candidate", "L2NORM_FP" ->
     "deterministic-binary64-reduction-output-mul-host-inverse-root"
+  | "host-fp-local-candidate", "ELEMWISE_MUL_FP" ->
+    "deterministic-binary64-elementwise-multiply"
+  | "host-fp-local-candidate", "RESIDUAL_ADD_FP" ->
+    "deterministic-binary64-elementwise-add"
   | "host-fp-local-candidate", _ -> "native-binary64-host-floating-point"
   | name, _ -> name
 
 let rounding_mode ~profile ~opcode =
   match profile.name, opcode with
-  | "host-fp-local-candidate", "LINEAR_Q1_G128_FP" ->
+  | ( "host-fp-local-candidate",
+      ( "LINEAR_Q1_G128_FP"
+      | "ELEMWISE_MUL_FP"
+      | "RESIDUAL_ADD_FP" ) ) ->
     "ieee754-roundTiesToEven"
   | ("q16-exact" | "q32-exact"), _ -> "integer-profile-defined"
   | "soft-fp-exact", _ -> "software-profile-defined"
@@ -761,6 +786,26 @@ let oracle_vector_root ~opcode =
         "shape_effort_revert";
         "overflow_revert";
         "inverse_root_overflow_revert";
+      ]
+    | "ELEMWISE_MUL_FP" ->
+      [
+        "golden";
+        "same_range_alias";
+        "missing_operand_revert";
+        "nonfinite_operand_revert";
+        "partial_overlap_revert";
+        "overflow_revert";
+        "effort_revert";
+      ]
+    | "RESIDUAL_ADD_FP" ->
+      [
+        "golden";
+        "same_range_alias";
+        "missing_operand_revert";
+        "nonfinite_operand_revert";
+        "partial_overlap_revert";
+        "overflow_revert";
+        "effort_revert";
       ]
     | _ -> ["profile_gate_only"]
   in

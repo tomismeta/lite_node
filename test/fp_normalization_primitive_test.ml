@@ -727,6 +727,15 @@ let check_mul_rejections () =
     state
     100
     (List.map Int64.bits_of_float [2.0; -3.0; 4.0]);
+  let state = make_mul_state () in
+  set_f64_bits state 100 (Int64.bits_of_float max_float);
+  set_f64_bits state 200 (Int64.bits_of_float 2.0);
+  check "elemwise mul output overflow rejects" (not (VM.run state mul_code));
+  check_cells
+    "elemwise mul output overflow keeps output"
+    state
+    100
+    (List.map Int64.bits_of_float [max_float; -3.0; 4.0]);
   let state = make_mul_state ~dst:101 ~src:100 () in
   List.iteri
     (fun index value -> set_f64_bits state (101 + index) (Int64.bits_of_float value))

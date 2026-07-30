@@ -411,8 +411,8 @@ current FP opcodes.
 LiteNode also reports `ELEMWISE_MUL_FP` and `RESIDUAL_ADD_FP` under the current
 `host-fp-local-candidate` runtime profile. Their runtime tests already pin
 finite reads, exact same-range aliasing, partial-overlap rejection, overflow
-rollback, and effort; profile reporting now prevents native binary64
-multiply/add from being mislabeled as fixed-point or software-FP authority.
+rollback, and effort; profile reporting now prevents deterministic binary64
+multiply/add from being mislabeled as fixed-point or consensus authority.
 
 LiteNode also reports `CAUSAL_DEPTHWISE_CONV1D_FP` under the current
 `host-fp-local-candidate` runtime profile. The local profile covers finite

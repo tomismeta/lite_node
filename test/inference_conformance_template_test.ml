@@ -601,9 +601,17 @@ let check_vector_arithmetic_profile_gates () =
       | Error error -> failwith (Profile.error_message error)
       | Ok _ -> failwith (opcode ^ " should reject profile overclaim"))
     [
-      "ELEMWISE_MUL_FP", "native binary64 multiplication", "elementwise multiply edge vectors";
-      "RESIDUAL_ADD_FP", "native binary64 addition", "residual add edge vectors";
-    ]
+      "ELEMWISE_MUL_FP", "deterministic finite binary64 multiplication", "elementwise multiply edge vectors";
+      "RESIDUAL_ADD_FP", "deterministic finite binary64 addition", "residual add edge vectors";
+    ];
+  let check_blocker opcode blocker =
+    let gate = profile_gate opcode in
+    check
+      (opcode ^ " blocker")
+      (List.mem blocker (string_list_value "consensus_blocker_codes" gate))
+  in
+  check_blocker "ELEMWISE_MUL_FP" "fp64_multiply_conformance";
+  check_blocker "RESIDUAL_ADD_FP" "fp64_add_conformance"
 
 let check_attention_profile_gates () =
   List.iter

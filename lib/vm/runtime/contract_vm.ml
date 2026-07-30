@@ -2780,16 +2780,20 @@ let exec_one st op =
        else if not (add_dyn_product st [n; 3] 1) then
          revert st
        else
-         (match read_fp64_array st.memory.data dst n,
-                read_fp64_array st.memory.data src n with
+         (match read_fp64_bits_array st.memory.data dst n,
+                read_fp64_bits_array st.memory.data src n with
           | Some dst_values, Some src_values ->
             let output =
-              Array.init n (fun i -> dst_values.(i) *. src_values.(i))
+              Array.init n (fun i ->
+                Inference_fp64.mul dst_values.(i) src_values.(i))
             in
-            if not (Array.for_all finite_fp64 output) then revert st
+            if not (Array.for_all Option.is_some output) then revert st
             else begin
               for i = 0 to n - 1 do
-                mem_set_fp64 st.memory.data (dst + i) output.(i)
+                mem_set_fp64_bits
+                  st.memory.data
+                  (dst + i)
+                  (Option.get output.(i))
               done;
               true
             end
@@ -2807,16 +2811,20 @@ let exec_one st op =
        else if not (add_dyn_product st [n; 2] 1) then
          revert st
        else
-         (match read_fp64_array st.memory.data dst n,
-                read_fp64_array st.memory.data src n with
+         (match read_fp64_bits_array st.memory.data dst n,
+                read_fp64_bits_array st.memory.data src n with
           | Some dst_values, Some src_values ->
             let output =
-              Array.init n (fun i -> dst_values.(i) +. src_values.(i))
+              Array.init n (fun i ->
+                Inference_fp64.add dst_values.(i) src_values.(i))
             in
-            if not (Array.for_all finite_fp64 output) then revert st
+            if not (Array.for_all Option.is_some output) then revert st
             else begin
               for i = 0 to n - 1 do
-                mem_set_fp64 st.memory.data (dst + i) output.(i)
+                mem_set_fp64_bits
+                  st.memory.data
+                  (dst + i)
+                  (Option.get output.(i))
               done;
               true
             end
