@@ -332,6 +332,12 @@ Current result:
 | `ARGMAX_FP` | 2 | accepted/matched for selected index |
 | `RMSNORM_FP_EPS -> LINEAR_Q1_G128_FP -> ARGMAX_FP` | 1 | accepted/matched |
 
+LiteNode runtime tests now also pin current host-FP left-to-right
+accumulation for `ATTENTION_SCORES_FP` dot products and
+`ATTENTION_WEIGHTED_SUM_FP` weighted reductions with cancellation vectors. This
+is useful local evidence for the P0-plus attention surface, but it does not
+promote either opcode beyond local-candidate math.
+
 The saved report is:
 
 ```text

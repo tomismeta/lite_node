@@ -187,6 +187,17 @@ let check_query_key_aliasing () =
   check "partial q/key alias runs" (VM.run st [|op; VM.STOP|]);
   check_scores "partial q/key alias" st [30.5; 32.]
 
+let check_left_to_right_accumulation () =
+  let st, ok =
+    run
+      ~key_count:1
+      ~head_dim:3
+      [1.; 1.; 1.]
+      [1e16; 1.; -1e16]
+  in
+  check "attention scores cancellation runs" ok;
+  check_scores "attention scores cancellation" st [0.]
+
 let check_reverts_atomically () =
   let cases = [
     "missing query cell", 300, (fun () ->
@@ -467,6 +478,7 @@ let check_artifact_fixture_if_available () =
 let () =
   check_golden ();
   check_query_key_aliasing ();
+  check_left_to_right_accumulation ();
   check_reverts_atomically ();
   check_effort ();
   check_capability_gate ();

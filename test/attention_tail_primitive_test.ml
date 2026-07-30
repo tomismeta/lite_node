@@ -135,6 +135,16 @@ let check_weighted_sum_golden () =
   check "weighted sum runs" (VM.run st [|weighted_sum_op; VM.STOP|]);
   check_cells "weighted sum" st 300 [5.; 7.]
 
+let check_weighted_sum_left_to_right_accumulation () =
+  let st = state () in
+  set_weighted_sum_regs st ~key_count:3 ~head_dim:1 ();
+  set_values st 100 [1.; 1.; 1.];
+  set_values st 200 [1e16; 1.; -1e16];
+  check
+    "weighted sum cancellation runs"
+    (VM.run st [|weighted_sum_op; VM.STOP|]);
+  check_cells "weighted sum cancellation" st 300 [0.]
+
 let check_tail_reverts_atomically () =
   let cases = [
     "softmax missing score", 300, 3, (fun () ->
@@ -470,6 +480,7 @@ let () =
   check_softmax_exact_inplace ();
   check_softmax_extreme_scores ();
   check_weighted_sum_golden ();
+  check_weighted_sum_left_to_right_accumulation ();
   check_tail_reverts_atomically ();
   check_effort ();
   check_capability_gate ();
