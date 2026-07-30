@@ -195,6 +195,18 @@ let of_name = function
         "preserve finite-domain gates, rejection policy, effort, and atomic writeback";
       ];
     }
+  | "host-fp-trig-local-candidate" as name ->
+    Ok {
+      name;
+      consensus_status = Local_only;
+      summary =
+        "native trigonometric and exponentiation math accepted only for local inference proof execution";
+      required_actions = [
+        "replace or qualify native pow/cos/sin math before validator admission";
+        "bind deterministic rotary oracle vectors and profile roots";
+        "preserve position/base interpretation, finite rejection, effort, and atomic writeback";
+      ];
+    }
   | "byte-ingress-exact" as name ->
     Ok {
       name;
@@ -311,7 +323,7 @@ let current_runtime_profile ~opcode =
   | "ATTENTION_WEIGHTED_SUM_FP" ->
     Some "deterministic-fp64-accumulation"
   | "ROPE_APPLY_INDEXED_FP" ->
-    Some "host-fp-local-candidate"
+    Some "host-fp-trig-local-candidate"
   | "ARGMAX_FP" ->
     Some "deterministic-fp64-comparison"
   | "ELEMWISE_MUL_FP"
@@ -733,6 +745,17 @@ let consensus_blocker_codes ~opcode =
       "atomic_writeback";
       "cross_platform_conformance";
     ]
+  | "ROPE_APPLY_INDEXED_FP" ->
+    [
+      "host_fp_exponentiation";
+      "host_fp_trig";
+      "fp64_multiply_conformance";
+      "fp64_add_sub_conformance";
+      "position_base_policy";
+      "tail_preservation";
+      "atomic_writeback";
+      "cross_platform_conformance";
+    ]
   | "ELEMWISE_MUL_FP" ->
     [
       "fp64_multiply_conformance";
@@ -847,6 +870,8 @@ let arithmetic_domain ~profile ~opcode =
     "deterministic-binary64-attention-weighted-sum"
   | "deterministic-fp64-accumulation", "CAUSAL_DEPTHWISE_CONV1D_FP" ->
     "deterministic-binary64-causal-depthwise-convolution"
+  | "host-fp-trig-local-candidate", "ROPE_APPLY_INDEXED_FP" ->
+    "deterministic-binary64-indexed-rotary-host-pow-cos-sin"
   | "host-fp-local-candidate", _ -> "native-binary64-host-floating-point"
   | name, _ -> name
 
@@ -877,6 +902,8 @@ let rounding_mode ~profile ~opcode =
     "deterministic-binary64-roundTiesToEven"
   | "deterministic-fp64-accumulation", "CAUSAL_DEPTHWISE_CONV1D_FP" ->
     "deterministic-binary64-roundTiesToEven"
+  | "host-fp-trig-local-candidate", "ROPE_APPLY_INDEXED_FP" ->
+    "host-runtime-native-pow-cos-sin"
   | ("q16-exact" | "q32-exact"), _ -> "integer-profile-defined"
   | "soft-fp-exact", _ -> "software-profile-defined"
   | "byte-ingress-exact", _ -> "exact-byte-decode"

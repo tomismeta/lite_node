@@ -811,9 +811,17 @@ let check_rope_indexed_profile_gate () =
   check
     "rope indexed runtime profile"
     (match Profile.current_runtime_profile ~opcode:"ROPE_APPLY_INDEXED_FP" with
-     | Some "host-fp-local-candidate" -> true
+     | Some "host-fp-trig-local-candidate" -> true
      | _ -> false);
   let gate = profile_gate "ROPE_APPLY_INDEXED_FP" in
+  check
+    "rope indexed trig-local profile"
+    (String.equal
+       (string_value "name" gate)
+       "host-fp-trig-local-candidate");
+  check
+    "rope indexed remains local-only"
+    (String.equal (string_value "consensus_status" gate) "local_only");
   check
     "rope indexed local trig semantics"
     (list_contains_substring
@@ -824,6 +832,49 @@ let check_rope_indexed_profile_gate () =
     (list_contains_substring
        "position-cell interpretation"
        (string_list_value "consensus_obligations" gate));
+  let blockers = string_list_value "consensus_blocker_codes" gate in
+  check
+    "rope indexed exponentiation blocker"
+    (List.mem "host_fp_exponentiation" blockers);
+  check
+    "rope indexed trig blocker"
+    (List.mem "host_fp_trig" blockers);
+  check
+    "rope indexed multiply blocker"
+    (List.mem "fp64_multiply_conformance" blockers);
+  check
+    "rope indexed add/sub blocker"
+    (List.mem "fp64_add_sub_conformance" blockers);
+  (match List.assoc_opt "profile_contract" gate with
+   | Some (`Assoc contract) ->
+     check
+       "rope indexed contract profile"
+       (String.equal
+          (string_value "profile_name" contract)
+          "host-fp-trig-local-candidate");
+     check
+       "rope indexed native trig rounding"
+       (String.equal
+          (string_value "rounding_mode" contract)
+          "host-runtime-native-pow-cos-sin")
+   | _ -> failwith "missing rope indexed profile contract");
+  (match
+     Profile.validate_for_opcode
+       ~opcode:"ROPE_APPLY_INDEXED_FP"
+       ~profile:"host-fp-local-candidate"
+   with
+   | Error (Profile.Unsupported_opcode_profile { opcode; profile; expected }) ->
+     check
+       "rope indexed old host profile opcode"
+       (String.equal opcode "ROPE_APPLY_INDEXED_FP");
+     check
+       "rope indexed old host profile rejected"
+       (String.equal profile "host-fp-local-candidate");
+     check
+       "rope indexed old host profile expected"
+       (String.equal expected "host-fp-trig-local-candidate")
+   | Error error -> failwith (Profile.error_message error)
+   | Ok _ -> failwith "expected rope indexed old host profile rejection");
   match
     Profile.validate_for_opcode
       ~opcode:"ROPE_APPLY_INDEXED_FP"
@@ -836,7 +887,7 @@ let check_rope_indexed_profile_gate () =
     check "rope indexed overclaim profile" (String.equal profile "q16-exact");
     check
       "rope indexed overclaim expected"
-      (String.equal expected "host-fp-local-candidate")
+      (String.equal expected "host-fp-trig-local-candidate")
   | Error error -> failwith (Profile.error_message error)
   | Ok _ -> failwith "expected rope indexed profile overclaim rejection"
 

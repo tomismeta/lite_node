@@ -248,8 +248,10 @@ GATED_DELTA_RULE_FP    host-fp-exp-local-candidate
 reported as `local_only`, with required actions to bind exact arithmetic,
 replace or qualify host math, and pass cross-platform conformance before
 validator admission. `host-fp-exp-local-candidate` is the narrower local-only
-profile for P0 kernels whose remaining native host dependency is exponential
-math. `deterministic-q1-g128-fp64-linear` and
+profile for kernels whose remaining native host dependency is `exp`/`log1p`.
+`host-fp-trig-local-candidate` is the narrower local-only profile for indexed
+rotary math whose remaining native host dependency is exponentiation plus
+`cos`/`sin`. `deterministic-q1-g128-fp64-linear` and
 `deterministic-fp64-normalization` are reported as `consensus_candidate`; they
 still require profile-root binding and independent cross-platform conformance
 before any consensus-ready claim.
@@ -426,11 +428,11 @@ independent cross-platform conformance before any consensus-ready attention
 claim.
 
 LiteNode also reports `ROPE_APPLY_INDEXED_FP` under the current
-`host-fp-local-candidate` runtime profile. The local profile covers finite
-binary64 input/base reads, exact integer position cells, native exponentiation,
-native `cos`/`sin`, finite-buffer writeback, zero-position behavior, and tail
-preservation. This remains local-only until rotary math has a software-defined
-or otherwise validator-qualified contract.
+`host-fp-trig-local-candidate` runtime profile. The local profile covers
+finite binary64 input/base reads, exact integer position cells, native
+exponentiation, native `cos`/`sin`, finite-buffer writeback, zero-position
+behavior, and tail preservation. This remains local-only until rotary math has
+a software-defined or otherwise validator-qualified contract.
 
 LiteNode also reports `SIGMOID_FP`, `SOFTPLUS_FP`, and `SILU_FP` under the
 `host-fp-exp-local-candidate` runtime profile. `SIGMOID_FP` and `SILU_FP`

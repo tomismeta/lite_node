@@ -27,7 +27,7 @@ The VM already has three relevant numerical surfaces:
 | --- | --- | --- |
 | Legacy host-float FP | `MATMUL_FP`, `RMSNORM_FP`, `SILU_FP`, `ARGMAX_FP`, `ATTENTION_KV_FP`, `ROPE_APPLY_FP`, `VECDOT_FP` | Classified as `Consensus_unsafe` by opcode policy. These are useful reference points, but they are not the plain inference consensus path. |
 | Existing Q16 fixed point | `SOFTMAX_Q16_INPLACE`, `LAYERNORM_Q16_INPLACE`, `RMSNORM_Q16_INPLACE`, `SILU_Q16_INPLACE`, `ROPE_APPLY_Q16`, `ATTENTION_KV_Q16`, `VECDOT_Q16`, `ARGMAX_Q16` | Classified as `Program_only` and admitted by inference only under `tensor.fixed`. This is the closest existing deterministic math profile. |
-| Inference proof surface | `LOAD_F32_LE_FP`, `LOAD_F64_LE_FP`, `LINEAR_Q1_G128_FP`, `SIGMOID_FP`, `SOFTPLUS_FP`, `SILU_FP`, `CAUSAL_DEPTHWISE_CONV1D_FP`, `GATED_DELTA_RULE_FP`, `RMSNORM_FP_EPS`, `L2NORM_FP`, `ELEMWISE_MUL_FP`, `RESIDUAL_ADD_FP`, `ROPE_APPLY_INDEXED_FP`, `ATTENTION_SCORES_FP`, `SOFTMAX_FP`, `ATTENTION_WEIGHTED_SUM_FP`, `ARGMAX_FP` | Selectively admitted by the inference harness under explicit capabilities. Byte ingress, comparison, Q1 linear, normalization, elementwise arithmetic, and finite accumulation now report narrow consensus-candidate profiles; exp/trig/log-style math remains local-only. |
+| Inference proof surface | `LOAD_F32_LE_FP`, `LOAD_F64_LE_FP`, `LINEAR_Q1_G128_FP`, `SIGMOID_FP`, `SOFTPLUS_FP`, `SILU_FP`, `CAUSAL_DEPTHWISE_CONV1D_FP`, `GATED_DELTA_RULE_FP`, `RMSNORM_FP_EPS`, `L2NORM_FP`, `ELEMWISE_MUL_FP`, `RESIDUAL_ADD_FP`, `ROPE_APPLY_INDEXED_FP`, `ATTENTION_SCORES_FP`, `SOFTMAX_FP`, `ATTENTION_WEIGHTED_SUM_FP`, `ARGMAX_FP` | Selectively admitted by the inference harness under explicit capabilities. Byte ingress, comparison, Q1 linear, normalization, elementwise arithmetic, and finite accumulation now report narrow consensus-candidate profiles; exp/log and trig/exponentiation math remain local-only. |
 
 The existing `host_float_hit` policy mechanism is correct and should remain:
 plain legacy/program admission still identifies host-floating-point opcodes as
@@ -43,8 +43,9 @@ does not prove deterministic math; the profile root must bind the math.
 
 | Profile | Admission role | Purpose |
 | --- | --- | --- |
-| `host-fp-local-candidate` | Local and attested-only | Current proof/demo path for primitives still relying on native host math functions outside the exp/log bucket, currently indexed rotary trig/exponentiation. This profile is useful for fast engineering but not validator-portable. |
+| `host-fp-local-candidate` | Local and attested-only | Generic fallback for proof/demo primitives still relying on native host math. This profile is useful for fast engineering but not validator-portable. |
 | `host-fp-exp-local-candidate` | Local and attested-only | Current proof/demo path for primitives still relying on native `exp`/`log1p`, including softmax, gated delta, sigmoid, softplus, and SiLU. This profile is useful for fast engineering but not validator-portable. |
+| `host-fp-trig-local-candidate` | Local and attested-only | Current proof/demo path for indexed rotary primitives still relying on native exponentiation, `cos`, and `sin`. This profile is useful for fast engineering but not validator-portable. |
 | `byte-ingress-exact` | Consensus candidate | Exact little-endian f32/f64 byte loading from authenticated ranges. |
 | `deterministic-q1-g128-fp64-linear` | Consensus candidate | Q1-G128 projection with exact binary16 scale decode, pinned sign mapping, and deterministic binary64 accumulation order. |
 | `deterministic-fp64-normalization` | Consensus candidate | RMSNorm/L2Norm finite binary64 reductions with explicit epsilon and deterministic sqrt/divide/output multiply policy. |
