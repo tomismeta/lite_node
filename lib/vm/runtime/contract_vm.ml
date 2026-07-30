@@ -2573,13 +2573,19 @@ let exec_one st op =
                        let k_base = k_t + (k_head * key_dim) in
                        let v_base = v_t + (head * value_dim) in
                        let state_base = head * state_per_head in
-                       let decay =
-                         exp
-                           (Int64.float_of_bits
-                              log_decay_values.(gate_t + head))
+                       let decay_input_bits =
+                         log_decay_values.(gate_t + head)
                        in
-                       let decay_bits = Int64.bits_of_float decay in
-                       if not (finite_fp64 decay) then ok := false;
+                       let decay_bits =
+                         match Inference_fp64.compare decay_input_bits 0L with
+                         | Some cmp when cmp <= 0 ->
+                           let decay =
+                             exp (Int64.float_of_bits decay_input_bits)
+                           in
+                           if not (finite_fp64 decay) then ok := false;
+                           Int64.bits_of_float decay
+                         | _ -> ok := false; 0L
+                       in
                        for i = 0 to state_per_head - 1 do
                          match
                            Inference_fp64.mul
@@ -3163,20 +3169,22 @@ let exec_one st op =
                   (Inference_fp64.negate !max_score_bits)
               with
               | Some shifted_bits ->
-                let shifted = Int64.float_of_bits shifted_bits in
-                let value = exp shifted in
-                let value_bits = Int64.bits_of_float value in
-                Array.unsafe_set exps index value_bits;
-                if not (finite_fp64 shifted && finite_fp64 value) then
-                  ok := false
-                else
-                  (match Inference_fp64.add !sum_exp_bits value_bits with
-                   | Some next -> sum_exp_bits := next
-                   | None -> ok := false)
+                (match Inference_fp64.compare shifted_bits 0L with
+                 | Some cmp when cmp <= 0 ->
+                   let shifted = Int64.float_of_bits shifted_bits in
+                   let value = exp shifted in
+                   let value_bits = Int64.bits_of_float value in
+                   Array.unsafe_set exps index value_bits;
+                   if not (finite_fp64 shifted && finite_fp64 value) then
+                     ok := false
+                   else
+                     (match Inference_fp64.add !sum_exp_bits value_bits with
+                      | Some next -> sum_exp_bits := next
+                      | None -> ok := false)
+                 | _ -> ok := false)
               | None -> ok := false
             done;
-            let sum_exp = Int64.float_of_bits !sum_exp_bits in
-            if (not !ok) || not (finite_fp64 sum_exp) || sum_exp <= 0.0 then
+            if (not !ok) || not (fp64_positive_bits !sum_exp_bits) then
               revert st
             else begin
               let output = Array.make count None in

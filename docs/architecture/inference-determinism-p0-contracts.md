@@ -87,15 +87,16 @@ Minimum vectors:
 Current opcode: `SOFTMAX_FP`.
 
 Current status: local host-FP candidate. High-risk because token probabilities
-and attention weights still depend on native `exp`; max selection, summation,
-and division use LiteNode's deterministic finite binary64 core locally.
+and attention weights still depend on native `exp`; max selection, shifted-score
+nonpositive gating, summation, and division use LiteNode's deterministic finite
+binary64 core locally.
 
 Required contract decisions:
 
 | Topic | Decision required |
 | --- | --- |
 | Max subtraction | Deterministic finite binary64 max scan order and tie behavior. |
-| Exponential | Deterministic `exp` approximation or table semantics. |
+| Exponential | Deterministic `exp` approximation or table semantics; current local runtime first requires every shifted score to compare `<= +0.0`. |
 | Sum | Fixed accumulation order and accumulator width/domain. |
 | Division | Exact probability rounding and normalization rule. |
 | Output | Sum behavior, signed-zero policy, and finite-result policy. |
@@ -115,7 +116,9 @@ Minimum vectors:
 Current opcode: `GATED_DELTA_RULE_FP`.
 
 Current status: local host-FP candidate. Stateful recurrence; drift compounds
-across layers and tokens.
+across layers and tokens. The current local runtime rejects positive finite
+`log_decay` before mutation and accepts finite nonpositive values, including
+negative zero.
 
 Required contract decisions:
 
@@ -124,7 +127,7 @@ Required contract decisions:
 | State layout | Exact recurrent state shape, grouping, and memory order. |
 | Inputs | Exact q/k/v/log-decay/beta/gate interpretation and shape checks. |
 | Update order | Fixed loop nesting and state update order. |
-| Math | Deterministic nonlinear and normalization semantics used inside the transition. |
+| Math | Deterministic nonlinear and normalization semantics used inside the transition; current native decay `exp` is gated to finite nonpositive `log_decay`. |
 | Atomicity | Output and next-state writes must be all-or-nothing. |
 | Aliasing | Explicit allowed and rejected overlap patterns. |
 | Effort | Effort formula must bind state size and transition work. |
@@ -133,6 +136,8 @@ Minimum vectors:
 
 - zero-state one-step;
 - nonzero-state one-step;
+- positive `log_decay` atomic rejection;
+- negative-zero `log_decay` acceptance;
 - multi-step state carry;
 - invalid shape;
 - unsafe overlap;

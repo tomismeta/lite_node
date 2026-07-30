@@ -502,6 +502,24 @@ let check_remaining_p0_profile_obligations () =
   check
     "softmax divide conformance blocker"
     (List.mem "fp64_divide_conformance" softmax_blockers);
+  check
+    "softmax nonpositive exp gate"
+    (list_contains_substring
+       "less than or equal to +0.0"
+       (string_list_value "local_semantics" softmax_gate));
+  (match List.assoc_opt "profile_contract" softmax_gate with
+   | Some (`Assoc contract) ->
+     check
+       "softmax profile records exp gate"
+       (list_contains_substring
+          "check_shifted_score_nonpositive"
+          (string_list_value "operation_sequence" contract));
+     check
+       "softmax edge policy records positive shift rejection"
+       (List.mem
+          "reject_positive_shifted_exp_input"
+          (string_list_value "edge_value_policy" contract))
+   | _ -> failwith "missing softmax profile contract");
   let delta_gate = profile_gate "GATED_DELTA_RULE_FP" in
   let delta_blockers =
     string_list_value "consensus_blocker_codes" delta_gate
@@ -518,6 +536,24 @@ let check_remaining_p0_profile_obligations () =
   check
     "delta divide conformance blocker"
     (List.mem "fp64_divide_conformance" delta_blockers);
+  check
+    "delta nonpositive exp gate"
+    (list_contains_substring
+       "less than or equal to +0.0"
+       (string_list_value "local_semantics" delta_gate));
+  (match List.assoc_opt "profile_contract" delta_gate with
+   | Some (`Assoc contract) ->
+     check
+       "delta profile records exp gate"
+       (list_contains_substring
+          "check_log_decay_nonpositive"
+          (string_list_value "operation_sequence" contract));
+     check
+       "delta edge policy records positive decay rejection"
+       (List.mem
+          "reject_positive_log_decay_before_state_mutation"
+          (string_list_value "edge_value_policy" contract))
+   | _ -> failwith "missing delta profile contract");
   let oracle_root gate =
     match List.assoc_opt "profile_contract" gate with
     | Some (`Assoc contract) -> string_value "oracle_vector_root" contract

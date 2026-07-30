@@ -23,8 +23,8 @@ with a scalar oracle and VM conformance gate.
 | `LINEAR_Q1_G128_FP` | `contract_vm.ml` decodes Q1-G128 blocks, binary16-like scales, sign bits, and accumulates with LiteNode's finite binary64 core. | Scale/sign interpretation and accumulator order are now contract-bound locally; independent cross-platform oracle qualification is still required before consensus promotion. | Pin byte layout, scale decode, sign mapping, loop order, accumulator profile, finite rejection, aliasing, and output encoding. |
 | `RMSNORM_FP_EPS` | Reads explicit epsilon bits; sum of squares, count division, epsilon addition, inverse-root `sqrt`, reciprocal division, and output multiply use LiteNode's finite binary64 core. | Independent cross-platform oracle qualification is still required before consensus promotion. | Define exact epsilon input, reduction order, inverse-root implementation, gamma read/order, non-finite policy, and rollback behavior. |
 | `L2NORM_FP` | Same deterministic reduction, inverse-root `sqrt`, and output multiply shape as RMSNorm without gamma. | Same as RMSNorm; smaller surface but still needs independent inverse-root qualification. | Define exact inverse-norm semantics, edge vectors near zero, signed-zero/subnormal behavior, and failure atomicity. |
-| `SOFTMAX_FP` | Uses deterministic finite binary64 left-to-right max selection, score shift, exponential sum, and probability division; `exp` remains native. | Highest math risk in this set because native `exp` can change probabilities and token/order behavior. | Replace or pin `exp`, tie behavior, overflow/underflow, in-place behavior, and finite-result rules. |
-| `GATED_DELTA_RULE_FP` | Stateful recurrence with native decay `exp`; integer key-dimension conversion, query-scale `sqrt`, reciprocal division, recurrence dot products, beta-delta updates, state updates, and output scaling multiply use LiteNode's finite binary64 core. | Highest state risk: small numeric drift compounds; decay math and recurrence ordering are not yet consensus-owned. | Pin layout, head mapping, loop nesting, decay math, scale math, state update order, aliasing, software-fp effort, and atomicity. |
+| `SOFTMAX_FP` | Uses deterministic finite binary64 left-to-right max selection, score shift, nonpositive shifted-score gate, exponential sum, and probability division; `exp` remains native. | Highest math risk in this set because native `exp` can change probabilities and token/order behavior. The local gate now constrains host `exp` inputs to shifted scores that compare `<= +0.0`. | Replace or pin `exp`, tie behavior, overflow/underflow, in-place behavior, and finite-result rules. |
+| `GATED_DELTA_RULE_FP` | Stateful recurrence with native decay `exp` behind a finite nonpositive `log_decay` gate; integer key-dimension conversion, query-scale `sqrt`, reciprocal division, recurrence dot products, beta-delta updates, state updates, and output scaling multiply use LiteNode's finite binary64 core. | Highest state risk: small numeric drift compounds; decay math and recurrence ordering are not yet consensus-owned. The local gate rejects positive finite `log_decay` before state mutation. | Pin layout, head mapping, loop nesting, decay math, scale math, state update order, aliasing, software-fp effort, and atomicity. |
 
 The software-fp effort charge is intentionally unchanged in this local-only
 hardening slice. Consensus promotion must recalibrate the charge for
@@ -362,8 +362,10 @@ Uncounted cases are intentionally observational today:
 LiteNode now also pins `SOFTMAX_FP` locally for extreme finite scores:
 equal `max_float` scores produce uniform probabilities after max subtraction,
 and a score dominated by `max_float` underflows to a zero probability without
-rejecting the finite input. This remains host-FP local-candidate behavior until
-`exp` and output encoding are protocol-owned; max selection, score-shift,
+rejecting the finite input. Shifted scores are checked with LiteNode's
+deterministic binary64 comparison and must compare `<= +0.0` before native
+`exp` is called. This remains host-FP local-candidate behavior until `exp` and
+output encoding are protocol-owned; max selection, score-shift,
 exponential-sum, and probability-division steps now use LiteNode's finite
 binary64 core.
 

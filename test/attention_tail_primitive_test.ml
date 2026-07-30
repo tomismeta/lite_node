@@ -101,6 +101,14 @@ let check_cells label st base expected =
         (f64_bits st (base + index) = Int64.bits_of_float value))
     expected
 
+let check_cells_bits label st base expected =
+  List.iteri
+    (fun index bits ->
+      check
+        (label ^ " cell " ^ string_of_int index)
+        (f64_bits st (base + index) = bits))
+    expected
+
 let check_softmax_equal_scores () =
   let st = state () in
   set_softmax_regs st ~count:2 ();
@@ -126,6 +134,28 @@ let check_softmax_extreme_scores () =
   set_values st 100 [max_float; 0.];
   check "softmax dominated score runs" (VM.run st [|softmax_op; VM.STOP|]);
   check_cells "softmax dominated score" st 300 [1.; 0.]
+
+let check_softmax_ordinary_near_tie () =
+  let st = state () in
+  let near_one = Int64.float_of_bits 0x3fefffffffffffffL in
+  set_softmax_regs st ~count:3 ();
+  set_values st 100 [1.; near_one; -2.];
+  let e0 = exp 0. in
+  let e1 = exp (near_one -. 1.) in
+  let e2 = exp (-3.) in
+  let sum = e0 +. e1 +. e2 in
+  check
+    "softmax ordinary near-tie runs"
+    (VM.run st [|softmax_op; VM.STOP|]);
+  check_cells_bits
+    "softmax ordinary near-tie"
+    st
+    300
+    [
+      Int64.bits_of_float (e0 /. sum);
+      Int64.bits_of_float (e1 /. sum);
+      Int64.bits_of_float (e2 /. sum);
+    ]
 
 let check_weighted_sum_golden () =
   let st = state () in
@@ -479,6 +509,7 @@ let () =
   check_softmax_equal_scores ();
   check_softmax_exact_inplace ();
   check_softmax_extreme_scores ();
+  check_softmax_ordinary_near_tie ();
   check_weighted_sum_golden ();
   check_weighted_sum_left_to_right_accumulation ();
   check_tail_reverts_atomically ();

@@ -390,6 +390,13 @@ let signed_zero_subnormal_one_timestep =
     expected_state = bytes_of_hex "0000000000000080";
   }
 
+let negative_zero_decay_one_timestep =
+  {
+    signed_zero_subnormal_one_timestep with
+    name = "negative zero decay one timestep";
+    log_decay = bytes_of_hex "0000000000000080";
+  }
+
 let late_add_mul_overflow =
   {
     name = "late add/mul overflow";
@@ -419,6 +426,7 @@ let fixtures =
     nonzero_state_multiple_timesteps;
     irregular_dimensions;
     signed_zero_subnormal_one_timestep;
+    negative_zero_decay_one_timestep;
   ]
 
 let output_cells fixture =
@@ -572,9 +580,9 @@ let check_missing_and_nonfinite_reverts () =
   check_result_sentinel "nonfinite log decay" state fixture;
   let state = make_state fixture in
   set_result_sentinel state fixture;
-  set_f64_bits state 600 (Int64.bits_of_float 1000.0);
-  check "nonfinite decay result rejects" (not (VM.run state code));
-  check_result_sentinel "nonfinite decay result" state fixture
+  set_f64_bits state 600 (Int64.bits_of_float min_float);
+  check "positive log decay rejects" (not (VM.run state code));
+  check_result_sentinel "positive log decay" state fixture
 
 let check_invalid_shape_and_effort_revert () =
   let fixture = zero_state_one_timestep in

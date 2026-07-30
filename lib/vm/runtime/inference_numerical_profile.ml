@@ -311,6 +311,7 @@ let local_semantics ~opcode =
       "score cells are finite binary64 values";
       "maximum score is selected left-to-right with deterministic finite binary64 comparison before exponentiation";
       "score-minus-maximum shifts use deterministic finite binary64 subtraction";
+      "each shifted score must deterministically compare less than or equal to +0.0 before native exp";
       "exp is applied to each shifted score using native binary64";
       "exponentials are summed left-to-right with deterministic finite binary64 addition";
       "probabilities are divided by the binary64 sum of exponentials using deterministic finite binary64 division";
@@ -352,7 +353,8 @@ let local_semantics ~opcode =
     [
       "query, key, value, decay, beta, and recurrent-state cells are finite binary64 values";
       "value heads map to query and key heads by modulo";
-      "state decay uses native exp(log_decay) and query-scale sqrt uses deterministic finite binary64";
+      "finite log_decay inputs must deterministically compare less than or equal to +0.0 before native exp";
+      "state decay uses native exp(log_decay) over the nonpositive domain and query-scale sqrt uses deterministic finite binary64";
       "integer key-dimension conversion, query-scale reciprocal division, recurrence add/mul, and output scaling multiply use deterministic finite binary64";
       "loop order is timestep, value head, value row, key column";
       "output and next-state cells are written only after both buffers are finite";
@@ -439,6 +441,7 @@ let consensus_obligations ~opcode =
   | "SOFTMAX_FP" ->
     [
       "replace or qualify native binary64 exp behavior";
+      "pin deterministic nonpositive exp-domain gate before native exp";
       "qualify deterministic binary64 score shifting, exponential summation, and probability division";
       "qualify deterministic binary64 comparison for maximum-score selection";
       "pin max-subtract semantics, ties, underflow, overflow, and non-finite rejection";
@@ -483,6 +486,7 @@ let consensus_obligations ~opcode =
   | "GATED_DELTA_RULE_FP" ->
     [
       "replace or qualify native binary64 exp for state decay";
+      "pin deterministic finite nonpositive log_decay gate before native exp";
       "qualify deterministic binary64 recurrence add/mul, dot-product, and reciprocal division behavior";
       "qualify deterministic binary64 query-scale sqrt behavior";
       "pin head mapping, decay order, beta application, state update order, and scaling";
@@ -660,9 +664,9 @@ let arithmetic_domain ~profile ~opcode =
   | "host-fp-local-candidate", "RESIDUAL_ADD_FP" ->
     "deterministic-binary64-elementwise-add"
   | "host-fp-local-candidate", "SOFTMAX_FP" ->
-    "deterministic-binary64-compare-shift-sum-divide-host-exp"
+    "deterministic-binary64-compare-shift-nonpositive-exp-gate-sum-divide-host-exp"
   | "host-fp-local-candidate", "GATED_DELTA_RULE_FP" ->
-    "deterministic-binary64-recurrence-sqrt-divide-host-exp"
+    "deterministic-binary64-nonpositive-exp-gate-recurrence-sqrt-divide-host-exp"
   | "host-fp-local-candidate", "ARGMAX_FP" ->
     "deterministic-binary64-comparison"
   | "host-fp-local-candidate", _ -> "native-binary64-host-floating-point"
@@ -731,7 +735,8 @@ let operation_sequence ~opcode =
       "snapshot_scores";
       "select_max_left_to_right_deterministic";
       "subtract_max_deterministic";
-      "exp_each_score";
+      "check_shifted_score_nonpositive_deterministic";
+      "exp_each_score_host";
       "sum_exponentials_left_to_right_deterministic";
       "divide_each_exponential_by_sum_deterministic";
       "finite_output_check";
@@ -741,7 +746,8 @@ let operation_sequence ~opcode =
     [
       "snapshot_operands_and_state";
       "iterate_timestep_value_head_row_column";
-      "compute_decay";
+      "check_log_decay_nonpositive_deterministic";
+      "compute_decay_host";
       "compute_query_scale_sqrt_deterministic";
       "compute_query_scale_reciprocal_deterministic";
       "apply_state_decay_deterministic";
@@ -790,6 +796,21 @@ let edge_value_policy ~opcode =
       "signed_zero_values_compare_equal";
       "preserve_first_index_on_equal_max";
       "preserve_destination_on_reject";
+    ]
+  | "SOFTMAX_FP" ->
+    [
+      "reject_missing_or_nonfinite_operands";
+      "reject_positive_shifted_exp_input";
+      "reject_nonpositive_or_nonfinite_exp_sum";
+      "preserve_destination_on_reject";
+    ]
+  | "GATED_DELTA_RULE_FP" ->
+    [
+      "reject_missing_or_nonfinite_operands";
+      "reject_positive_log_decay_before_state_mutation";
+      "accept_negative_zero_log_decay";
+      "reject_nonfinite_output_or_next_state";
+      "preserve_destination_and_next_state_on_reject";
     ]
   | _ ->
     [
@@ -860,6 +881,7 @@ let oracle_vector_root ~opcode =
         "equal_scores";
         "exact_inplace";
         "equal_max_scores";
+        "ordinary_near_tie";
         "dominated_score_underflow";
         "missing_score_revert";
         "nonfinite_score_revert";
@@ -885,9 +907,11 @@ let oracle_vector_root ~opcode =
         "nonzero_state_multiple_timesteps";
         "irregular_dimensions";
         "signed_zero_subnormal_one_timestep";
+        "negative_zero_decay_one_timestep";
         "state_in_place_alias";
         "alias_rejections";
         "missing_nonfinite_reverts";
+        "positive_log_decay_revert";
         "invalid_shape_effort_revert";
         "late_add_mul_overflow_revert";
       ]
