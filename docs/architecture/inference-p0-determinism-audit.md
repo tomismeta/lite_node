@@ -141,7 +141,7 @@ Required template schema:
   "schema": 1,
   "opcode": "RMSNORM_FP_EPS",
   "primitive": "rmsnorm_fp_eps",
-  "profile": "host-fp-local-candidate",
+  "profile": "deterministic-fp64-normalization",
   "vm_semantics_root": "<vm-semantics-root>",
   "numerical_profile_root": "<numerical-profile-root>",
   "expected_effort": 16,
@@ -233,15 +233,23 @@ After that, LiteNode can execute templates without negotiating schema again.
 ## Numerical Profile Gate
 
 The conformance template parser now treats the numerical profile as a gate, not
-as free-form metadata. The current runtime profile for the P0 FP templates is:
+as free-form metadata. P0 templates are no longer forced into one broad host-FP
+bucket:
 
 ```text
-host-fp-local-candidate
+LINEAR_Q1_G128_FP      host-fp-local-candidate
+RMSNORM_FP_EPS         deterministic-fp64-normalization
+L2NORM_FP              deterministic-fp64-normalization
+SOFTMAX_FP             host-fp-local-candidate
+GATED_DELTA_RULE_FP    host-fp-local-candidate
 ```
 
-That profile is accepted only as local candidate execution. It is reported as
-`local_only`, with required actions to bind exact arithmetic, replace or qualify
-host math, and pass cross-platform conformance before validator admission.
+`host-fp-local-candidate` is accepted only as local candidate execution and is
+reported as `local_only`, with required actions to bind exact arithmetic,
+replace or qualify host math, and pass cross-platform conformance before
+validator admission. `deterministic-fp64-normalization` is reported as
+`consensus_candidate`; it still requires profile-root binding and independent
+cross-platform conformance before any consensus-ready claim.
 Conformance JSON includes:
 
 ```text
@@ -315,12 +323,16 @@ Initial P0 focus:
 | Opcode | Current accepted profile | Consensus status | Pinned locally | Why not ready |
 | --- | --- | --- | --- | --- |
 | `LINEAR_Q1_G128_FP` | `host-fp-local-candidate` | `local_only` | Q1 scale/sign edge vectors, exhaustive binary16 scale decode, NaN/infinity scale rejection, finite rejection, overflow rollback, effort floor, output atomicity, and destination/lhs snapshot behavior. | Uses LiteNode's deterministic finite binary64 add/mul core; still needs independent cross-platform oracle qualification. |
-| `RMSNORM_FP_EPS` | `host-fp-local-candidate` | `local_only` | Explicit epsilon bits, minimum-subnormal epsilon, deterministic reduction/inverse-root/output multiply, row composition, signed-zero/subnormal acceptance, finite rejection, alias rejection, effort floor, and output atomicity. | Uses LiteNode's deterministic finite binary64 core; still needs independent cross-platform oracle qualification and profile-root binding. |
-| `L2NORM_FP` | `host-fp-local-candidate` | `local_only` | Explicit epsilon bits, minimum-subnormal epsilon, deterministic reduction/inverse-root/output multiply, row composition, finite rejection, effort floor, inverse-root overflow rejection, and output atomicity. | Uses LiteNode's deterministic finite binary64 core; still needs independent cross-platform oracle qualification and profile-root binding. |
+| `RMSNORM_FP_EPS` | `deterministic-fp64-normalization` | `consensus_candidate` | Explicit epsilon bits, minimum-subnormal epsilon, deterministic reduction/inverse-root/output multiply, row composition, signed-zero/subnormal acceptance, finite rejection, alias rejection, effort floor, and output atomicity. | Uses LiteNode's software-defined finite binary64 core; still needs independent cross-platform oracle qualification and profile-root binding. |
+| `L2NORM_FP` | `deterministic-fp64-normalization` | `consensus_candidate` | Explicit epsilon bits, minimum-subnormal epsilon, deterministic reduction/inverse-root/output multiply, row composition, finite rejection, effort floor, inverse-root overflow rejection, and output atomicity. | Uses LiteNode's software-defined finite binary64 core; still needs independent cross-platform oracle qualification and profile-root binding. |
 
-The next acceptable status change for these opcodes requires a runtime
-implementation change and matching scalar-oracle corpus, not just a new string
-in the producer template.
+The next acceptable status change for `LINEAR_Q1_G128_FP` requires closing the
+binary16 scale-decode authority gap and matching scalar-oracle corpus, not just
+a new string in the producer template. The normalization opcodes have moved out
+of the broad host-FP bucket because their current runtime path uses LiteNode's
+deterministic finite binary64 helper for reduction, division, sqrt, and output
+multiply, but they still are not consensus-ready until profile roots and
+cross-platform conformance are bound.
 
 ## Current Positive Execution Gate
 

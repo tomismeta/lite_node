@@ -216,6 +216,17 @@ let of_name = function
         "pin signed-zero, subnormal, overflow, aliasing, effort, and atomic writeback policy";
       ];
     }
+  | "deterministic-fp64-normalization" as name ->
+    Ok {
+      name;
+      consensus_status = Consensus_candidate;
+      summary = "deterministic finite binary64 normalization profile";
+      required_actions = [
+        "bind the numerical profile root in the model or request authority";
+        "qualify software-defined binary64 reduction, division, sqrt, and output multiply edge vectors across validators";
+        "pin epsilon bits, signed-zero, subnormal, overflow, aliasing, effort, and atomic writeback policy";
+      ];
+    }
   | "q16-exact" as name ->
     Ok {
       name;
@@ -254,8 +265,6 @@ let current_runtime_profile ~opcode =
   | "LOAD_F64_LE_FP" ->
     Some "byte-ingress-exact"
   | "LINEAR_Q1_G128_FP"
-  | "RMSNORM_FP_EPS"
-  | "L2NORM_FP"
   | "SOFTMAX_FP"
   | "GATED_DELTA_RULE_FP"
   | "CAUSAL_DEPTHWISE_CONV1D_FP"
@@ -271,6 +280,9 @@ let current_runtime_profile ~opcode =
   | "ELEMWISE_MUL_FP"
   | "RESIDUAL_ADD_FP" ->
     Some "deterministic-fp64-elementwise"
+  | "RMSNORM_FP_EPS"
+  | "L2NORM_FP" ->
+    Some "deterministic-fp64-normalization"
   | _ -> None
 
 let validate_for_opcode ~opcode ~profile =
@@ -312,13 +324,14 @@ let local_semantics ~opcode =
   | "RMSNORM_FP_EPS" ->
     [
       "epsilon is read from an integer register as binary64 bits and must be finite and positive";
-      "minimum positive subnormal epsilon is accepted by the current host-fp profile";
+      "minimum positive subnormal epsilon is accepted by the current normalization profile";
       "input and gamma cells are finite binary64 values and their ranges must not overlap";
       "sum of squares is accumulated left-to-right with deterministic finite binary64 multiply/add";
       "mean-square division, epsilon addition, reciprocal division, and output multiply use deterministic finite binary64";
       "sqrt in the inverse RMS path uses deterministic finite binary64";
       "output multiply uses deterministic finite binary64 multiply";
       "outputs are written only after the complete finite output vector is computed";
+      "the normalization compute path uses no native host floating-point math";
     ]
   | "L2NORM_FP" ->
     [
@@ -329,6 +342,7 @@ let local_semantics ~opcode =
       "sqrt in the inverse norm path uses deterministic finite binary64";
       "output multiply uses deterministic finite binary64 multiply";
       "outputs are written only after the complete finite output vector is computed";
+      "the normalization compute path uses no native host floating-point math";
     ]
   | "SOFTMAX_FP" ->
     [
@@ -457,6 +471,7 @@ let consensus_obligations ~opcode =
     ]
   | "RMSNORM_FP_EPS" ->
     [
+      "bind the deterministic normalization profile root before consensus admission";
       "qualify deterministic binary64 reduction, division, epsilon addition, sqrt, and output multiplication";
       "pin signed-zero, subnormal, overflow, underflow, and non-finite behavior";
       "define exact epsilon-bit interpretation and range-overlap rejection";
@@ -464,6 +479,7 @@ let consensus_obligations ~opcode =
     ]
   | "L2NORM_FP" ->
     [
+      "bind the deterministic normalization profile root before consensus admission";
       "qualify deterministic binary64 reduction, division, epsilon addition, sqrt, and output multiplication";
       "pin epsilon-bit interpretation, signed-zero, subnormal, overflow, and non-finite behavior";
       "define exact output encoding and in-place writeback atomicity";
@@ -764,9 +780,9 @@ let arithmetic_domain ~profile ~opcode =
   | "soft-fp-exact", _ -> "software-defined-floating-point"
   | "host-fp-local-candidate", "LINEAR_Q1_G128_FP" ->
     "q1-g128-binary16-scale-deterministic-binary64-accumulator"
-  | "host-fp-local-candidate", "RMSNORM_FP_EPS" ->
+  | "deterministic-fp64-normalization", "RMSNORM_FP_EPS" ->
     "deterministic-binary64-reduction-divide-epsilon-sqrt-output-mul"
-  | "host-fp-local-candidate", "L2NORM_FP" ->
+  | "deterministic-fp64-normalization", "L2NORM_FP" ->
     "deterministic-binary64-reduction-epsilon-sqrt-divide-output-mul"
   | "deterministic-fp64-elementwise", "ELEMWISE_MUL_FP" ->
     "deterministic-binary64-elementwise-multiply"
@@ -799,7 +815,7 @@ let rounding_mode ~profile ~opcode =
   match profile.name, opcode with
   | "host-fp-local-candidate", "LINEAR_Q1_G128_FP" ->
     "ieee754-roundTiesToEven"
-  | ( "host-fp-local-candidate",
+  | ( "deterministic-fp64-normalization",
       ( "RMSNORM_FP_EPS" | "L2NORM_FP" ) ) ->
     "deterministic-binary64-roundTiesToEven"
   | ( "host-fp-local-candidate",

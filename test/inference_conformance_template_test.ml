@@ -102,9 +102,15 @@ let list_contains_substring needle values =
 
 let template ?(opcode = "RMSNORM_FP_EPS") ?(primitive = "rmsnorm_fp_eps")
     ?(effects = ["memory_read"; "memory_write"]) ?(memory_access = "read_write")
-    ?(profile = "host-fp-local-candidate") ?(vm_semantics_root = hex_root 'd')
+    ?profile ?(vm_semantics_root = hex_root 'd')
     ?(numerical_profile_root = hex_root 'e')
     ?(failure_cases = [failure "nonfinite_input_nan"]) () =
+  let profile =
+    match profile, Profile.current_runtime_profile ~opcode with
+    | Some profile, _ -> profile
+    | None, Some profile -> profile
+    | None, None -> "host-fp-local-candidate"
+  in
   `Assoc [
     "type", `String "litenode_vm_conformance_template";
     "schema", `Int 1;
@@ -161,7 +167,7 @@ let check_accepts_template () =
       in
       check
         ("consensus status " ^ consensus_status)
-        (String.equal consensus_status "local_only");
+        (String.equal consensus_status "consensus_candidate");
       check
         "profile root binding"
         (match List.assoc_opt "profile_root_binding" fields with
@@ -261,7 +267,7 @@ let profile_gate opcode =
        | _ -> failwith "profile gate must be object")
 
 let check_profile_root () =
-  match Profile.of_name "host-fp-local-candidate" with
+  match Profile.of_name "deterministic-fp64-normalization" with
   | Error error -> failwith (Profile.error_message error)
   | Ok profile ->
     let root = Profile.root_for_opcode ~opcode:"RMSNORM_FP_EPS" profile in
@@ -300,14 +306,14 @@ let check_profile_root () =
       "profile set root is order-independent"
       (String.equal
          (Profile.profile_set_root_for_opcodes
-            ~opcodes:["LINEAR_Q1_G128_FP"; "RMSNORM_FP_EPS"]
+            ~opcodes:["RMSNORM_FP_EPS"; "L2NORM_FP"]
             profile)
          (Profile.profile_set_root_for_opcodes
-            ~opcodes:["RMSNORM_FP_EPS"; "LINEAR_Q1_G128_FP"]
+            ~opcodes:["L2NORM_FP"; "RMSNORM_FP_EPS"]
             profile))
 
 let check_profile_root_binding_counts () =
-  match Profile.of_name "host-fp-local-candidate" with
+  match Profile.of_name "deterministic-fp64-normalization" with
   | Error error -> failwith (Profile.error_message error)
   | Ok profile ->
     let gate = Profile.to_json_for_opcode ~opcode:"RMSNORM_FP_EPS" profile in
@@ -356,8 +362,8 @@ let check_profile_status_counts () =
   (match Profile.status_counts_json counts with
    | `Assoc fields ->
      check "classified count" (Profile.classified_gate_count counts = 6);
-     check "local-only count" (int_value "local_only" fields = 2);
-     check "candidate count" (int_value "consensus_candidate" fields = 1);
+     check "local-only count" (int_value "local_only" fields = 1);
+     check "candidate count" (int_value "consensus_candidate" fields = 2);
      check "ready count" (int_value "consensus_ready" fields = 1);
      check "unknown count" (int_value "unknown" fields = 2);
      check
@@ -423,7 +429,7 @@ let check_p0_profile_gate_coverage () =
       check
         (opcode ^ " runtime profile")
         (match Profile.current_runtime_profile ~opcode with
-         | Some "host-fp-local-candidate" -> true
+         | Some _ -> true
          | _ -> false);
       let gate = profile_gate opcode in
       let local_semantics = string_list_value "local_semantics" gate in
@@ -464,6 +470,62 @@ let check_remaining_p0_profile_obligations () =
       "SOFTMAX_FP", "maximum score", "probability and ordering";
       "GATED_DELTA_RULE_FP", "next-state cells", "state-transition";
     ];
+  List.iter
+    (fun opcode ->
+      let gate = profile_gate opcode in
+      check
+        (opcode ^ " consensus candidate")
+        (String.equal
+           (string_value "consensus_status" gate)
+           "consensus_candidate");
+      check
+        (opcode ^ " records no native fp math")
+        (list_contains_substring
+           "no native host floating-point math"
+           (string_list_value "local_semantics" gate));
+      check
+        (opcode ^ " profile root obligation")
+        (list_contains_substring
+           "profile root"
+           (string_list_value "consensus_obligations" gate));
+      (match List.assoc_opt "profile_contract" gate with
+       | Some (`Assoc contract) ->
+         check
+           (opcode ^ " profile name")
+           (String.equal
+              (string_value "profile_name" contract)
+              "deterministic-fp64-normalization");
+         check
+           (opcode ^ " rounding mode")
+           (String.equal
+              (string_value "rounding_mode" contract)
+              "deterministic-binary64-roundTiesToEven")
+       | _ -> failwith ("missing " ^ opcode ^ " profile contract"));
+      (match
+         Profile.validate_for_opcode
+           ~opcode
+           ~profile:"host-fp-local-candidate"
+       with
+       | Error (Profile.Unsupported_opcode_profile { opcode = actual; profile; expected }) ->
+         check (opcode ^ " old host profile opcode") (String.equal actual opcode);
+         check
+           (opcode ^ " old host profile rejected")
+           (String.equal profile "host-fp-local-candidate");
+         check
+           (opcode ^ " old host profile expected")
+           (String.equal expected "deterministic-fp64-normalization")
+       | Error error -> failwith (Profile.error_message error)
+       | Ok _ -> failwith (opcode ^ " should reject old host profile"));
+      match Profile.validate_for_opcode ~opcode ~profile:"q16-exact" with
+      | Error (Profile.Unsupported_opcode_profile { opcode = actual; profile; expected }) ->
+        check (opcode ^ " overclaim opcode") (String.equal actual opcode);
+        check (opcode ^ " overclaim profile") (String.equal profile "q16-exact");
+        check
+          (opcode ^ " overclaim expected")
+          (String.equal expected "deterministic-fp64-normalization")
+      | Error error -> failwith (Profile.error_message error)
+      | Ok _ -> failwith (opcode ^ " should reject profile overclaim"))
+    ["RMSNORM_FP_EPS"; "L2NORM_FP"];
   let l2_gate = profile_gate "L2NORM_FP" in
   (match List.assoc_opt "profile_contract" l2_gate with
    | Some (`Assoc contract) ->
@@ -1139,7 +1201,7 @@ let check_rejects_profile_overclaim () =
       (String.equal
          message
          "profile soft-fp-exact is not implemented for opcode \
-          RMSNORM_FP_EPS; expected host-fp-local-candidate")
+          RMSNORM_FP_EPS; expected deterministic-fp64-normalization")
   | Error error -> failwith (Template.error_message error)
   | Ok _ -> failwith "expected profile overclaim rejection"
 
@@ -1171,7 +1233,7 @@ let check_rejects_wide_register () =
         "schema", `Int 1;
         "opcode", `String "RMSNORM_FP_EPS";
         "primitive", `String "rmsnorm_fp_eps";
-        "profile", `String "host-fp-local-candidate";
+        "profile", `String "deterministic-fp64-normalization";
         "vm_semantics_root", `String (hex_root 'd');
         "numerical_profile_root", `String (hex_root 'e');
         "expected_effort", `Int 16;
