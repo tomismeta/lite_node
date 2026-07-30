@@ -388,7 +388,7 @@ let local_semantics ~opcode =
       "query and key cells are finite binary64 values";
       "each score is a dot product accumulated left-to-right by head dimension";
       "scale is computed as 1.0 / sqrt(head_dim) using deterministic finite binary64";
-      "each output score is computed with native binary64 multiplication and addition";
+      "dot products and scaled scores use deterministic finite binary64 multiplication and addition";
       "outputs are written only after the complete finite score vector is computed";
     ]
   | "ATTENTION_WEIGHTED_SUM_FP" ->
@@ -396,7 +396,7 @@ let local_semantics ~opcode =
       "probability and value cells are finite binary64 values";
       "each output dimension is accumulated left-to-right by key index";
       "probabilities are consumed as provided and are not renormalized";
-      "each weighted value is computed with native binary64 multiplication and addition";
+      "weighted values and reductions use deterministic finite binary64 multiplication and addition";
       "outputs are written only after the complete finite output vector is computed";
     ]
   | _ -> []
@@ -516,7 +516,7 @@ let consensus_obligations ~opcode =
     ]
   | "ATTENTION_SCORES_FP" ->
     [
-      "replace or qualify native binary64 multiplication and addition";
+      "qualify deterministic binary64 multiplication and addition";
       "qualify deterministic binary64 sqrt and division for score scaling";
       "pin scale semantics, finite rejection, score accumulation order, output atomicity, and effort";
       "define exact output encoding for cancellation, signed-zero, subnormal, and overflow cases";
@@ -524,7 +524,7 @@ let consensus_obligations ~opcode =
     ]
   | "ATTENTION_WEIGHTED_SUM_FP" ->
     [
-      "replace or qualify native binary64 multiplication and addition";
+      "qualify deterministic binary64 multiplication and addition";
       "pin weighted-sum accumulation order, finite rejection, overlap rejection, writeback atomicity, and effort";
       "define exact output encoding for cancellation, signed-zero, subnormal, and overflow cases";
       "pass independent cross-platform conformance for weighted-sum edge vectors";
@@ -628,6 +628,27 @@ let consensus_blocker_codes ~opcode =
       "atomic_writeback";
       "cross_platform_conformance";
     ]
+  | "ATTENTION_SCORES_FP" ->
+    [
+      "fp64_multiply_conformance";
+      "fp64_add_conformance";
+      "fp64_sqrt_conformance";
+      "fp64_divide_conformance";
+      "score_accumulation_order";
+      "finite_overflow_policy";
+      "atomic_writeback";
+      "cross_platform_conformance";
+    ]
+  | "ATTENTION_WEIGHTED_SUM_FP" ->
+    [
+      "fp64_multiply_conformance";
+      "fp64_add_conformance";
+      "weighted_sum_accumulation_order";
+      "finite_overflow_policy";
+      "overlap_policy";
+      "atomic_writeback";
+      "cross_platform_conformance";
+    ]
   | opcode ->
     match current_runtime_profile ~opcode with
     | Some "host-fp-local-candidate" ->
@@ -669,6 +690,10 @@ let arithmetic_domain ~profile ~opcode =
     "deterministic-binary64-nonpositive-exp-gate-recurrence-sqrt-divide-host-exp"
   | "host-fp-local-candidate", "ARGMAX_FP" ->
     "deterministic-binary64-comparison"
+  | "host-fp-local-candidate", "ATTENTION_SCORES_FP" ->
+    "deterministic-binary64-attention-score-dot-scale"
+  | "host-fp-local-candidate", "ATTENTION_WEIGHTED_SUM_FP" ->
+    "deterministic-binary64-attention-weighted-sum"
   | "host-fp-local-candidate", _ -> "native-binary64-host-floating-point"
   | name, _ -> name
 
@@ -687,6 +712,9 @@ let rounding_mode ~profile ~opcode =
     "deterministic-binary64-roundTiesToEven-with-host-math"
   | "host-fp-local-candidate", "ARGMAX_FP" ->
     "not-applicable-deterministic-comparison"
+  | ( "host-fp-local-candidate",
+      ( "ATTENTION_SCORES_FP" | "ATTENTION_WEIGHTED_SUM_FP" ) ) ->
+    "deterministic-binary64-roundTiesToEven"
   | ("q16-exact" | "q32-exact"), _ -> "integer-profile-defined"
   | "soft-fp-exact", _ -> "software-profile-defined"
   | "byte-ingress-exact", _ -> "exact-byte-decode"
@@ -765,6 +793,23 @@ let operation_sequence ~opcode =
       "select_first_max_left_to_right_deterministic";
       "write_selected_index";
     ]
+  | "ATTENTION_SCORES_FP" ->
+    [
+      "snapshot_query_and_keys";
+      "compute_query_scale_sqrt_deterministic";
+      "compute_query_scale_reciprocal_deterministic";
+      "accumulate_dot_product_left_to_right_deterministic";
+      "multiply_score_by_scale_deterministic";
+      "finite_output_check";
+      "atomic_output_writeback";
+    ]
+  | "ATTENTION_WEIGHTED_SUM_FP" ->
+    [
+      "snapshot_probabilities_and_values";
+      "accumulate_weighted_values_left_to_right_deterministic";
+      "finite_output_check";
+      "atomic_output_writeback";
+    ]
   | _ ->
     [
       "primitive_defined_snapshot";
@@ -811,6 +856,20 @@ let edge_value_policy ~opcode =
       "accept_negative_zero_log_decay";
       "reject_nonfinite_output_or_next_state";
       "preserve_destination_and_next_state_on_reject";
+    ]
+  | "ATTENTION_SCORES_FP" ->
+    [
+      "reject_missing_or_nonfinite_operands";
+      "reject_nonfinite_or_overflowed_score";
+      "reject_output_input_overlap";
+      "preserve_destination_on_reject";
+    ]
+  | "ATTENTION_WEIGHTED_SUM_FP" ->
+    [
+      "reject_missing_or_nonfinite_operands";
+      "reject_nonfinite_or_overflowed_output";
+      "reject_output_input_overlap";
+      "preserve_destination_on_reject";
     ]
   | _ ->
     [
@@ -914,6 +973,27 @@ let oracle_vector_root ~opcode =
         "positive_log_decay_revert";
         "invalid_shape_effort_revert";
         "late_add_mul_overflow_revert";
+      ]
+    | "ATTENTION_SCORES_FP" ->
+      [
+        "golden";
+        "query_key_aliasing";
+        "left_to_right_accumulation";
+        "missing_operand_revert";
+        "nonfinite_operand_revert";
+        "overflow_revert";
+        "output_overlap_revert";
+        "shape_effort_revert";
+      ]
+    | "ATTENTION_WEIGHTED_SUM_FP" ->
+      [
+        "golden";
+        "left_to_right_accumulation";
+        "missing_operand_revert";
+        "nonfinite_operand_revert";
+        "overflow_revert";
+        "output_overlap_revert";
+        "shape_effort_revert";
       ]
     | _ -> ["profile_gate_only"]
   in

@@ -396,12 +396,12 @@ Current result:
 | `ARGMAX_FP` | 2 | accepted/matched for selected index |
 | `RMSNORM_FP_EPS -> LINEAR_Q1_G128_FP -> ARGMAX_FP` | 1 | accepted/matched |
 
-LiteNode runtime tests now also pin current host-FP left-to-right
-accumulation for `ATTENTION_SCORES_FP` dot products and
-`ATTENTION_WEIGHTED_SUM_FP` weighted reductions with cancellation vectors. This
-is useful local evidence for the P0-plus attention surface, but it does not
-promote either opcode beyond local-candidate math. LiteNode now reports both
-under the `host-fp-local-candidate` runtime profile; any fixed-point,
+LiteNode runtime tests now also pin deterministic finite binary64
+left-to-right accumulation for `ATTENTION_SCORES_FP` dot products and
+`ATTENTION_WEIGHTED_SUM_FP` weighted reductions with cancellation vectors.
+This is useful local evidence for the P0-plus attention surface, but it does
+not promote either opcode beyond local-candidate math. LiteNode now reports
+both under the `host-fp-local-candidate` runtime profile; any fixed-point,
 software-FP, or consensus-ready attention claim must be a separate proven
 profile rather than an overclaim on the current FP opcodes.
 

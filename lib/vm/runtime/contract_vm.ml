@@ -3099,10 +3099,10 @@ let exec_one st op =
           if not (add_dyn_product st [key_count; head_dim; 4] 1) then
             revert st
           else
-            (match read_fp64_array st.memory.data query head_dim,
-                   read_fp64_array st.memory.data key key_cells with
+            (match read_fp64_bits_array st.memory.data query head_dim,
+                   read_fp64_bits_array st.memory.data key key_cells with
              | Some query_values, Some key_values ->
-               let output = Array.make key_count 0.0 in
+               let output = Array.make key_count 0L in
                let scale_bits, scale_ok =
                  match Inference_fp64.of_int head_dim with
                  | Some head_dim_bits ->
@@ -3111,27 +3111,34 @@ let exec_one st op =
                     | None -> 0L, false)
                  | None -> 0L, false
                in
-               let scale = Int64.float_of_bits scale_bits in
-               let ok = ref (scale_ok && finite_fp64 scale) in
+               let ok = ref scale_ok in
                for key_index = 0 to key_count - 1 do
-                 let acc = ref 0.0 in
+                 let acc = ref 0L in
                  let key_base = key_index * head_dim in
                  for dim = 0 to head_dim - 1 do
-                   acc :=
-                     !acc
-                     +. (Array.unsafe_get query_values dim
-                         *. Array.unsafe_get key_values (key_base + dim))
+                   match
+                     Inference_fp64.mul
+                       (Array.unsafe_get query_values dim)
+                       (Array.unsafe_get key_values (key_base + dim))
+                   with
+                   | Some product ->
+                     (match Inference_fp64.add !acc product with
+                      | Some next -> acc := next
+                      | None -> ok := false)
+                   | None -> ok := false
                  done;
-                 let score = !acc *. scale in
-                 Array.unsafe_set output key_index score;
-                 if not (finite_fp64 !acc && finite_fp64 score) then
-                   ok := false
+                 (match Inference_fp64.mul !acc scale_bits with
+                  | Some score -> Array.unsafe_set output key_index score
+                  | None -> ok := false)
                done;
                if not !ok then
                  revert st
                else begin
                  for index = 0 to key_count - 1 do
-                   mem_set_fp64 st.memory.data (dst + index) output.(index)
+                   mem_set_fp64_bits
+                     st.memory.data
+                     (dst + index)
+                     (Array.unsafe_get output index)
                  done;
                  true
                end
@@ -3228,33 +3235,37 @@ let exec_one st op =
           if not (add_dyn_product st [key_count; head_dim; 4] 1) then
             revert st
           else
-            (match read_fp64_array st.memory.data probs key_count,
-                   read_fp64_array st.memory.data value value_cells with
+            (match read_fp64_bits_array st.memory.data probs key_count,
+                   read_fp64_bits_array st.memory.data value value_cells with
              | Some prob_values, Some value_values ->
-              let output = Array.make head_dim 0.0 in
-              let ok = ref true in
-              for dim = 0 to head_dim - 1 do
-                let acc = ref 0.0 in
-                for key_index = 0 to key_count - 1 do
-                  let product =
-                    Array.unsafe_get prob_values key_index
-                    *. Array.unsafe_get value_values
-                         ((key_index * head_dim) + dim)
-                  in
-                  acc :=
-                    !acc
-                     +. product;
-                  if not (finite_fp64 product && finite_fp64 !acc) then
-                    ok := false
-                done;
-                Array.unsafe_set output dim !acc;
-                if not (finite_fp64 !acc) then ok := false
+               let output = Array.make head_dim 0L in
+               let ok = ref true in
+               for dim = 0 to head_dim - 1 do
+                 let acc = ref 0L in
+                 for key_index = 0 to key_count - 1 do
+                   match
+                     Inference_fp64.mul
+                       (Array.unsafe_get prob_values key_index)
+                       (Array.unsafe_get
+                          value_values
+                          ((key_index * head_dim) + dim))
+                   with
+                   | Some product ->
+                     (match Inference_fp64.add !acc product with
+                      | Some next -> acc := next
+                      | None -> ok := false)
+                   | None -> ok := false
+                 done;
+                 Array.unsafe_set output dim !acc
                done;
                if not !ok then
                  revert st
                else begin
                  for index = 0 to head_dim - 1 do
-                   mem_set_fp64 st.memory.data (dst + index) output.(index)
+                   mem_set_fp64_bits
+                     st.memory.data
+                     (dst + index)
+                     (Array.unsafe_get output index)
                  done;
                  true
                end

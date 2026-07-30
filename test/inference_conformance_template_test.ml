@@ -747,9 +747,51 @@ let check_attention_profile_gates () =
       | Error error -> failwith (Profile.error_message error)
       | Ok _ -> failwith (opcode ^ " should reject profile overclaim"))
     [
-      "ATTENTION_SCORES_FP", "scale is computed", "attention-score edge vectors";
-      "ATTENTION_WEIGHTED_SUM_FP", "not renormalized", "weighted-sum edge vectors";
-    ]
+      ( "ATTENTION_SCORES_FP",
+        "deterministic finite binary64 multiplication",
+        "attention-score edge vectors" );
+      ( "ATTENTION_WEIGHTED_SUM_FP",
+        "deterministic finite binary64 multiplication",
+        "weighted-sum edge vectors" );
+    ];
+  let weighted_sum_gate = profile_gate "ATTENTION_WEIGHTED_SUM_FP" in
+  check
+    "ATTENTION_WEIGHTED_SUM_FP does not renormalize probabilities"
+    (list_contains_substring
+       "not renormalized"
+       (string_list_value "local_semantics" weighted_sum_gate));
+  let check_attention_contract opcode sequence_needle =
+    let gate = profile_gate opcode in
+    let blockers = string_list_value "consensus_blocker_codes" gate in
+    check
+      (opcode ^ " no longer uses generic host arithmetic blocker")
+      (not (List.mem "host_fp_arithmetic" blockers));
+    check
+      (opcode ^ " multiply blocker")
+      (List.mem "fp64_multiply_conformance" blockers);
+    check
+      (opcode ^ " add blocker")
+      (List.mem "fp64_add_conformance" blockers);
+    match List.assoc_opt "profile_contract" gate with
+    | Some (`Assoc contract) ->
+      check
+        (opcode ^ " deterministic rounding")
+        (String.equal
+           (string_value "rounding_mode" contract)
+           "deterministic-binary64-roundTiesToEven");
+      check
+        (opcode ^ " deterministic sequence")
+        (list_contains_substring
+           sequence_needle
+           (string_list_value "operation_sequence" contract))
+    | _ -> failwith ("missing " ^ opcode ^ " profile contract")
+  in
+  check_attention_contract
+    "ATTENTION_SCORES_FP"
+    "accumulate_dot_product_left_to_right";
+  check_attention_contract
+    "ATTENTION_WEIGHTED_SUM_FP"
+    "accumulate_weighted_values_left_to_right"
 
 let check_causal_conv_profile_gate () =
   check
