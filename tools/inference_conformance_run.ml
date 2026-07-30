@@ -112,13 +112,28 @@ let opt_int_field name fields =
   | _ -> fail ("invalid int field: " ^ name)
 
 let profile_gate_json opcode fields =
+  let add_source source = function
+    | `Assoc gate -> `Assoc (gate @ ["profile_source", `String source])
+    | value -> value
+  in
   match opt_string_field "profile" fields with
-  | None -> `Null
   | Some profile ->
     (match Profile.validate_for_opcode ~opcode ~profile with
-     | Ok gate -> Profile.to_json_for_opcode ~opcode gate
+     | Ok gate ->
+       Profile.to_json_for_opcode ~opcode gate
+       |> add_source "template"
      | Error error ->
        fail (Profile.error_message error))
+  | None ->
+    (match Profile.current_runtime_profile ~opcode with
+     | None -> `Null
+     | Some profile ->
+       (match Profile.validate_for_opcode ~opcode ~profile with
+        | Ok gate ->
+          Profile.to_json_for_opcode ~opcode gate
+          |> add_source "current_runtime_profile"
+        | Error error ->
+          fail (Profile.error_message error)))
 
 let register_index value =
   let len = String.length value in

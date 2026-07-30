@@ -236,7 +236,9 @@ silently upgrading a host-FP fixture into a consensus-candidate claim.
 
 The same check applies to producer VM execution templates when they include a
 `profile` field. Older accepted templates without that field remain readable,
-but any declared profile is now enforced before execution.
+but execution reports attach the opcode's current runtime profile as an implicit
+diagnostic `profile_gate`. Any declared profile is still enforced before
+execution.
 
 Initial P0 focus:
 
