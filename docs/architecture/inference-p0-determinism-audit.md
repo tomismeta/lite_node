@@ -240,14 +240,16 @@ bucket:
 LINEAR_Q1_G128_FP      deterministic-q1-g128-fp64-linear
 RMSNORM_FP_EPS         deterministic-fp64-normalization
 L2NORM_FP              deterministic-fp64-normalization
-SOFTMAX_FP             host-fp-local-candidate
-GATED_DELTA_RULE_FP    host-fp-local-candidate
+SOFTMAX_FP             host-fp-exp-local-candidate
+GATED_DELTA_RULE_FP    host-fp-exp-local-candidate
 ```
 
 `host-fp-local-candidate` is accepted only as local candidate execution and is
 reported as `local_only`, with required actions to bind exact arithmetic,
 replace or qualify host math, and pass cross-platform conformance before
-validator admission. `deterministic-q1-g128-fp64-linear` and
+validator admission. `host-fp-exp-local-candidate` is the narrower local-only
+profile for P0 kernels whose remaining native host dependency is exponential
+math. `deterministic-q1-g128-fp64-linear` and
 `deterministic-fp64-normalization` are reported as `consensus_candidate`; they
 still require profile-root binding and independent cross-platform conformance
 before any consensus-ready claim.
@@ -375,10 +377,18 @@ equal `max_float` scores produce uniform probabilities after max subtraction,
 and a score dominated by `max_float` underflows to a zero probability without
 rejecting the finite input. Shifted scores are checked with LiteNode's
 deterministic binary64 comparison and must compare `<= +0.0` before native
-`exp` is called. This remains host-FP local-candidate behavior until `exp` and
+`exp` is called. This remains exp-local candidate behavior until `exp` and
 output encoding are protocol-owned; max selection, score-shift,
 exponential-sum, and probability-division steps now use LiteNode's finite
 binary64 core.
+
+LiteNode reports `GATED_DELTA_RULE_FP` under the same
+`host-fp-exp-local-candidate` profile. The recurrence shape, query-scale
+sqrt/division, dot products, beta updates, state mutation order, and output
+scaling are locally pinned around LiteNode's finite binary64 helper path, but
+state decay still calls native `exp` after the deterministic nonpositive
+`log_decay` gate. That native exponential is the remaining P0 state-transition
+determinism gap.
 
 ## P0-Plus Execution Gate
 

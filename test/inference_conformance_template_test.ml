@@ -594,6 +594,14 @@ let check_remaining_p0_profile_obligations () =
     "l2 divide conformance blocker"
     (List.mem "fp64_divide_conformance" l2_blockers);
   let softmax_gate = profile_gate "SOFTMAX_FP" in
+  check
+    "softmax exp-local profile"
+    (String.equal
+       (string_value "name" softmax_gate)
+       "host-fp-exp-local-candidate");
+  check
+    "softmax remains local-only"
+    (String.equal (string_value "consensus_status" softmax_gate) "local_only");
   let softmax_blockers =
     string_list_value "consensus_blocker_codes" softmax_gate
   in
@@ -623,6 +631,11 @@ let check_remaining_p0_profile_obligations () =
   (match List.assoc_opt "profile_contract" softmax_gate with
    | Some (`Assoc contract) ->
      check
+       "softmax contract profile"
+       (String.equal
+          (string_value "profile_name" contract)
+          "host-fp-exp-local-candidate");
+     check
        "softmax profile records exp gate"
        (list_contains_substring
           "check_shifted_score_nonpositive"
@@ -634,6 +647,14 @@ let check_remaining_p0_profile_obligations () =
           (string_list_value "edge_value_policy" contract))
    | _ -> failwith "missing softmax profile contract");
   let delta_gate = profile_gate "GATED_DELTA_RULE_FP" in
+  check
+    "delta exp-local profile"
+    (String.equal
+       (string_value "name" delta_gate)
+       "host-fp-exp-local-candidate");
+  check
+    "delta remains local-only"
+    (String.equal (string_value "consensus_status" delta_gate) "local_only");
   let delta_blockers =
     string_list_value "consensus_blocker_codes" delta_gate
   in
@@ -657,6 +678,11 @@ let check_remaining_p0_profile_obligations () =
   (match List.assoc_opt "profile_contract" delta_gate with
    | Some (`Assoc contract) ->
      check
+       "delta contract profile"
+       (String.equal
+          (string_value "profile_name" contract)
+          "host-fp-exp-local-candidate");
+     check
        "delta profile records exp gate"
        (list_contains_substring
           "check_log_decay_nonpositive"
@@ -667,6 +693,33 @@ let check_remaining_p0_profile_obligations () =
           "reject_positive_log_decay_before_state_mutation"
           (string_list_value "edge_value_policy" contract))
    | _ -> failwith "missing delta profile contract");
+  List.iter
+    (fun opcode ->
+      (match
+         Profile.validate_for_opcode
+           ~opcode
+           ~profile:"host-fp-local-candidate"
+       with
+       | Error (Profile.Unsupported_opcode_profile { opcode = actual; profile; expected }) ->
+         check (opcode ^ " old host profile opcode") (String.equal actual opcode);
+         check
+           (opcode ^ " old host profile rejected")
+           (String.equal profile "host-fp-local-candidate");
+         check
+           (opcode ^ " old host profile expected")
+           (String.equal expected "host-fp-exp-local-candidate")
+       | Error error -> failwith (Profile.error_message error)
+       | Ok _ -> failwith (opcode ^ " should reject old host profile"));
+      match Profile.validate_for_opcode ~opcode ~profile:"q16-exact" with
+      | Error (Profile.Unsupported_opcode_profile { opcode = actual; profile; expected }) ->
+        check (opcode ^ " q16 overclaim opcode") (String.equal actual opcode);
+        check (opcode ^ " q16 overclaim profile") (String.equal profile "q16-exact");
+        check
+          (opcode ^ " q16 overclaim expected")
+          (String.equal expected "host-fp-exp-local-candidate")
+      | Error error -> failwith (Profile.error_message error)
+      | Ok _ -> failwith (opcode ^ " should reject q16 overclaim"))
+    ["SOFTMAX_FP"; "GATED_DELTA_RULE_FP"];
   let oracle_root gate =
     match List.assoc_opt "profile_contract" gate with
     | Some (`Assoc contract) -> string_value "oracle_vector_root" contract

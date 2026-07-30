@@ -183,6 +183,18 @@ let of_name = function
         "native host floating point accepted only for local inference proof execution";
       required_actions = host_fp_actions;
     }
+  | "host-fp-exp-local-candidate" as name ->
+    Ok {
+      name;
+      consensus_status = Local_only;
+      summary =
+        "native exponential math accepted only for local inference proof execution";
+      required_actions = [
+        "replace or qualify native exp/log-style math before validator admission";
+        "bind deterministic exponential oracle vectors and profile roots";
+        "preserve finite-domain gates, rejection policy, effort, and atomic writeback";
+      ];
+    }
   | "byte-ingress-exact" as name ->
     Ok {
       name;
@@ -278,7 +290,8 @@ let current_runtime_profile ~opcode =
   | "LINEAR_Q1_G128_FP" ->
     Some "deterministic-q1-g128-fp64-linear"
   | "SOFTMAX_FP"
-  | "GATED_DELTA_RULE_FP"
+  | "GATED_DELTA_RULE_FP" ->
+    Some "host-fp-exp-local-candidate"
   | "CAUSAL_DEPTHWISE_CONV1D_FP"
   | "ROPE_APPLY_INDEXED_FP"
   | "ATTENTION_SCORES_FP"
@@ -802,9 +815,9 @@ let arithmetic_domain ~profile ~opcode =
     "deterministic-binary64-elementwise-multiply"
   | "deterministic-fp64-elementwise", "RESIDUAL_ADD_FP" ->
     "deterministic-binary64-elementwise-add"
-  | "host-fp-local-candidate", "SOFTMAX_FP" ->
+  | "host-fp-exp-local-candidate", "SOFTMAX_FP" ->
     "deterministic-binary64-compare-shift-nonpositive-exp-gate-sum-divide-host-exp"
-  | "host-fp-local-candidate", "GATED_DELTA_RULE_FP" ->
+  | "host-fp-exp-local-candidate", "GATED_DELTA_RULE_FP" ->
     "deterministic-binary64-nonpositive-exp-gate-recurrence-sqrt-divide-host-exp"
   | "host-fp-local-candidate", "SIGMOID_FP" ->
     "deterministic-binary64-sigmoid-nonpositive-exp-gate-host-exp"
@@ -832,10 +845,11 @@ let rounding_mode ~profile ~opcode =
   | ( "deterministic-fp64-normalization",
       ( "RMSNORM_FP_EPS" | "L2NORM_FP" ) ) ->
     "deterministic-binary64-roundTiesToEven"
+  | ( "host-fp-exp-local-candidate",
+      ( "SOFTMAX_FP" | "GATED_DELTA_RULE_FP" ) ) ->
+    "deterministic-binary64-roundTiesToEven-with-host-exp"
   | ( "host-fp-local-candidate",
-      ( "SOFTMAX_FP"
-      | "GATED_DELTA_RULE_FP"
-      | "SIGMOID_FP"
+      ( "SIGMOID_FP"
       | "SOFTPLUS_FP"
       | "SILU_FP" ) ) ->
     "deterministic-binary64-roundTiesToEven-with-host-math"

@@ -87,10 +87,10 @@ Minimum vectors:
 
 Current opcode: `SOFTMAX_FP`.
 
-Current status: local host-FP candidate. High-risk because token probabilities
-and attention weights still depend on native `exp`; max selection, shifted-score
-nonpositive gating, summation, and division use LiteNode's deterministic finite
-binary64 core locally.
+Current status: `host-fp-exp-local-candidate`. High-risk because token
+probabilities and attention weights still depend on native `exp`; max
+selection, shifted-score nonpositive gating, summation, and division use
+LiteNode's deterministic finite binary64 core locally.
 
 Required contract decisions:
 
@@ -116,10 +116,10 @@ Minimum vectors:
 
 Current opcode: `GATED_DELTA_RULE_FP`.
 
-Current status: local host-FP candidate. Stateful recurrence; drift compounds
-across layers and tokens. The current local runtime rejects positive finite
-`log_decay` before mutation and accepts finite nonpositive values, including
-negative zero.
+Current status: `host-fp-exp-local-candidate`. Stateful recurrence; drift
+compounds across layers and tokens. The current local runtime rejects positive
+finite `log_decay` before mutation and accepts finite nonpositive values,
+including negative zero.
 
 Required contract decisions:
 
