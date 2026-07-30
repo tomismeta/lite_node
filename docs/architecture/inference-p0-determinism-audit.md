@@ -448,6 +448,11 @@ state decay still calls native `exp` after the deterministic nonpositive
 `log_decay` gate. That native exponential is the remaining P0 state-transition
 determinism gap.
 
+Host-backed exponential/log helpers are intentionally named `host_fp64_*` in the
+contract VM. They are not part of the deterministic `Inference_fp64` substrate
+and must remain behind `host-fp-exp-local-candidate` gates until protocol-owned
+transcendental math or a qualified replacement profile exists.
+
 ## P0-Plus Execution Gate
 
 Status on 2026-07-30:

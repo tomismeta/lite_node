@@ -1087,7 +1087,7 @@ let fp64_positive_bits =
 let fp64_inverse_sqrt_bits =
   Inference_fp64.inverse_sqrt
 
-let fp64_exp_nonpositive_bits bits =
+let host_fp64_exp_nonpositive_bits bits =
   match Inference_fp64.compare bits 0L with
   | Some cmp when cmp <= 0 ->
     let input = Int64.float_of_bits bits in
@@ -1100,14 +1100,14 @@ let fp64_exp_nonpositive_bits bits =
 let fp64_sigmoid_bits bits =
   match Inference_fp64.compare bits 0L with
   | Some cmp when cmp >= 0 ->
-    (match fp64_exp_nonpositive_bits (Inference_fp64.negate bits) with
+    (match host_fp64_exp_nonpositive_bits (Inference_fp64.negate bits) with
      | Some exp_bits ->
        (match Inference_fp64.add fp64_one_bits exp_bits with
         | Some denom -> Inference_fp64.div fp64_one_bits denom
         | None -> None)
      | None -> None)
   | Some _ ->
-    (match fp64_exp_nonpositive_bits bits with
+    (match host_fp64_exp_nonpositive_bits bits with
      | Some exp_bits ->
        (match Inference_fp64.add fp64_one_bits exp_bits with
         | Some denom -> Inference_fp64.div exp_bits denom
@@ -1120,7 +1120,7 @@ let fp64_silu_bits bits =
   | Some sigmoid -> Inference_fp64.mul bits sigmoid
   | None -> None
 
-let fp64_log1p_nonnegative_bits bits =
+let host_fp64_log1p_nonnegative_bits bits =
   match Inference_fp64.compare bits 0L with
   | Some cmp when cmp >= 0 ->
     let input = Int64.float_of_bits bits in
@@ -1133,15 +1133,15 @@ let fp64_log1p_nonnegative_bits bits =
 let fp64_softplus_bits bits =
   match Inference_fp64.compare bits 0L with
   | Some cmp when cmp > 0 ->
-    (match fp64_exp_nonpositive_bits (Inference_fp64.negate bits) with
+    (match host_fp64_exp_nonpositive_bits (Inference_fp64.negate bits) with
      | Some exp_bits ->
-       (match fp64_log1p_nonnegative_bits exp_bits with
+       (match host_fp64_log1p_nonnegative_bits exp_bits with
         | Some tail_bits -> Inference_fp64.add bits tail_bits
         | None -> None)
      | None -> None)
   | Some _ ->
-    (match fp64_exp_nonpositive_bits bits with
-     | Some exp_bits -> fp64_log1p_nonnegative_bits exp_bits
+    (match host_fp64_exp_nonpositive_bits bits with
+     | Some exp_bits -> host_fp64_log1p_nonnegative_bits exp_bits
      | None -> None)
   | None -> None
 
@@ -2646,14 +2646,11 @@ let exec_one st op =
                          log_decay_values.(gate_t + head)
                        in
                        let decay_bits =
-                         match Inference_fp64.compare decay_input_bits 0L with
-                         | Some cmp when cmp <= 0 ->
-                           let decay =
-                             exp (Int64.float_of_bits decay_input_bits)
-                           in
-                           if not (finite_fp64 decay) then ok := false;
-                           Int64.bits_of_float decay
-                         | _ -> ok := false; 0L
+                         match
+                           host_fp64_exp_nonpositive_bits decay_input_bits
+                         with
+                         | Some decay_bits -> decay_bits
+                         | None -> ok := false; 0L
                        in
                        for i = 0 to state_per_head - 1 do
                          match
