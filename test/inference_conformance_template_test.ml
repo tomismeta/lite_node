@@ -499,6 +499,71 @@ let check_p0_profile_gate_coverage () =
               consensus_obligations)))
     Template.p0_opcodes
 
+let check_inference_profile_surface_coverage () =
+  let surface =
+    [
+      "LOAD_F32_LE_FP", "byte-ingress-exact", "consensus_candidate";
+      "LOAD_F64_LE_FP", "byte-ingress-exact", "consensus_candidate";
+      "LINEAR_Q1_G128_FP", "deterministic-q1-g128-fp64-linear", "consensus_candidate";
+      "SIGMOID_FP", "host-fp-exp-local-candidate", "local_only";
+      "SOFTPLUS_FP", "host-fp-exp-local-candidate", "local_only";
+      "SILU_FP", "host-fp-exp-local-candidate", "local_only";
+      "CAUSAL_DEPTHWISE_CONV1D_FP", "deterministic-fp64-accumulation", "consensus_candidate";
+      "GATED_DELTA_RULE_FP", "host-fp-exp-local-candidate", "local_only";
+      "RMSNORM_FP_EPS", "deterministic-fp64-normalization", "consensus_candidate";
+      "L2NORM_FP", "deterministic-fp64-normalization", "consensus_candidate";
+      "ELEMWISE_MUL_FP", "deterministic-fp64-elementwise", "consensus_candidate";
+      "RESIDUAL_ADD_FP", "deterministic-fp64-elementwise", "consensus_candidate";
+      "ROPE_APPLY_INDEXED_FP", "host-fp-trig-local-candidate", "local_only";
+      "ATTENTION_SCORES_FP", "deterministic-fp64-accumulation", "consensus_candidate";
+      "SOFTMAX_FP", "host-fp-exp-local-candidate", "local_only";
+      "ATTENTION_WEIGHTED_SUM_FP", "deterministic-fp64-accumulation", "consensus_candidate";
+      "ARGMAX_FP", "deterministic-fp64-comparison", "consensus_candidate";
+    ]
+  in
+  check "inference profile surface count" (List.length surface = 17);
+  let gates =
+    List.map
+      (fun (opcode, expected_profile, expected_status) ->
+         (match Profile.current_runtime_profile ~opcode with
+          | Some actual ->
+            check
+              (opcode ^ " explicit runtime profile")
+              (String.equal actual expected_profile)
+          | None -> failwith (opcode ^ " missing runtime profile"));
+         check
+           (opcode ^ " does not use generic host profile")
+           (not (String.equal expected_profile "host-fp-local-candidate"));
+         let gate = profile_gate opcode in
+         check
+           (opcode ^ " gate profile")
+           (String.equal (string_value "name" gate) expected_profile);
+         check
+           (opcode ^ " gate status")
+           (String.equal (string_value "consensus_status" gate) expected_status);
+         check
+           (opcode ^ " local semantics present")
+           (string_list_value "local_semantics" gate <> []);
+         check
+           (opcode ^ " obligations present")
+           (string_list_value "consensus_obligations" gate <> []);
+         check
+           (opcode ^ " blockers present")
+           (string_list_value "consensus_blocker_codes" gate <> []);
+         `Assoc gate)
+      surface
+  in
+  let counts = Profile.status_counts_of_json_gates gates in
+  (match Profile.status_counts_json counts with
+   | `Assoc fields ->
+     check "surface local-only count" (int_value "local_only" fields = 6);
+     check
+       "surface consensus-candidate count"
+       (int_value "consensus_candidate" fields = 11);
+     check "surface consensus-ready count" (int_value "consensus_ready" fields = 0);
+     check "surface unknown count" (int_value "unknown" fields = 0)
+   | _ -> failwith "surface status counts json must be object")
+
 let check_remaining_p0_profile_obligations () =
   List.iter
     (fun (opcode, local_needle, obligation_needle) ->
@@ -1523,6 +1588,7 @@ let () =
   check_profile_root_binding_counts ();
   check_profile_status_counts ();
   check_p0_profile_gate_coverage ();
+  check_inference_profile_surface_coverage ();
   check_remaining_p0_profile_obligations ();
   check_argmax_profile_gate ();
   check_rope_indexed_profile_gate ();

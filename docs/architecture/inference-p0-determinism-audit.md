@@ -270,7 +270,11 @@ profile_gate.profile_root
 Checker reports also include `profile_gate_count` and
 `classified_profile_gate_count` plus `unprofiled_template_count` so producer
 indexes, single templates, and template directories can be audited without
-parsing every template body. The companion
+parsing every template body. The conformance-template test also pins every
+currently admitted inference runtime opcode to an explicit profile bucket. The
+current surface has seventeen profiled opcodes: eleven `consensus_candidate`
+gates and six `local_only` gates. No current inference opcode may fall back
+silently to the generic `host-fp-local-candidate` bucket. The companion
 `profile_consensus_status_counts` object summarizes how many present profile
 gates are `local_only`, `consensus_candidate`, `consensus_ready`, or unknown.
 Unknown covers malformed gates or unrecognized `consensus_status` values.
