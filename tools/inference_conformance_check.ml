@@ -189,12 +189,33 @@ let profile_status_counts values =
   |> List.filter_map profile_gate_value
   |> Profile.status_counts_of_json_gates
 
-let consensus_ready_gate ~profile_gate_count ~unprofiled_count status_counts =
+let profile_root_binding_value value =
+  match value with
+  | `Assoc fields ->
+    if profile_gate_present value then
+      match List.assoc_opt "profile_root_binding" fields with
+      | Some (`Assoc _ as binding) -> Some binding
+      | _ -> Some Profile.unavailable_root_binding_json
+    else
+      None
+  | _ -> None
+
+let profile_root_binding_status_counts values =
+  values
+  |> List.filter_map profile_root_binding_value
+  |> Profile.root_binding_counts_of_json
+
+let consensus_ready_gate
+    ~profile_gate_count
+    ~unprofiled_count
+    ~root_binding_counts
+    status_counts =
   let ready =
     Profile.consensus_ready
       ~profile_gate_count
       ~unprofiled_count
       status_counts
+    && Profile.root_bindings_are_consensus_ready root_binding_counts
   in
   `Assoc [
     "required", `Bool !require_consensus_ready;
@@ -210,16 +231,22 @@ let consensus_ready_gate ~profile_gate_count ~unprofiled_count status_counts =
          (Profile.consensus_ready_blockers
             ~profile_gate_count
             ~unprofiled_count
-            status_counts));
+            status_counts
+          @ Profile.root_binding_blockers root_binding_counts));
   ]
 
-let consensus_ready_required_passes ~profile_gate_count ~unprofiled_count status_counts =
-  (not !require_consensus_ready)
-  ||
-  Profile.consensus_ready
+let consensus_ready_required_passes
     ~profile_gate_count
     ~unprofiled_count
-    status_counts
+    ~root_binding_counts
+    status_counts =
+  (not !require_consensus_ready)
+  ||
+  (Profile.consensus_ready
+     ~profile_gate_count
+     ~unprofiled_count
+     status_counts
+   && Profile.root_bindings_are_consensus_ready root_binding_counts)
 
 let template_profile_gate_present (checked : checked_template) =
   profile_gate_present (Template.to_json checked.template)
@@ -660,6 +687,9 @@ let producer_index_report index_path =
       List.length templates - profile_gate_count
     in
     let profile_status_counts = profile_status_counts profile_gates in
+    let profile_root_binding_counts =
+      profile_root_binding_status_counts profile_gates
+    in
     let classified_profile_gate_count =
       Profile.classified_gate_count profile_status_counts
     in
@@ -688,6 +718,7 @@ let producer_index_report index_path =
         && consensus_ready_required_passes
              ~profile_gate_count
              ~unprofiled_count:unprofiled_template_count
+             ~root_binding_counts:profile_root_binding_counts
              profile_status_counts
       then "accepted"
       else "rejected"
@@ -706,10 +737,13 @@ let producer_index_report index_path =
       "unprofiled_template_count", `Int unprofiled_template_count;
       "profile_consensus_status_counts",
       Profile.status_counts_json profile_status_counts;
+      "profile_root_binding_status_counts",
+      Profile.root_binding_counts_json profile_root_binding_counts;
       "consensus_ready_gate",
       consensus_ready_gate
         ~profile_gate_count
         ~unprofiled_count:unprofiled_template_count
+        ~root_binding_counts:profile_root_binding_counts
         profile_status_counts;
       "issue_count", `Int (List.length issues);
       "issues", `List (List.map issue_json issues);
@@ -754,6 +788,9 @@ let () =
             if profile_gate_present template_json then 1 else 0
           in
           let profile_status_counts = profile_status_counts [template_json] in
+          let profile_root_binding_counts =
+            profile_root_binding_status_counts [template_json]
+          in
           let classified_profile_gate_count =
             Profile.classified_gate_count profile_status_counts
           in
@@ -763,6 +800,7 @@ let () =
               consensus_ready_required_passes
                 ~profile_gate_count
                 ~unprofiled_count:(1 - profile_gate_count)
+                ~root_binding_counts:profile_root_binding_counts
                 profile_status_counts
             then "accepted"
             else "rejected"
@@ -779,10 +817,13 @@ let () =
               "unprofiled_template_count", `Int (1 - profile_gate_count);
               "profile_consensus_status_counts",
               Profile.status_counts_json profile_status_counts;
+              "profile_root_binding_status_counts",
+              Profile.root_binding_counts_json profile_root_binding_counts;
               "consensus_ready_gate",
               consensus_ready_gate
                 ~profile_gate_count
                 ~unprofiled_count:(1 - profile_gate_count)
+                ~root_binding_counts:profile_root_binding_counts
                 profile_status_counts;
               "templates", `List [checked_template_json checked];
             ]))
@@ -803,6 +844,9 @@ let () =
       List.map (fun checked -> Template.to_json checked.template) templates
     in
     let status_counts = profile_status_counts template_jsons in
+    let root_binding_counts =
+      profile_root_binding_status_counts template_jsons
+    in
     let classified_profile_gate_count =
       Profile.classified_gate_count status_counts
     in
@@ -813,6 +857,7 @@ let () =
         consensus_ready_required_passes
           ~profile_gate_count
           ~unprofiled_count
+          ~root_binding_counts
           status_counts
       then "accepted"
       else "rejected"
@@ -828,10 +873,13 @@ let () =
         "unprofiled_template_count", `Int unprofiled_count;
         "profile_consensus_status_counts",
         Profile.status_counts_json status_counts;
+        "profile_root_binding_status_counts",
+        Profile.root_binding_counts_json root_binding_counts;
         "consensus_ready_gate",
         consensus_ready_gate
           ~profile_gate_count
           ~unprofiled_count
+          ~root_binding_counts
           status_counts;
         "p0_opcodes",
         `List (List.map (fun opcode -> `String opcode) Template.p0_opcodes);

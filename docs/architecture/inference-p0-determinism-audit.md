@@ -255,18 +255,19 @@ parsing every template body. The companion
 gates are `local_only`, `consensus_candidate`, `consensus_ready`, or unknown.
 Unknown covers malformed gates or unrecognized `consensus_status` values.
 Passing `--require-consensus-ready` rejects any report with unprofiled,
-unclassified, `local_only`, `consensus_candidate`, or unknown profile gates.
-Rejection reasons are emitted as stable strings in
-`consensus_ready_gate.blockers`.
+unclassified, `local_only`, `consensus_candidate`, or unknown profile gates,
+and any `unbound` or `unavailable` profile roots. Rejection reasons are emitted
+as stable strings in `consensus_ready_gate.blockers`.
 `schema_status` remains the producer/template shape result in both normal and
 strict mode; top-level `status` additionally includes the active readiness gate.
 `consensus_blocker_codes` is the stable, machine-readable list of primitive
 math/profile blockers behind the prose obligations.
 `profile_root` is the LiteNode-owned descriptor root for the emitted profile
 gate. Current templates still validate `numerical_profile_root` syntactically;
-profile-root equality is diagnostic until a profile is promoted beyond
-`local_only`. Template and P0 execution reports expose that diagnostic as
-`profile_root_binding.status`: `matched`, `unbound`, or `unavailable`.
+profile-root equality is diagnostic in default mode and enforced only by
+`--require-consensus-ready`. Template and P0 execution reports expose that
+diagnostic as `profile_root_binding.status`: `matched`, `unbound`, or
+`unavailable`.
 
 `local_semantics` records what the current VM does today.
 `consensus_obligations` records what must become protocol-owned before the

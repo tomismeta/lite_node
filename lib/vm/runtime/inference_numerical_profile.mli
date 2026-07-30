@@ -31,6 +31,12 @@ type status_counts = {
   unknown : int;
 }
 
+type root_binding_counts = {
+  matched : int;
+  unbound : int;
+  unavailable : int;
+}
+
 type error =
   | Unknown_profile of string
   | Unsupported_opcode_profile of {
@@ -48,6 +54,7 @@ val to_json : t -> Yojson.Safe.t
 val root_for_opcode : opcode:string -> t -> string
 val root_binding_json :
   numerical_profile_root:string -> Yojson.Safe.t -> Yojson.Safe.t
+val unavailable_root_binding_json : Yojson.Safe.t
 val to_json_for_opcode : opcode:string -> t -> Yojson.Safe.t
 val status_counts_of_json_gates : Yojson.Safe.t list -> status_counts
 val classified_gate_count : status_counts -> int
@@ -56,4 +63,8 @@ val consensus_ready :
   profile_gate_count:int -> unprofiled_count:int -> status_counts -> bool
 val consensus_ready_blockers :
   profile_gate_count:int -> unprofiled_count:int -> status_counts -> string list
+val root_binding_counts_of_json : Yojson.Safe.t list -> root_binding_counts
+val root_bindings_are_consensus_ready : root_binding_counts -> bool
+val root_binding_blockers : root_binding_counts -> string list
+val root_binding_counts_json : root_binding_counts -> Yojson.Safe.t
 val status_counts_json : status_counts -> Yojson.Safe.t

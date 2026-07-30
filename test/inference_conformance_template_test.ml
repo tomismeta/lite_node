@@ -254,6 +254,35 @@ let check_profile_root () =
       "profile root is reported"
       (String.equal root (string_value "profile_root" gate))
 
+let check_profile_root_binding_counts () =
+  match Profile.of_name "host-fp-local-candidate" with
+  | Error error -> failwith (Profile.error_message error)
+  | Ok profile ->
+    let gate = Profile.to_json_for_opcode ~opcode:"RMSNORM_FP_EPS" profile in
+    let root = Profile.root_for_opcode ~opcode:"RMSNORM_FP_EPS" profile in
+    let counts =
+      Profile.root_binding_counts_of_json
+        [
+          Profile.root_binding_json ~numerical_profile_root:root gate;
+          Profile.root_binding_json ~numerical_profile_root:(hex_root 'e') gate;
+          Profile.unavailable_root_binding_json;
+        ]
+    in
+    (match Profile.root_binding_counts_json counts with
+     | `Assoc fields ->
+       check "matched root count" (int_value "matched" fields = 1);
+       check "unbound root count" (int_value "unbound" fields = 1);
+       check "unavailable root count" (int_value "unavailable" fields = 1);
+       check
+         "mixed root bindings are not consensus-ready"
+         (not (Profile.root_bindings_are_consensus_ready counts));
+       check
+         "mixed root binding blockers"
+         (list_equal
+            (Profile.root_binding_blockers counts)
+            ["unbound_profile_roots"; "unavailable_profile_roots"])
+     | _ -> failwith "root binding counts json must be object")
+
 let check_profile_status_counts () =
   let host_gate opcode = `Assoc (profile_gate opcode) in
   let candidate_gate =
@@ -760,6 +789,7 @@ let () =
   check_accepts_template ();
   check_q1_profile_obligations ();
   check_profile_root ();
+  check_profile_root_binding_counts ();
   check_profile_status_counts ();
   check_p0_profile_gate_coverage ();
   check_remaining_p0_profile_obligations ();

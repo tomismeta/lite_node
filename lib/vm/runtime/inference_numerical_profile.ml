@@ -31,6 +31,12 @@ type status_counts = {
   unknown : int;
 }
 
+type root_binding_counts = {
+  matched : int;
+  unbound : int;
+  unavailable : int;
+}
+
 type error =
   | Unknown_profile of string
   | Unsupported_opcode_profile of {
@@ -49,6 +55,12 @@ let empty_status_counts = {
   consensus_candidate = 0;
   consensus_ready = 0;
   unknown = 0;
+}
+
+let empty_root_binding_counts = {
+  matched = 0;
+  unbound = 0;
+  unavailable = 0;
 }
 
 let gate_status = function
@@ -105,6 +117,39 @@ let consensus_ready_blockers ~profile_gate_count ~unprofiled_count counts =
   |> add_if (counts.local_only > 0) "local_only_profile_gates"
   |> add_if (unprofiled_count > 0) "unprofiled_profile_gates"
   |> add_if (profile_gate_count = 0) "no_profile_gates"
+
+let root_binding_status = function
+  | `Assoc fields ->
+    (match List.assoc_opt "status" fields with
+     | Some (`String "matched") -> "matched"
+     | Some (`String "unbound") -> "unbound"
+     | Some (`String "unavailable") -> "unavailable"
+     | _ -> "unavailable")
+  | _ -> "unavailable"
+
+let add_root_binding_status counts binding =
+  match root_binding_status binding with
+  | "matched" -> { counts with matched = counts.matched + 1 }
+  | "unbound" -> { counts with unbound = counts.unbound + 1 }
+  | _ -> { counts with unavailable = counts.unavailable + 1 }
+
+let root_binding_counts_of_json bindings =
+  List.fold_left add_root_binding_status empty_root_binding_counts bindings
+
+let root_bindings_are_consensus_ready counts =
+  counts.unbound = 0 && counts.unavailable = 0
+
+let root_binding_blockers counts =
+  []
+  |> add_if (counts.unavailable > 0) "unavailable_profile_roots"
+  |> add_if (counts.unbound > 0) "unbound_profile_roots"
+
+let root_binding_counts_json counts =
+  `Assoc [
+    "matched", `Int counts.matched;
+    "unbound", `Int counts.unbound;
+    "unavailable", `Int counts.unavailable;
+  ]
 
 let status_counts_json counts =
   `Assoc [
@@ -606,6 +651,13 @@ let root_binding_json ~numerical_profile_root profile_gate =
     (match profile_root with
      | None -> `Null
      | Some root -> `String root);
+  ]
+
+let unavailable_root_binding_json =
+  `Assoc [
+    "status", `String "unavailable";
+    "numerical_profile_root", `Null;
+    "profile_root", `Null;
   ]
 
 let to_json profile =

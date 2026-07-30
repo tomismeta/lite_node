@@ -178,12 +178,33 @@ let profile_status_counts values =
   |> List.filter_map profile_gate_value
   |> Profile.status_counts_of_json_gates
 
-let consensus_ready_gate ~profile_gate_count ~unprofiled_count status_counts =
+let profile_root_binding_value value =
+  match value with
+  | `Assoc fields ->
+    if profile_gate_present value then
+      match field "profile_root_binding" fields with
+      | Some (`Assoc _ as binding) -> Some binding
+      | _ -> Some Profile.unavailable_root_binding_json
+    else
+      None
+  | _ -> None
+
+let profile_root_binding_status_counts values =
+  values
+  |> List.filter_map profile_root_binding_value
+  |> Profile.root_binding_counts_of_json
+
+let consensus_ready_gate
+    ~profile_gate_count
+    ~unprofiled_count
+    ~root_binding_counts
+    status_counts =
   let ready =
     Profile.consensus_ready
       ~profile_gate_count
       ~unprofiled_count
       status_counts
+    && Profile.root_bindings_are_consensus_ready root_binding_counts
   in
   `Assoc [
     "required", `Bool !require_consensus_ready;
@@ -199,16 +220,22 @@ let consensus_ready_gate ~profile_gate_count ~unprofiled_count status_counts =
          (Profile.consensus_ready_blockers
             ~profile_gate_count
             ~unprofiled_count
-            status_counts));
+            status_counts
+          @ Profile.root_binding_blockers root_binding_counts));
   ]
 
-let consensus_ready_required_passes ~profile_gate_count ~unprofiled_count status_counts =
-  (not !require_consensus_ready)
-  ||
-  Profile.consensus_ready
+let consensus_ready_required_passes
     ~profile_gate_count
     ~unprofiled_count
-    status_counts
+    ~root_binding_counts
+    status_counts =
+  (not !require_consensus_ready)
+  ||
+  (Profile.consensus_ready
+     ~profile_gate_count
+     ~unprofiled_count
+     status_counts
+   && Profile.root_bindings_are_consensus_ready root_binding_counts)
 
 let result_profile_gate_count result =
   if profile_gate_present result then 1 else 0
@@ -221,6 +248,15 @@ let p0_plus_profile_gates opcode fields =
          runtime_profile_gate_json
          ["RMSNORM_FP_EPS"; "LINEAR_Q1_G128_FP"; "ARGMAX_FP"])
   | _ -> non_null_profile_gates [profile_gate_json opcode fields]
+
+let p0_plus_profile_root_bindings fields profile_gates =
+  match opt_string_field "numerical_profile_root" fields with
+  | Some numerical_profile_root ->
+    List.map
+      (Profile.root_binding_json ~numerical_profile_root)
+      profile_gates
+  | None ->
+    List.map (fun _ -> Profile.unavailable_root_binding_json) profile_gates
 
 let check_template_identity template_path opcode primitive fields =
   (match opt_string_field "opcode" fields with
@@ -1087,6 +1123,9 @@ let execute_p0_plus_fixture root_dir entry =
   in
   let accepted = ran && matched in
   let profile_gates = p0_plus_profile_gates opcode fixture in
+  let profile_root_bindings =
+    p0_plus_profile_root_bindings fixture profile_gates
+  in
   accepted,
   `Assoc [
     "case", `String case_name;
@@ -1095,6 +1134,7 @@ let execute_p0_plus_fixture root_dir entry =
     "manifest", `String manifest_path;
     "profile_gates", `List profile_gates;
     "profile_gate_count", `Int (List.length profile_gates);
+    "profile_root_bindings", `List profile_root_bindings;
     "status", `String (if accepted then "accepted" else "rejected");
     "vm_run", `String (if ran then "accepted" else "rejected");
     "output_status", `String (if matched then "matched" else "mismatch");
@@ -1145,7 +1185,22 @@ let run_p0_plus_pack path =
       []
       results
   in
+  let profile_root_bindings =
+    List.fold_left
+      (fun bindings (_, result) ->
+         match result with
+         | `Assoc fields ->
+           (match field "profile_root_bindings" fields with
+            | Some (`List values) -> values @ bindings
+            | _ -> bindings)
+         | _ -> bindings)
+      []
+      results
+  in
   let status_counts = Profile.status_counts_of_json_gates profile_gates in
+  let root_binding_counts =
+    Profile.root_binding_counts_of_json profile_root_bindings
+  in
   let classified_profile_gate_count =
     Profile.classified_gate_count status_counts
   in
@@ -1155,6 +1210,7 @@ let run_p0_plus_pack path =
     consensus_ready_required_passes
       ~profile_gate_count
       ~unprofiled_count:0
+      ~root_binding_counts
       status_counts
   in
   `Assoc [
@@ -1171,10 +1227,13 @@ let run_p0_plus_pack path =
     "classified_profile_gate_count", `Int classified_profile_gate_count;
     "profile_consensus_status_counts",
     Profile.status_counts_json status_counts;
+    "profile_root_binding_status_counts",
+    Profile.root_binding_counts_json root_binding_counts;
     "consensus_ready_gate",
     consensus_ready_gate
       ~profile_gate_count
       ~unprofiled_count:0
+      ~root_binding_counts
       status_counts;
     "results", `List (List.map snd results);
   ]
@@ -1206,6 +1265,9 @@ let run_index path =
   let status_counts =
     profile_status_counts (List.map snd results)
   in
+  let root_binding_counts =
+    profile_root_binding_status_counts (List.map snd results)
+  in
   let classified_profile_gate_count =
     Profile.classified_gate_count status_counts
   in
@@ -1216,6 +1278,7 @@ let run_index path =
     consensus_ready_required_passes
       ~profile_gate_count
       ~unprofiled_count
+      ~root_binding_counts
       status_counts
   in
   let status = if accepted then "accepted" else "rejected" in
@@ -1231,10 +1294,13 @@ let run_index path =
     "unprofiled_template_count", `Int unprofiled_count;
     "profile_consensus_status_counts",
     Profile.status_counts_json status_counts;
+    "profile_root_binding_status_counts",
+    Profile.root_binding_counts_json root_binding_counts;
     "consensus_ready_gate",
     consensus_ready_gate
       ~profile_gate_count
       ~unprofiled_count
+      ~root_binding_counts
       status_counts;
     "accepted_count",
     `Int (List.length (List.filter fst results));
