@@ -135,6 +135,16 @@ let profile_gate_json opcode fields =
         | Error error ->
           fail (Profile.error_message error)))
 
+let check_template_identity template_path opcode primitive fields =
+  (match opt_string_field "opcode" fields with
+   | Some value when not (String.equal value opcode) ->
+     fail (template_path ^ ": template opcode mismatch: " ^ value)
+   | _ -> ());
+  match primitive, opt_string_field "primitive" fields with
+  | Some expected, Some value when not (String.equal value expected) ->
+    fail (template_path ^ ": template primitive mismatch: " ^ value)
+  | _ -> ()
+
 let register_index value =
   let len = String.length value in
   if len < 2 || value.[0] <> 'r' then
@@ -624,6 +634,7 @@ let failure_case_results root_dir opcode template registers values op =
 
 let execute_template root_dir entry =
   let opcode = string_field "opcode" entry in
+  let primitive = opt_string_field "primitive" entry in
   let template_path = string_field "vm_execution_template" entry in
   let full_template_path = Filename.concat root_dir template_path in
   let template =
@@ -631,6 +642,7 @@ let execute_template root_dir entry =
     | `Assoc fields -> fields
     | _ -> fail (full_template_path ^ ": template must be an object")
   in
+  check_template_identity full_template_path opcode primitive template;
   let profile_gate = profile_gate_json opcode template in
   let expected_effort = int_field "expected_effort" template in
   let params = assoc_field "parameter_addresses_and_scalar_params" template in

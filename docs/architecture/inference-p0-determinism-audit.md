@@ -204,7 +204,8 @@ Producer-index reports include diagnostic `profile_gates`, using a declared
 template profile when present and the opcode's current runtime profile when the
 template is profile-less.
 If a referenced template also declares `opcode` or `primitive`, those fields
-must match the index entry so profile diagnostics cannot be mislabeled.
+must match the index entry so profile diagnostics and execution cannot be
+mislabeled.
 
 After that, LiteNode can execute templates without negotiating schema again.
 
