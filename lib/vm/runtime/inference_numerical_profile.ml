@@ -55,8 +55,8 @@ let gate_status = function
   | `Assoc fields ->
     (match List.assoc_opt "consensus_status" fields with
      | Some (`String value) -> Some value
-     | _ -> None)
-  | _ -> None
+     | _ -> Some "unknown")
+  | _ -> Some "unknown"
 
 let add_gate_status counts gate =
   match gate_status gate with
@@ -74,7 +74,8 @@ let status_counts_of_json_gates gates =
   List.fold_left add_gate_status empty_status_counts gates
 
 let status_counts_are_consensus_ready counts =
-  counts.local_only = 0
+  counts.consensus_ready > 0
+  && counts.local_only = 0
   && counts.consensus_candidate = 0
   && counts.unknown = 0
 

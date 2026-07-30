@@ -247,6 +247,7 @@ Checker reports also include `profile_gate_count` and
 directories can be audited without parsing every template body. The companion
 `profile_consensus_status_counts` object summarizes how many present profile
 gates are `local_only`, `consensus_candidate`, `consensus_ready`, or unknown.
+Unknown covers malformed gates or unrecognized `consensus_status` values.
 Passing `--require-consensus-ready` rejects any report with unprofiled,
 `local_only`, `consensus_candidate`, or unknown profile gates. Rejection reasons
 are emitted as stable strings in `consensus_ready_gate.blockers`.
