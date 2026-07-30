@@ -152,6 +152,9 @@ let check_accepts_template () =
            && list_contains_substring
                 "epsilon"
                 (string_list_value "local_semantics" gate)
+           && list_contains_substring
+                "minimum positive subnormal epsilon"
+                (string_list_value "local_semantics" gate)
          | _ -> false)
     | _ -> failwith "template json must be object"
 

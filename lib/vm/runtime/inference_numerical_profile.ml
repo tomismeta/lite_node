@@ -125,6 +125,7 @@ let local_semantics ~opcode =
   | "RMSNORM_FP_EPS" ->
     [
       "epsilon is read from an integer register as binary64 bits and must be finite and positive";
+      "minimum positive subnormal epsilon is accepted by the current host-fp profile";
       "input and gamma cells are finite binary64 values and their ranges must not overlap";
       "sum of squares is accumulated left-to-right in native binary64";
       "inverse RMS is computed as 1.0 / sqrt((sum_sq / count) + epsilon)";
