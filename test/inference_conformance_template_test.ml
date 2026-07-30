@@ -407,6 +407,44 @@ let check_attention_profile_gates () =
       "ATTENTION_WEIGHTED_SUM_FP", "not renormalized", "weighted-sum edge vectors";
     ]
 
+let check_causal_conv_profile_gate () =
+  check
+    "causal conv runtime profile"
+    (match Profile.current_runtime_profile ~opcode:"CAUSAL_DEPTHWISE_CONV1D_FP" with
+     | Some "host-fp-local-candidate" -> true
+     | _ -> false);
+  let gate = profile_gate "CAUSAL_DEPTHWISE_CONV1D_FP" in
+  check
+    "causal conv local indexing semantics"
+    (list_contains_substring
+       "causal depthwise indexing"
+       (string_list_value "local_semantics" gate));
+  check
+    "causal conv snapshot semantics"
+    (list_contains_substring
+       "snapshotted before output writeback"
+       (string_list_value "local_semantics" gate));
+  check
+    "causal conv edge obligation"
+    (list_contains_substring
+       "causal-convolution edge vectors"
+       (string_list_value "consensus_obligations" gate));
+  match
+    Profile.validate_for_opcode
+      ~opcode:"CAUSAL_DEPTHWISE_CONV1D_FP"
+      ~profile:"q16-exact"
+  with
+  | Error (Profile.Unsupported_opcode_profile { opcode; profile; expected }) ->
+    check
+      "causal conv overclaim opcode"
+      (String.equal opcode "CAUSAL_DEPTHWISE_CONV1D_FP");
+    check "causal conv overclaim profile" (String.equal profile "q16-exact");
+    check
+      "causal conv overclaim expected"
+      (String.equal expected "host-fp-local-candidate")
+  | Error error -> failwith (Profile.error_message error)
+  | Ok _ -> failwith "expected causal conv profile overclaim rejection"
+
 let check_rejects_unknown_opcode () =
   match Template.of_json (template ~opcode:"MODEL_SPECIFIC_FASTPATH" ()) with
   | Error (Template.Template_error message) ->
@@ -541,6 +579,7 @@ let () =
   check_activation_profile_gates ();
   check_vector_arithmetic_profile_gates ();
   check_attention_profile_gates ();
+  check_causal_conv_profile_gate ();
   check_rejects_unknown_opcode ();
   check_rejects_effect_drift ();
   check_rejects_missing_failure_cases ();

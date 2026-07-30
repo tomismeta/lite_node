@@ -100,6 +100,7 @@ let current_runtime_profile ~opcode =
   | "L2NORM_FP"
   | "SOFTMAX_FP"
   | "GATED_DELTA_RULE_FP"
+  | "CAUSAL_DEPTHWISE_CONV1D_FP"
   | "ARGMAX_FP"
   | "ROPE_APPLY_INDEXED_FP"
   | "ATTENTION_SCORES_FP"
@@ -195,6 +196,15 @@ let local_semantics ~opcode =
       "state decay uses exp(log_decay) and scale uses 1.0 / sqrt(key_dim)";
       "loop order is timestep, value head, value row, key column";
       "output and next-state cells are written only after both buffers are finite";
+    ]
+  | "CAUSAL_DEPTHWISE_CONV1D_FP" ->
+    [
+      "input and kernel cells are finite binary64 values";
+      "timesteps, channels, and width must be positive";
+      "each output cell uses causal depthwise indexing over matching channels";
+      "accumulation is left-to-right by kernel index using native binary64";
+      "input and kernel ranges are snapshotted before output writeback";
+      "outputs are written only after the complete finite output tensor is computed";
     ]
   | "ARGMAX_FP" ->
     [
@@ -300,6 +310,13 @@ let consensus_obligations ~opcode =
       "pin head mapping, decay order, beta application, state update order, and scaling";
       "define exact output plus next-state encoding, alias rejection, effort, and atomicity";
       "pass independent cross-platform conformance for recurrent state-transition edge vectors";
+    ]
+  | "CAUSAL_DEPTHWISE_CONV1D_FP" ->
+    [
+      "replace or qualify native binary64 multiplication and addition";
+      "pin causal depthwise indexing, kernel-order accumulation, finite rejection, and effort";
+      "define input/kernel snapshot behavior, output encoding, alias handling, and writeback atomicity";
+      "pass independent cross-platform conformance for causal-convolution edge vectors";
     ]
   | "ARGMAX_FP" ->
     [

@@ -360,6 +360,14 @@ finite reads, exact same-range aliasing, partial-overlap rejection, overflow
 rollback, and effort; profile reporting now prevents native binary64
 multiply/add from being mislabeled as fixed-point or software-FP authority.
 
+LiteNode also reports `CAUSAL_DEPTHWISE_CONV1D_FP` under the current
+`host-fp-local-candidate` runtime profile. The local profile covers finite
+input/kernel reads, positive shape parameters, causal depthwise indexing,
+left-to-right kernel accumulation, input/kernel snapshot before writeback, and
+finite output atomicity. This is a generic sequence primitive, not a model- or
+SSM-specific fused path, and still requires protocol-owned arithmetic before a
+consensus-ready claim.
+
 The saved report is:
 
 ```text
