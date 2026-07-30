@@ -345,6 +345,12 @@ native `cos`/`sin`, finite-buffer writeback, zero-position behavior, and tail
 preservation. This remains local-only until rotary math has a software-defined
 or otherwise validator-qualified contract.
 
+LiteNode also reports `SIGMOID_FP`, `SOFTPLUS_FP`, and `SILU_FP` under the
+current `host-fp-local-candidate` runtime profile. These opcodes use native
+`exp` and, for softplus, native `log1p`; any Q16 or software-FP activation
+claim must be a separate profile or opcode path rather than an overclaim on the
+current FP opcodes.
+
 The saved report is:
 
 ```text

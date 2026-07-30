@@ -101,7 +101,10 @@ let current_runtime_profile ~opcode =
   | "SOFTMAX_FP"
   | "GATED_DELTA_RULE_FP"
   | "ARGMAX_FP"
-  | "ROPE_APPLY_INDEXED_FP" ->
+  | "ROPE_APPLY_INDEXED_FP"
+  | "SIGMOID_FP"
+  | "SOFTPLUS_FP"
+  | "SILU_FP" ->
     Some "host-fp-local-candidate"
   | _ -> None
 
@@ -148,6 +151,24 @@ let local_semantics ~opcode =
       "exp is applied to each score minus the selected maximum score";
       "probabilities are divided by the native binary64 sum of exponentials";
       "destination may equal scores exactly, but partial overlap is rejected";
+    ]
+  | "SIGMOID_FP" ->
+    [
+      "input cells are finite binary64 values and are updated in place";
+      "sigmoid is computed as 1.0 / (1.0 + exp(-x)) using native binary64";
+      "outputs are written only after the complete finite output vector is computed";
+    ]
+  | "SOFTPLUS_FP" ->
+    [
+      "input cells are finite binary64 values and are updated in place";
+      "positive inputs use x + log1p(exp(-x)) and other inputs use log1p(exp(x))";
+      "outputs are written only after the complete finite output vector is computed";
+    ]
+  | "SILU_FP" ->
+    [
+      "input cells are finite binary64 values and are updated in place";
+      "SiLU is computed as x * (1.0 / (1.0 + exp(-x))) using native binary64";
+      "outputs are written only after the complete finite output vector is computed";
     ]
   | "GATED_DELTA_RULE_FP" ->
     [
@@ -203,6 +224,27 @@ let consensus_obligations ~opcode =
       "pin max-subtract semantics, ties, underflow, overflow, and non-finite rejection";
       "define exact output encoding and overlap/writeback atomicity";
       "pass independent cross-platform conformance for probability and ordering edge vectors";
+    ]
+  | "SIGMOID_FP" ->
+    [
+      "replace or qualify native binary64 exp, division, and addition";
+      "pin saturation, signed-zero, subnormal, overflow, and non-finite behavior";
+      "define in-place writeback atomicity and effort";
+      "pass independent cross-platform conformance for sigmoid edge vectors";
+    ]
+  | "SOFTPLUS_FP" ->
+    [
+      "replace or qualify native binary64 exp, log1p, addition, and branch behavior";
+      "pin positive/negative branch boundary, signed-zero, subnormal, overflow, and non-finite behavior";
+      "define in-place writeback atomicity and effort";
+      "pass independent cross-platform conformance for softplus edge vectors";
+    ]
+  | "SILU_FP" ->
+    [
+      "replace or qualify native binary64 exp, division, multiplication, and addition";
+      "pin sigmoid reuse, signed-zero, subnormal, overflow, and non-finite behavior";
+      "define in-place writeback atomicity and effort";
+      "pass independent cross-platform conformance for SiLU edge vectors";
     ]
   | "GATED_DELTA_RULE_FP" ->
     [
