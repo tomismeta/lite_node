@@ -672,10 +672,68 @@ let check_activation_profile_gates () =
       | Error error -> failwith (Profile.error_message error)
       | Ok _ -> failwith (opcode ^ " should reject profile overclaim"))
     [
-      "SIGMOID_FP", "1.0 / (1.0 + exp(-x))", "sigmoid edge vectors";
+      "SIGMOID_FP", "native exp only sees finite nonpositive inputs", "nonpositive exp-domain gate";
       "SOFTPLUS_FP", "log1p", "softplus edge vectors";
-      "SILU_FP", "x * (1.0 / (1.0 + exp(-x)))", "SiLU edge vectors";
-    ]
+      "SILU_FP", "SiLU reuses the SIGMOID_FP sign branch", "deterministic sigmoid reuse";
+    ];
+  let sigmoid_gate = profile_gate "SIGMOID_FP" in
+  let sigmoid_blockers =
+    string_list_value "consensus_blocker_codes" sigmoid_gate
+  in
+  check
+    "sigmoid host exp blocker"
+    (List.mem "host_fp_exp" sigmoid_blockers);
+  check
+    "sigmoid comparison blocker"
+    (List.mem "fp64_comparison_conformance" sigmoid_blockers);
+  check
+    "sigmoid add blocker"
+    (List.mem "fp64_add_conformance" sigmoid_blockers);
+  check
+    "sigmoid divide blocker"
+    (List.mem "fp64_divide_conformance" sigmoid_blockers);
+  check
+    "sigmoid generic host arithmetic retired"
+    (not (List.mem "host_fp_arithmetic" sigmoid_blockers));
+  (match List.assoc_opt "profile_contract" sigmoid_gate with
+   | Some (`Assoc contract) ->
+     check
+       "sigmoid operation records branch"
+       (list_contains_substring
+          "select_exp_branch_by_deterministic_sign_compare"
+          (string_list_value "operation_sequence" contract));
+     check
+       "sigmoid edge records exp gate"
+       (List.mem
+          "native_exp_input_must_be_finite_and_nonpositive"
+          (string_list_value "edge_value_policy" contract))
+   | _ -> failwith "missing sigmoid profile contract");
+  let silu_gate = profile_gate "SILU_FP" in
+  let silu_blockers =
+    string_list_value "consensus_blocker_codes" silu_gate
+  in
+  check
+    "silu host exp blocker"
+    (List.mem "host_fp_exp" silu_blockers);
+  check
+    "silu multiply blocker"
+    (List.mem "fp64_multiply_conformance" silu_blockers);
+  check
+    "silu generic host arithmetic retired"
+    (not (List.mem "host_fp_arithmetic" silu_blockers));
+  (match List.assoc_opt "profile_contract" silu_gate with
+   | Some (`Assoc contract) ->
+     check
+       "silu operation records sigmoid reuse"
+       (list_contains_substring
+          "compute_sigmoid_with_deterministic_sign_branch"
+          (string_list_value "operation_sequence" contract));
+     check
+       "silu edge records exp gate"
+       (List.mem
+          "reuse_sigmoid_nonpositive_exp_gate"
+          (string_list_value "edge_value_policy" contract))
+   | _ -> failwith "missing silu profile contract")
 
 let check_vector_arithmetic_profile_gates () =
   List.iter

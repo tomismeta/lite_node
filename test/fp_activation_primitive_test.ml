@@ -88,6 +88,14 @@ let fixture_bits bytes =
   if String.length bytes mod 8 <> 0 then failwith "invalid f64 fixture";
   List.init (String.length bytes / 8) (fun i -> int64_le bytes (i * 8))
 
+let finite_f64_bits bits =
+  match classify_float (Int64.float_of_bits bits) with
+  | FP_nan
+  | FP_infinite -> false
+  | FP_normal
+  | FP_subnormal
+  | FP_zero -> true
+
 let run_activation op input =
   let state =
     VM.create_state
@@ -112,7 +120,7 @@ let sigmoid_input =
 
 let sigmoid_output =
   bytes_of_hex
-    "4554903c3448a83f86ba54145636d13f000000000000e03fbda2d5f5d464e73f\
+    "4654903c3448a83f86ba54145636d13f000000000000e03fbda2d5f5d464e73f\
      bdfa36bc7c7bee3f"
 
 let softplus_input =
@@ -193,6 +201,7 @@ let check_nonfinite_reverts_atomically () =
       check (name ^ " following input unchanged")
         (f64_bits state 101 = Int64.bits_of_float 9.0))
     [
+      "SIGMOID_FP", VM.SIGMOID_FP (0, 1);
       "SOFTPLUS_FP", VM.SOFTPLUS_FP (0, 1);
       "SILU_FP", VM.SILU_FP (0, 1);
     ]
@@ -304,6 +313,88 @@ let set_f64_values state base values =
     (fun index value ->
       set_f64_bits state (base + index) (Int64.bits_of_float value))
     values
+
+let check_activation_large_magnitude_edges () =
+  let sigmoid = fresh_state () in
+  set_int_reg sigmoid 0 100;
+  set_int_reg sigmoid 1 2;
+  set_f64_values sigmoid 100 [max_float; -. max_float];
+  check "sigmoid large magnitude succeeds"
+    (VM.run sigmoid [|VM.SIGMOID_FP (0, 1); VM.STOP|]);
+  check
+    "sigmoid large positive saturates"
+    (f64_bits sigmoid 100 = Int64.bits_of_float 1.0);
+  check
+    "sigmoid large negative saturates"
+    (f64_bits sigmoid 101 = Int64.bits_of_float 0.0);
+  let silu = fresh_state () in
+  set_int_reg silu 0 100;
+  set_int_reg silu 1 2;
+  set_f64_values silu 100 [max_float; -. max_float];
+  check "silu large magnitude succeeds"
+    (VM.run silu [|VM.SILU_FP (0, 1); VM.STOP|]);
+  check
+    "silu large positive preserves magnitude"
+    (f64_bits silu 100 = Int64.bits_of_float max_float);
+  check
+    "silu large negative saturates to negative zero"
+    (f64_bits silu 101 = Int64.bits_of_float (-0.0))
+
+let check_activation_zero_subnormal_edges () =
+  let pos_min_subnormal = 0x0000000000000001L in
+  let neg_min_subnormal = 0x8000000000000001L in
+  let sigmoid = fresh_state () in
+  set_int_reg sigmoid 0 100;
+  set_int_reg sigmoid 1 4;
+  set_f64_bits sigmoid 100 (Int64.bits_of_float 0.0);
+  set_f64_bits sigmoid 101 (Int64.bits_of_float (-0.0));
+  set_f64_bits sigmoid 102 pos_min_subnormal;
+  set_f64_bits sigmoid 103 neg_min_subnormal;
+  check "sigmoid zero/subnormal succeeds"
+    (VM.run sigmoid [|VM.SIGMOID_FP (0, 1); VM.STOP|]);
+  check
+    "sigmoid positive zero"
+    (f64_bits sigmoid 100 = Int64.bits_of_float 0.5);
+  check
+    "sigmoid negative zero"
+    (f64_bits sigmoid 101 = Int64.bits_of_float 0.5);
+  check "sigmoid positive subnormal finite" (finite_f64_bits (f64_bits sigmoid 102));
+  check "sigmoid negative subnormal finite" (finite_f64_bits (f64_bits sigmoid 103));
+  let silu = fresh_state () in
+  set_int_reg silu 0 100;
+  set_int_reg silu 1 4;
+  set_f64_bits silu 100 (Int64.bits_of_float 0.0);
+  set_f64_bits silu 101 (Int64.bits_of_float (-0.0));
+  set_f64_bits silu 102 pos_min_subnormal;
+  set_f64_bits silu 103 neg_min_subnormal;
+  check "silu zero/subnormal succeeds"
+    (VM.run silu [|VM.SILU_FP (0, 1); VM.STOP|]);
+  check "silu positive zero" (f64_bits silu 100 = Int64.bits_of_float 0.0);
+  check "silu negative zero" (f64_bits silu 101 = Int64.bits_of_float (-0.0));
+  check "silu positive subnormal finite" (finite_f64_bits (f64_bits silu 102));
+  check "silu negative subnormal finite" (finite_f64_bits (f64_bits silu 103))
+
+let check_activation_effort_accounting () =
+  List.iter
+    (fun (name, op) ->
+      let exact = fresh_state ~limit:26 () in
+      set_int_reg exact 0 100;
+      set_int_reg exact 1 2;
+      set_f64_values exact 100 [1.0; -1.0];
+      check (name ^ " exact effort succeeds") (VM.run exact [|op|]);
+      check (name ^ " exact effort charged") (exact.VM.effort_used = 26);
+      let one_under = fresh_state ~limit:25 () in
+      set_int_reg one_under 0 100;
+      set_int_reg one_under 1 2;
+      set_f64_values one_under 100 [1.0; -1.0];
+      check (name ^ " one-under effort reverts") (not (VM.run one_under [|op|]));
+      check
+        (name ^ " one-under effort leaves input")
+        (f64_bits one_under 100 = Int64.bits_of_float 1.0))
+    [
+      "sigmoid", VM.SIGMOID_FP (0, 1);
+      "silu", VM.SILU_FP (0, 1);
+    ]
 
 let check_residual_add () =
   let state = fresh_state () in
@@ -807,6 +898,9 @@ let () =
   check_nonfinite_reverts_atomically ();
   check_strict_operands ();
   check_invalid_shape_and_effort_reverts ();
+  check_activation_large_magnitude_edges ();
+  check_activation_zero_subnormal_edges ();
+  check_activation_effort_accounting ();
   check_residual_add ();
   check_residual_reverts_atomically ();
   check_residual_effort ();

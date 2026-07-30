@@ -1099,6 +1099,39 @@ let fp64_inverse_sqrt_bits bits =
      | None -> None)
   | _ -> None
 
+let fp64_exp_nonpositive_bits bits =
+  match Inference_fp64.compare bits 0L with
+  | Some cmp when cmp <= 0 ->
+    let input = Int64.float_of_bits bits in
+    let output = exp input in
+    if finite_fp64 input && finite_fp64 output then
+      Some (Int64.bits_of_float output)
+    else None
+  | _ -> None
+
+let fp64_sigmoid_bits bits =
+  match Inference_fp64.compare bits 0L with
+  | Some cmp when cmp >= 0 ->
+    (match fp64_exp_nonpositive_bits (Inference_fp64.negate bits) with
+     | Some exp_bits ->
+       (match Inference_fp64.add fp64_one_bits exp_bits with
+        | Some denom -> Inference_fp64.div fp64_one_bits denom
+        | None -> None)
+     | None -> None)
+  | Some _ ->
+    (match fp64_exp_nonpositive_bits bits with
+     | Some exp_bits ->
+       (match Inference_fp64.add fp64_one_bits exp_bits with
+        | Some denom -> Inference_fp64.div exp_bits denom
+        | None -> None)
+     | None -> None)
+  | None -> None
+
+let fp64_silu_bits bits =
+  match fp64_sigmoid_bits bits with
+  | Some sigmoid -> Inference_fp64.mul bits sigmoid
+  | None -> None
+
 let gated_delta_rule_effort timesteps v_heads value_dim key_dim =
   let scale_product factors scale =
     match Cost.product factors with
@@ -1161,6 +1194,27 @@ let map_fp64_inplace st addr n f =
       else begin
         for i = 0 to n - 1 do
           mem_set_fp64 st.memory.data (addr + i) output.(i)
+        done;
+        true
+      end
+
+let map_fp64_bits_inplace st addr n f =
+  if n <= 0 || n > 131072 || not (valid_mem_span addr n) then revert st
+  else if not (add_dyn_product st [n; 3] 1) then revert st
+  else
+    match read_fp64_bits_array st.memory.data addr n with
+    | None -> revert st
+    | Some input ->
+      let output = Array.map f input in
+      if
+        not
+          (Array.for_all
+             (function Some bits -> Inference_fp64.finite bits | None -> false)
+             output)
+      then revert st
+      else begin
+        for i = 0 to n - 1 do
+          mem_set_fp64_bits st.memory.data (addr + i) (Option.get output.(i))
         done;
         true
       end
@@ -2427,7 +2481,7 @@ let exec_one st op =
   | SIGMOID_FP (rs_addr, rs_n) ->
     (match read_int st rs_addr, read_int st rs_n with
      | Some addr, Some n ->
-       map_fp64_inplace st addr n (fun x -> 1.0 /. (1.0 +. exp (-. x)))
+       map_fp64_bits_inplace st addr n fp64_sigmoid_bits
      | _ -> revert st)
   | SOFTPLUS_FP (rs_addr, rs_n) ->
     (match read_int st rs_addr, read_int st rs_n with
@@ -2863,8 +2917,7 @@ let exec_one st op =
   | SILU_FP (rs_addr, rs_n) ->
     (match read_int st rs_addr, read_int st rs_n with
      | Some addr, Some n ->
-       map_fp64_inplace st addr n (fun x ->
-         x *. (1.0 /. (1.0 +. exp (-. x))))
+       map_fp64_bits_inplace st addr n fp64_silu_bits
      | _ -> revert st)
   | ELEMWISE_MUL_FP (rs_dst, rs_src, rs_n) ->
     (match read_int st rs_dst, read_int st rs_src, read_int st rs_n with

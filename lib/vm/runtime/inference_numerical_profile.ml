@@ -320,7 +320,8 @@ let local_semantics ~opcode =
   | "SIGMOID_FP" ->
     [
       "input cells are finite binary64 values and are updated in place";
-      "sigmoid is computed as 1.0 / (1.0 + exp(-x)) using native binary64";
+      "nonnegative inputs use exp(-x) and negative inputs use exp(x), so native exp only sees finite nonpositive inputs";
+      "1.0 + exp and the final ratio use deterministic finite binary64 add/divide";
       "outputs are written only after the complete finite output vector is computed";
     ]
   | "SOFTPLUS_FP" ->
@@ -332,7 +333,8 @@ let local_semantics ~opcode =
   | "SILU_FP" ->
     [
       "input cells are finite binary64 values and are updated in place";
-      "SiLU is computed as x * (1.0 / (1.0 + exp(-x))) using native binary64";
+      "SiLU reuses the SIGMOID_FP sign branch and nonpositive native exp-domain gate";
+      "x * sigmoid(x) uses deterministic finite binary64 multiplication";
       "outputs are written only after the complete finite output vector is computed";
     ]
   | "ELEMWISE_MUL_FP" ->
@@ -450,7 +452,9 @@ let consensus_obligations ~opcode =
     ]
   | "SIGMOID_FP" ->
     [
-      "replace or qualify native binary64 exp, division, and addition";
+      "replace or qualify native binary64 exp";
+      "pin deterministic sign branch and nonpositive exp-domain gate";
+      "qualify deterministic binary64 addition and division";
       "pin saturation, signed-zero, subnormal, overflow, and non-finite behavior";
       "define in-place writeback atomicity and effort";
       "pass independent cross-platform conformance for sigmoid edge vectors";
@@ -464,8 +468,10 @@ let consensus_obligations ~opcode =
     ]
   | "SILU_FP" ->
     [
-      "replace or qualify native binary64 exp, division, multiplication, and addition";
-      "pin sigmoid reuse, signed-zero, subnormal, overflow, and non-finite behavior";
+      "replace or qualify native binary64 exp";
+      "pin deterministic sigmoid reuse and nonpositive exp-domain gate";
+      "qualify deterministic binary64 addition, division, and multiplication";
+      "pin signed-zero, subnormal, overflow, and non-finite behavior";
       "define in-place writeback atomicity and effort";
       "pass independent cross-platform conformance for SiLU edge vectors";
     ]
@@ -590,6 +596,43 @@ let consensus_blocker_codes ~opcode =
       "overlap_policy";
       "cross_platform_conformance";
     ]
+  | "SIGMOID_FP" ->
+    [
+      "fp64_comparison_conformance";
+      "host_fp_exp";
+      "fp64_add_conformance";
+      "fp64_divide_conformance";
+      "activation_branch_policy";
+      "signed_zero_subnormal_policy";
+      "finite_overflow_policy";
+      "atomic_writeback";
+      "cross_platform_conformance";
+    ]
+  | "SOFTPLUS_FP" ->
+    [
+      "fp64_comparison_conformance";
+      "host_fp_exp";
+      "host_fp_log1p";
+      "host_fp_add";
+      "activation_branch_policy";
+      "signed_zero_subnormal_policy";
+      "finite_overflow_policy";
+      "atomic_writeback";
+      "cross_platform_conformance";
+    ]
+  | "SILU_FP" ->
+    [
+      "fp64_comparison_conformance";
+      "host_fp_exp";
+      "fp64_add_conformance";
+      "fp64_divide_conformance";
+      "fp64_multiply_conformance";
+      "activation_branch_policy";
+      "signed_zero_subnormal_policy";
+      "finite_overflow_policy";
+      "atomic_writeback";
+      "cross_platform_conformance";
+    ]
   | "GATED_DELTA_RULE_FP" ->
     [
       "fp64_recurrence_add_mul_conformance";
@@ -699,6 +742,12 @@ let arithmetic_domain ~profile ~opcode =
     "deterministic-binary64-compare-shift-nonpositive-exp-gate-sum-divide-host-exp"
   | "host-fp-local-candidate", "GATED_DELTA_RULE_FP" ->
     "deterministic-binary64-nonpositive-exp-gate-recurrence-sqrt-divide-host-exp"
+  | "host-fp-local-candidate", "SIGMOID_FP" ->
+    "deterministic-binary64-sigmoid-nonpositive-exp-gate-host-exp"
+  | "host-fp-local-candidate", "SOFTPLUS_FP" ->
+    "native-binary64-softplus-host-exp-log1p"
+  | "host-fp-local-candidate", "SILU_FP" ->
+    "deterministic-binary64-silu-nonpositive-exp-gate-host-exp"
   | "host-fp-local-candidate", "ARGMAX_FP" ->
     "deterministic-binary64-comparison"
   | "host-fp-local-candidate", "ATTENTION_SCORES_FP" ->
@@ -720,6 +769,8 @@ let rounding_mode ~profile ~opcode =
   | ( "host-fp-local-candidate",
       ( "SOFTMAX_FP"
       | "GATED_DELTA_RULE_FP"
+      | "SIGMOID_FP"
+      | "SILU_FP"
       | "ELEMWISE_MUL_FP"
       | "RESIDUAL_ADD_FP" ) ) ->
     "deterministic-binary64-roundTiesToEven-with-host-math"
@@ -782,6 +833,35 @@ let operation_sequence ~opcode =
       "exp_each_score_host";
       "sum_exponentials_left_to_right_deterministic";
       "divide_each_exponential_by_sum_deterministic";
+      "finite_output_check";
+      "atomic_output_writeback";
+    ]
+  | "SIGMOID_FP" ->
+    [
+      "snapshot_input";
+      "select_exp_branch_by_deterministic_sign_compare";
+      "check_exp_input_nonpositive_deterministic";
+      "compute_exp_host";
+      "add_one_plus_exp_deterministic";
+      "divide_ratio_deterministic";
+      "finite_output_check";
+      "atomic_output_writeback";
+    ]
+  | "SOFTPLUS_FP" ->
+    [
+      "snapshot_input";
+      "select_positive_or_nonpositive_branch_host_compare";
+      "compute_exp_host";
+      "compute_log1p_host";
+      "add_positive_branch_host";
+      "finite_output_check";
+      "atomic_output_writeback";
+    ]
+  | "SILU_FP" ->
+    [
+      "snapshot_input";
+      "compute_sigmoid_with_deterministic_sign_branch";
+      "multiply_input_sigmoid_deterministic";
       "finite_output_check";
       "atomic_output_writeback";
     ]
@@ -872,6 +952,27 @@ let edge_value_policy ~opcode =
       "reject_missing_or_nonfinite_operands";
       "reject_positive_shifted_exp_input";
       "reject_nonpositive_or_nonfinite_exp_sum";
+      "preserve_destination_on_reject";
+    ]
+  | "SIGMOID_FP" ->
+    [
+      "reject_missing_or_nonfinite_operands";
+      "native_exp_input_must_be_finite_and_nonpositive";
+      "reject_nonfinite_output";
+      "preserve_destination_on_reject";
+    ]
+  | "SOFTPLUS_FP" ->
+    [
+      "reject_missing_or_nonfinite_operands";
+      "positive_branch_boundary_is_host_greater_than_zero";
+      "reject_nonfinite_output";
+      "preserve_destination_on_reject";
+    ]
+  | "SILU_FP" ->
+    [
+      "reject_missing_or_nonfinite_operands";
+      "reuse_sigmoid_nonpositive_exp_gate";
+      "reject_nonfinite_output";
       "preserve_destination_on_reject";
     ]
   | "GATED_DELTA_RULE_FP" ->
@@ -979,6 +1080,38 @@ let oracle_vector_root ~opcode =
         "nonfinite_score_revert";
         "partial_overlap_revert";
         "bad_count_revert";
+        "effort_revert";
+      ]
+    | "SIGMOID_FP" ->
+      [
+        "golden";
+        "negative_branch_nonpositive_exp";
+        "positive_branch_nonpositive_exp";
+        "signed_zero";
+        "large_magnitude_saturation";
+        "missing_operand_revert";
+        "nonfinite_operand_revert";
+        "effort_revert";
+      ]
+    | "SOFTPLUS_FP" ->
+      [
+        "golden";
+        "positive_branch";
+        "nonpositive_branch";
+        "signed_zero";
+        "large_magnitude";
+        "missing_operand_revert";
+        "nonfinite_operand_revert";
+        "effort_revert";
+      ]
+    | "SILU_FP" ->
+      [
+        "golden";
+        "sigmoid_branch_reuse";
+        "signed_zero";
+        "large_magnitude_saturation";
+        "missing_operand_revert";
+        "nonfinite_operand_revert";
         "effort_revert";
       ]
     | "ARGMAX_FP" ->
