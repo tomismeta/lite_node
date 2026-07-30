@@ -104,7 +104,9 @@ let current_runtime_profile ~opcode =
   | "ROPE_APPLY_INDEXED_FP"
   | "SIGMOID_FP"
   | "SOFTPLUS_FP"
-  | "SILU_FP" ->
+  | "SILU_FP"
+  | "ELEMWISE_MUL_FP"
+  | "RESIDUAL_ADD_FP" ->
     Some "host-fp-local-candidate"
   | _ -> None
 
@@ -168,6 +170,20 @@ let local_semantics ~opcode =
     [
       "input cells are finite binary64 values and are updated in place";
       "SiLU is computed as x * (1.0 / (1.0 + exp(-x))) using native binary64";
+      "outputs are written only after the complete finite output vector is computed";
+    ]
+  | "ELEMWISE_MUL_FP" ->
+    [
+      "destination and source cells are finite binary64 values";
+      "destination may equal source exactly, but partial overlap is rejected";
+      "each output cell is computed with native binary64 multiplication";
+      "outputs are written only after the complete finite output vector is computed";
+    ]
+  | "RESIDUAL_ADD_FP" ->
+    [
+      "destination and source cells are finite binary64 values";
+      "destination may equal source exactly, but partial overlap is rejected";
+      "each output cell is computed with native binary64 addition";
       "outputs are written only after the complete finite output vector is computed";
     ]
   | "GATED_DELTA_RULE_FP" ->
@@ -245,6 +261,20 @@ let consensus_obligations ~opcode =
       "pin sigmoid reuse, signed-zero, subnormal, overflow, and non-finite behavior";
       "define in-place writeback atomicity and effort";
       "pass independent cross-platform conformance for SiLU edge vectors";
+    ]
+  | "ELEMWISE_MUL_FP" ->
+    [
+      "replace or qualify native binary64 multiplication";
+      "pin signed-zero, subnormal, overflow, and non-finite behavior";
+      "define same-range aliasing, partial-overlap rejection, writeback atomicity, and effort";
+      "pass independent cross-platform conformance for elementwise multiply edge vectors";
+    ]
+  | "RESIDUAL_ADD_FP" ->
+    [
+      "replace or qualify native binary64 addition";
+      "pin signed-zero, subnormal, overflow, and non-finite behavior";
+      "define same-range aliasing, partial-overlap rejection, writeback atomicity, and effort";
+      "pass independent cross-platform conformance for residual add edge vectors";
     ]
   | "GATED_DELTA_RULE_FP" ->
     [

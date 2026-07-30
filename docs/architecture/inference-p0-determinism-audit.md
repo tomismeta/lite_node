@@ -351,6 +351,12 @@ current `host-fp-local-candidate` runtime profile. These opcodes use native
 claim must be a separate profile or opcode path rather than an overclaim on the
 current FP opcodes.
 
+LiteNode also reports `ELEMWISE_MUL_FP` and `RESIDUAL_ADD_FP` under the current
+`host-fp-local-candidate` runtime profile. Their runtime tests already pin
+finite reads, exact same-range aliasing, partial-overlap rejection, overflow
+rollback, and effort; profile reporting now prevents native binary64
+multiply/add from being mislabeled as fixed-point or software-FP authority.
+
 The saved report is:
 
 ```text
