@@ -108,6 +108,8 @@ current host-FP P0 math until a deterministic runtime profile lands.
 Passing `--require-consensus-ready` turns that diagnostic boundary into a hard
 gate; current host-FP artifacts are expected to reject under that flag with
 `local_only_profile_gates` in `consensus_ready_gate.blockers`.
+In that strict mode, `execution_status` remains the VM-output result while the
+top-level `status` reflects the active consensus-readiness gate.
 
 Failure/atomicity mode is available for definitive rejection cases:
 
@@ -251,6 +253,8 @@ Unknown covers malformed gates or unrecognized `consensus_status` values.
 Passing `--require-consensus-ready` rejects any report with unprofiled,
 `local_only`, `consensus_candidate`, or unknown profile gates. Rejection reasons
 are emitted as stable strings in `consensus_ready_gate.blockers`.
+`schema_status` remains the producer/template shape result in both normal and
+strict mode; top-level `status` additionally includes the active readiness gate.
 
 `local_semantics` records what the current VM does today.
 `consensus_obligations` records what must become protocol-owned before the
@@ -415,7 +419,9 @@ P0-plus runner now reports per-fixture `profile_gates` plus an aggregate
 `profile_gate_count`; the composite logits-tail case reports the component
 profiles for `RMSNORM_FP_EPS`, `LINEAR_Q1_G128_FP`, and `ARGMAX_FP`. Its
 `profile_consensus_status_counts` should also remain `local_only` for the
-current host-FP pack. The explicit top-k boundary is:
+current host-FP pack. Like P0 execution reports, `execution_status` is the VM
+output result and top-level `status` includes any strict consensus-readiness
+gate. The explicit top-k boundary is:
 
 LiteNode now reports `ARGMAX_FP` under the current `host-fp-local-candidate`
 runtime profile. Its local semantics are finite binary64 input reads,

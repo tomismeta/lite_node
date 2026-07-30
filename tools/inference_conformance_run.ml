@@ -1108,7 +1108,10 @@ let run_p0_plus_pack path =
       | _ -> fail "P0-plus fixture entries must be objects")
   in
   let results = List.map (execute_p0_plus_fixture root_dir) entries in
-  let accepted = List.for_all fst results in
+  let execution_accepted = List.for_all fst results in
+  let execution_status =
+    if execution_accepted then "accepted" else "rejected"
+  in
   let profile_gate_count =
     List.fold_left
       (fun count (_, result) ->
@@ -1136,7 +1139,7 @@ let run_p0_plus_pack path =
   in
   let status_counts = Profile.status_counts_of_json_gates profile_gates in
   let accepted =
-    accepted
+    execution_accepted
     &&
     consensus_ready_required_passes
       ~profile_gate_count
@@ -1145,6 +1148,7 @@ let run_p0_plus_pack path =
   in
   `Assoc [
     "status", `String (if accepted then "accepted" else "rejected");
+    "execution_status", `String execution_status;
     "diagnostic_only", `Bool true;
     "execution_mode", `String "p0_plus_fixture_pack_vm_execution";
     "fixture_pack", `String path;
@@ -1177,7 +1181,10 @@ let run_index path =
       | _ -> fail "template index entries must be objects")
   in
   let results = List.map (execute_template root_dir) entries in
-  let accepted = List.for_all fst results in
+  let execution_accepted = List.for_all fst results in
+  let execution_status =
+    if execution_accepted then "accepted" else "rejected"
+  in
   let profile_gate_count =
     List.fold_left
       (fun count (_, result) -> count + result_profile_gate_count result)
@@ -1189,7 +1196,7 @@ let run_index path =
   in
   let unprofiled_count = List.length results - profile_gate_count in
   let accepted =
-    accepted
+    execution_accepted
     &&
     consensus_ready_required_passes
       ~profile_gate_count
@@ -1199,6 +1206,7 @@ let run_index path =
   let status = if accepted then "accepted" else "rejected" in
   `Assoc [
     "status", `String status;
+    "execution_status", `String execution_status;
     "diagnostic_only", `Bool true;
     "execution_mode", `String "positive_template_vm_execution";
     "template_index", `String path;
