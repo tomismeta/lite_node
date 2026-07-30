@@ -401,3 +401,18 @@ come from separate ordering-preservation evidence.
 It declares `topk_vm_authority = false` and `topk_opcode_proposal =
 not_emitted`. A future `TOPK_FP` must be a separate primitive/spec; it must not
 be inferred from `ARGMAX_FP` fixtures.
+
+## Q16 Fixed-Point Boundary
+
+LiteNode still exposes several `tensor.fixed` Q16 opcodes for program-mode
+experiments, but they are not yet promoted by this audit. The P0 and P0-plus
+profile gates cover the VM-proven Bonsai FP path plus exact byte ingress; they
+do not prove that Q16 kernels preserve model quality, token ordering, or
+cross-platform bit identity for the same inference workload.
+
+The next Q16 step must be narrow and fixture-led: choose the exact Q16 opcode
+subset, pin per-opcode scaling/rounding/saturation/aliasing/effort semantics,
+and require `q16-exact` only for those opcodes after positive, negative,
+atomicity, and token-order fixtures pass. Until then, Q16 is a candidate speed
+path, not a replacement claim for the current `host-fp-local-candidate`
+inference proof path.
