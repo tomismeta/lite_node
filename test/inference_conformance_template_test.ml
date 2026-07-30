@@ -247,6 +247,33 @@ let check_remaining_p0_profile_obligations () =
       "GATED_DELTA_RULE_FP", "next-state cells", "state-transition";
     ]
 
+let check_argmax_profile_gate () =
+  check
+    "argmax runtime profile"
+    (match Profile.current_runtime_profile ~opcode:"ARGMAX_FP" with
+     | Some "host-fp-local-candidate" -> true
+     | _ -> false);
+  let gate = profile_gate "ARGMAX_FP" in
+  check
+    "argmax local tie semantics"
+    (list_contains_substring
+       "lowest zero-based index"
+       (string_list_value "local_semantics" gate));
+  check
+    "argmax ordering obligation"
+    (list_contains_substring
+       "ordering preservation"
+       (string_list_value "consensus_obligations" gate));
+  match Profile.validate_for_opcode ~opcode:"ARGMAX_FP" ~profile:"q16-exact" with
+  | Error (Profile.Unsupported_opcode_profile { opcode; profile; expected }) ->
+    check "argmax overclaim opcode" (String.equal opcode "ARGMAX_FP");
+    check "argmax overclaim profile" (String.equal profile "q16-exact");
+    check
+      "argmax overclaim expected"
+      (String.equal expected "host-fp-local-candidate")
+  | Error error -> failwith (Profile.error_message error)
+  | Ok _ -> failwith "expected argmax profile overclaim rejection"
+
 let check_rejects_unknown_opcode () =
   match Template.of_json (template ~opcode:"MODEL_SPECIFIC_FASTPATH" ()) with
   | Error (Template.Template_error message) ->
@@ -376,6 +403,7 @@ let () =
   check_q1_profile_obligations ();
   check_p0_profile_gate_coverage ();
   check_remaining_p0_profile_obligations ();
+  check_argmax_profile_gate ();
   check_rejects_unknown_opcode ();
   check_rejects_effect_drift ();
   check_rejects_missing_failure_cases ();

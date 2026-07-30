@@ -351,6 +351,12 @@ composition. `ARGMAX_FP` only returns the selected index, so producer top-k
 ordering manifests are preserved as `producer_only` evidence. The explicit
 top-k boundary is:
 
+LiteNode now reports `ARGMAX_FP` under the current `host-fp-local-candidate`
+runtime profile. Its local semantics are finite binary64 input reads,
+native greater-than comparison, lowest-index tie selection, and selected-index
+writeback after the input span is read. Fixed-point or ranked-token claims must
+come from separate ordering-preservation evidence.
+
 ```text
 /home/exedev/evidence/octra-inference/determinism-p0-plus-topk-boundary-20260730-025306/p0-plus-topk-boundary.cjson
 ```

@@ -99,7 +99,8 @@ let current_runtime_profile ~opcode =
   | "RMSNORM_FP_EPS"
   | "L2NORM_FP"
   | "SOFTMAX_FP"
-  | "GATED_DELTA_RULE_FP" ->
+  | "GATED_DELTA_RULE_FP"
+  | "ARGMAX_FP" ->
     Some "host-fp-local-candidate"
   | _ -> None
 
@@ -155,6 +156,13 @@ let local_semantics ~opcode =
       "loop order is timestep, value head, value row, key column";
       "output and next-state cells are written only after both buffers are finite";
     ]
+  | "ARGMAX_FP" ->
+    [
+      "input cells are finite binary64 values";
+      "comparison uses native binary64 greater-than";
+      "ties keep the lowest zero-based index, including signed-zero ties";
+      "the selected index is written only after the full input span is read";
+    ]
   | _ -> []
 
 let consensus_obligations ~opcode =
@@ -193,6 +201,13 @@ let consensus_obligations ~opcode =
       "pin head mapping, decay order, beta application, state update order, and scaling";
       "define exact output plus next-state encoding, alias rejection, effort, and atomicity";
       "pass independent cross-platform conformance for recurrent state-transition edge vectors";
+    ]
+  | "ARGMAX_FP" ->
+    [
+      "define the exact binary64 comparison relation for signed zero and all finite values";
+      "reject non-finite logits before selection and preserve destination on rejection";
+      "pin first-maximum tie behavior, selected-index encoding, and effort";
+      "prove ordering preservation before mapping fixed-point logits to token authority";
     ]
   | _ -> [
       "write primitive-specific deterministic math obligations before promotion";
