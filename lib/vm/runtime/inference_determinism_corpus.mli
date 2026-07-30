@@ -19,13 +19,22 @@ type p0_status = {
   next_action : string;
 }
 
+type differential_status = {
+  candidate : string;
+  selected_token_changes : int;
+  top_k_order_changes : int;
+}
+
 type t = {
-  operation_count : int;
+  corpus_type : string;
+  operation_count : int option;
   fixture_count : int;
   failure_case_count : int;
-  bonsai_cutpoint_count : int;
+  cutpoint_count : int;
+  logit_cutpoint_count : int option;
   selected_token_changes_under_q16_16_candidate : int option;
   first_divergent_cutpoint : string option;
+  differential_reports : differential_status list;
   p0_worklist : p0_status list;
 }
 
@@ -34,10 +43,12 @@ type error =
   | Corpus_error of string
 
 val of_json :
+  ?operation_mapping:Yojson.Safe.t ->
+  ?differential_summary:Yojson.Safe.t ->
   summary:Yojson.Safe.t ->
-  operation_mapping:Yojson.Safe.t ->
   fixture_corpus:Yojson.Safe.t ->
   failure_cases:Yojson.Safe.t ->
+  unit ->
   (t, error) result
 
 val to_json : t -> Yojson.Safe.t
