@@ -100,6 +100,9 @@ The first accepted producer indexes are:
 These indexes currently execute all five positive P0 templates and match every
 declared output span. The saved LiteNode reports live beside the indexes as
 `litenode-positive-execution-report.cjson`.
+Positive execution reports also include `profile_gate_count` and
+`unprofiled_template_count` so an accepted VM run can be audited for profile
+coverage without walking every per-template result.
 
 Failure/atomicity mode is available for definitive rejection cases:
 

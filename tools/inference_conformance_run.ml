@@ -154,6 +154,17 @@ let non_null_profile_gates gates =
       | gate -> Some gate)
     gates
 
+let profile_gate_present = function
+  | `Assoc fields ->
+    (match field "profile_gate" fields with
+     | Some `Null
+     | None -> false
+     | Some _ -> true)
+  | _ -> false
+
+let result_profile_gate_count result =
+  if profile_gate_present result then 1 else 0
+
 let p0_plus_profile_gates opcode fields =
   match opcode with
   | "LOGITS_TAIL_PATH" ->
@@ -1094,12 +1105,21 @@ let run_index path =
   let results = List.map (execute_template root_dir) entries in
   let accepted = List.for_all fst results in
   let status = if accepted then "accepted" else "rejected" in
+  let profile_gate_count =
+    List.fold_left
+      (fun count (_, result) -> count + result_profile_gate_count result)
+      0
+      results
+  in
   `Assoc [
     "status", `String status;
     "diagnostic_only", `Bool true;
     "execution_mode", `String "positive_template_vm_execution";
     "template_index", `String path;
     "template_count", `Int (List.length results);
+    "profile_gate_count", `Int profile_gate_count;
+    "unprofiled_template_count",
+    `Int (List.length results - profile_gate_count);
     "accepted_count",
     `Int (List.length (List.filter fst results));
     "rejected_count",
