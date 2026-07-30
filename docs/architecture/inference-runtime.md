@@ -20,6 +20,9 @@ Baseline: `octra-labs/lite_node` `main` at
   owns the gap between local inference execution and validator-grade
   deterministic math. It cannot expand the execution surface; it defines the
   conformance bar for accepting that surface.
+- [`inference-devnet-readiness.md`](inference-devnet-readiness.md) is the
+  operational readiness checkpoint. It summarizes gates and blockers, but it
+  does not override runtime, session, performance, or determinism authority.
 - [`inference-determinism-p0-contracts.md`](inference-determinism-p0-contracts.md)
   owns the first deterministic math contracts to write for P0 inference
   primitives.
