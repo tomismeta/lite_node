@@ -21,6 +21,14 @@ let check label condition =
 let hex_root char =
   String.make 64 char
 
+let hex_char = function
+  | '0'..'9'
+  | 'a'..'f' -> true
+  | _ -> false
+
+let root_ok value =
+  String.length value = 64 && String.for_all hex_char value
+
 let register register name kind value =
   `Assoc [
     "register", `Int register;
@@ -156,6 +164,7 @@ let check_accepts_template () =
         (match List.assoc_opt "profile_gate" fields with
          | Some (`Assoc gate) ->
            String.equal (string_value "opcode" gate) "RMSNORM_FP_EPS"
+           && root_ok (string_value "profile_root" gate)
            && list_contains_substring
                 "sqrt"
                 (string_list_value "consensus_obligations" gate)
@@ -223,6 +232,17 @@ let profile_gate opcode =
     (match Profile.to_json_for_opcode ~opcode profile with
      | `Assoc gate -> gate
      | _ -> failwith "profile gate must be object")
+
+let check_profile_root () =
+  match Profile.of_name "host-fp-local-candidate" with
+  | Error error -> failwith (Profile.error_message error)
+  | Ok profile ->
+    let root = Profile.root_for_opcode ~opcode:"RMSNORM_FP_EPS" profile in
+    let gate = profile_gate "RMSNORM_FP_EPS" in
+    check "profile root is hex" (root_ok root);
+    check
+      "profile root is reported"
+      (String.equal root (string_value "profile_root" gate))
 
 let check_profile_status_counts () =
   let host_gate opcode = `Assoc (profile_gate opcode) in
@@ -729,6 +749,7 @@ let check_rejects_single_delta_expected_span () =
 let () =
   check_accepts_template ();
   check_q1_profile_obligations ();
+  check_profile_root ();
   check_profile_status_counts ();
   check_p0_profile_gate_coverage ();
   check_remaining_p0_profile_obligations ();

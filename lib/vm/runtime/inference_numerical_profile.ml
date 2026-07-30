@@ -552,6 +552,38 @@ let consensus_blocker_codes ~opcode =
       ]
     | _ -> []
 
+let profile_gate_core_json ~opcode profile =
+  `Assoc [
+    "name", `String profile.name;
+    "consensus_status", `String (status_string profile.consensus_status);
+    "summary", `String profile.summary;
+    "required_actions",
+    `List (List.map (fun action -> `String action) profile.required_actions);
+    "opcode", `String opcode;
+    "local_semantics",
+    `List
+      (List.map
+         (fun value -> `String value)
+         (local_semantics ~opcode));
+    "consensus_obligations",
+    `List
+      (List.map
+         (fun value -> `String value)
+         (consensus_obligations ~opcode));
+    "consensus_blocker_codes",
+    `List
+      (List.map
+         (fun value -> `String value)
+         (consensus_blocker_codes ~opcode));
+  ]
+
+let root_for_opcode ~opcode profile =
+  let payload =
+    Yojson.Safe.to_string (profile_gate_core_json ~opcode profile)
+  in
+  Digestif.SHA256.(
+    digest_string ("octra:inference:numerical-profile\000" ^ payload) |> to_hex)
+
 let to_json profile =
   `Assoc [
     "name", `String profile.name;
@@ -562,26 +594,11 @@ let to_json profile =
   ]
 
 let to_json_for_opcode ~opcode profile =
-  match to_json profile with
+  match profile_gate_core_json ~opcode profile with
   | `Assoc fields ->
     `Assoc
       (fields
        @ [
-         "opcode", `String opcode;
-         "local_semantics",
-         `List
-           (List.map
-              (fun value -> `String value)
-              (local_semantics ~opcode));
-         "consensus_obligations",
-         `List
-           (List.map
-              (fun value -> `String value)
-              (consensus_obligations ~opcode));
-         "consensus_blocker_codes",
-         `List
-           (List.map
-              (fun value -> `String value)
-              (consensus_blocker_codes ~opcode));
+         "profile_root", `String (root_for_opcode ~opcode profile);
        ])
   | value -> value

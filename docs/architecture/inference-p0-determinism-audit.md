@@ -244,6 +244,7 @@ profile_gate.consensus_status
 profile_gate.local_semantics
 profile_gate.consensus_obligations
 profile_gate.consensus_blocker_codes
+profile_gate.profile_root
 ```
 
 Checker reports also include `profile_gate_count` and
@@ -261,6 +262,10 @@ Rejection reasons are emitted as stable strings in
 strict mode; top-level `status` additionally includes the active readiness gate.
 `consensus_blocker_codes` is the stable, machine-readable list of primitive
 math/profile blockers behind the prose obligations.
+`profile_root` is the LiteNode-owned descriptor root for the emitted profile
+gate. Current templates still validate `numerical_profile_root` syntactically;
+profile-root equality is diagnostic until a profile is promoted beyond
+`local_only`.
 
 `local_semantics` records what the current VM does today.
 `consensus_obligations` records what must become protocol-owned before the
