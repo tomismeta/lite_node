@@ -301,16 +301,16 @@ let current_runtime_profile ~opcode =
   | "LINEAR_Q1_G128_FP" ->
     Some "deterministic-q1-g128-fp64-linear"
   | "SOFTMAX_FP"
-  | "GATED_DELTA_RULE_FP" ->
+  | "GATED_DELTA_RULE_FP"
+  | "SIGMOID_FP"
+  | "SOFTPLUS_FP"
+  | "SILU_FP" ->
     Some "host-fp-exp-local-candidate"
   | "CAUSAL_DEPTHWISE_CONV1D_FP"
   | "ATTENTION_SCORES_FP"
   | "ATTENTION_WEIGHTED_SUM_FP" ->
     Some "deterministic-fp64-accumulation"
-  | "ROPE_APPLY_INDEXED_FP"
-  | "SIGMOID_FP"
-  | "SOFTPLUS_FP"
-  | "SILU_FP" ->
+  | "ROPE_APPLY_INDEXED_FP" ->
     Some "host-fp-local-candidate"
   | "ARGMAX_FP" ->
     Some "deterministic-fp64-comparison"
@@ -831,11 +831,11 @@ let arithmetic_domain ~profile ~opcode =
     "deterministic-binary64-compare-shift-nonpositive-exp-gate-sum-divide-host-exp"
   | "host-fp-exp-local-candidate", "GATED_DELTA_RULE_FP" ->
     "deterministic-binary64-nonpositive-exp-gate-recurrence-sqrt-divide-host-exp"
-  | "host-fp-local-candidate", "SIGMOID_FP" ->
+  | "host-fp-exp-local-candidate", "SIGMOID_FP" ->
     "deterministic-binary64-sigmoid-nonpositive-exp-gate-host-exp"
-  | "host-fp-local-candidate", "SOFTPLUS_FP" ->
+  | "host-fp-exp-local-candidate", "SOFTPLUS_FP" ->
     "deterministic-binary64-softplus-nonpositive-exp-gate-host-exp-log1p"
-  | "host-fp-local-candidate", "SILU_FP" ->
+  | "host-fp-exp-local-candidate", "SILU_FP" ->
     "deterministic-binary64-silu-nonpositive-exp-gate-host-exp"
   | "host-fp-local-candidate", "ARGMAX_FP" ->
     "deterministic-binary64-comparison"
@@ -860,7 +860,7 @@ let rounding_mode ~profile ~opcode =
   | ( "host-fp-exp-local-candidate",
       ( "SOFTMAX_FP" | "GATED_DELTA_RULE_FP" ) ) ->
     "deterministic-binary64-roundTiesToEven-with-host-exp"
-  | ( "host-fp-local-candidate",
+  | ( "host-fp-exp-local-candidate",
       ( "SIGMOID_FP"
       | "SOFTPLUS_FP"
       | "SILU_FP" ) ) ->

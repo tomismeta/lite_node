@@ -433,7 +433,7 @@ preservation. This remains local-only until rotary math has a software-defined
 or otherwise validator-qualified contract.
 
 LiteNode also reports `SIGMOID_FP`, `SOFTPLUS_FP`, and `SILU_FP` under the
-current `host-fp-local-candidate` runtime profile. `SIGMOID_FP` and `SILU_FP`
+`host-fp-exp-local-candidate` runtime profile. `SIGMOID_FP` and `SILU_FP`
 now route through a deterministic sign branch: nonnegative inputs use
 `exp(-x)`, negative inputs use `exp(x)`, and the runtime rejects any path where
 the native `exp` input is not both finite and nonpositive. The surrounding

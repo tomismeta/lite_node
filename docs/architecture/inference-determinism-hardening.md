@@ -43,7 +43,8 @@ does not prove deterministic math; the profile root must bind the math.
 
 | Profile | Admission role | Purpose |
 | --- | --- | --- |
-| `host-fp-local-candidate` / `host-fp-exp-local-candidate` | Local and attested-only | Current proof/demo path for primitives still relying on native host math functions, especially exp/trig/log-style operations. These profiles are useful for fast engineering but not validator-portable. |
+| `host-fp-local-candidate` | Local and attested-only | Current proof/demo path for primitives still relying on native host math functions outside the exp/log bucket, currently indexed rotary trig/exponentiation. This profile is useful for fast engineering but not validator-portable. |
+| `host-fp-exp-local-candidate` | Local and attested-only | Current proof/demo path for primitives still relying on native `exp`/`log1p`, including softmax, gated delta, sigmoid, softplus, and SiLU. This profile is useful for fast engineering but not validator-portable. |
 | `byte-ingress-exact` | Consensus candidate | Exact little-endian f32/f64 byte loading from authenticated ranges. |
 | `deterministic-q1-g128-fp64-linear` | Consensus candidate | Q1-G128 projection with exact binary16 scale decode, pinned sign mapping, and deterministic binary64 accumulation order. |
 | `deterministic-fp64-normalization` | Consensus candidate | RMSNorm/L2Norm finite binary64 reductions with explicit epsilon and deterministic sqrt/divide/output multiply policy. |

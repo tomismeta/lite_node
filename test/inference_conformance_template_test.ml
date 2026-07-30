@@ -846,9 +846,17 @@ let check_activation_profile_gates () =
       check
         (opcode ^ " runtime profile")
         (match Profile.current_runtime_profile ~opcode with
-         | Some "host-fp-local-candidate" -> true
+         | Some "host-fp-exp-local-candidate" -> true
          | _ -> false);
       let gate = profile_gate opcode in
+      check
+        (opcode ^ " exp-local profile")
+        (String.equal
+           (string_value "name" gate)
+           "host-fp-exp-local-candidate");
+      check
+        (opcode ^ " remains local-only")
+        (String.equal (string_value "consensus_status" gate) "local_only");
       check
         (opcode ^ " local semantics")
         (list_contains_substring
@@ -859,13 +867,28 @@ let check_activation_profile_gates () =
         (list_contains_substring
            obligation_needle
            (string_list_value "consensus_obligations" gate));
+      (match
+         Profile.validate_for_opcode
+           ~opcode
+           ~profile:"host-fp-local-candidate"
+       with
+       | Error (Profile.Unsupported_opcode_profile { opcode = actual; profile; expected }) ->
+         check (opcode ^ " old host profile opcode") (String.equal actual opcode);
+         check
+           (opcode ^ " old host profile rejected")
+           (String.equal profile "host-fp-local-candidate");
+         check
+           (opcode ^ " old host profile expected")
+           (String.equal expected "host-fp-exp-local-candidate")
+       | Error error -> failwith (Profile.error_message error)
+       | Ok _ -> failwith (opcode ^ " should reject old host profile"));
       match Profile.validate_for_opcode ~opcode ~profile:"q16-exact" with
       | Error (Profile.Unsupported_opcode_profile { opcode = actual; profile; expected }) ->
         check (opcode ^ " overclaim opcode") (String.equal actual opcode);
         check (opcode ^ " overclaim profile") (String.equal profile "q16-exact");
         check
           (opcode ^ " overclaim expected")
-          (String.equal expected "host-fp-local-candidate")
+          (String.equal expected "host-fp-exp-local-candidate")
       | Error error -> failwith (Profile.error_message error)
       | Ok _ -> failwith (opcode ^ " should reject profile overclaim"))
     [
