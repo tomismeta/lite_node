@@ -244,6 +244,23 @@ let check_sign_and_scale_edges () =
       8384512.0;
     ]
 
+let check_accumulation_order_stress () =
+  let input =
+    1e16 :: 1.0 :: -1e16 :: 0.25 :: List.init 124 (fun _ -> 0.0)
+  in
+  let state =
+    one_block_state
+      ~input
+      (q1_block "\000\060" (String.make 16 '\255'))
+  in
+  check "q1 accumulation-order stress runs" (VM.run state q1_code);
+  check
+    "q1 accumulation-order stress output"
+    (output_bytes state 10000 1 = f64_bytes [0.25]);
+  check
+    "q1 accumulation-order stress distinguishes reassociation"
+    (f64_bytes [0.25] <> f64_bytes [1.25])
+
 let check_output_overflow_reverts () =
   let scale_one = "\000\060" in
   let state =
@@ -615,6 +632,7 @@ let check_fload_session () =
 let () =
   check_golden_fixture ();
   check_sign_and_scale_edges ();
+  check_accumulation_order_stress ();
   check_output_overflow_reverts ();
   check_profiled_run_equivalence ();
   check_invalid_input_reverts ();

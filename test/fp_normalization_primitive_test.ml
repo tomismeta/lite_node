@@ -241,6 +241,18 @@ let min_subnormal_epsilon = {
   expected = min_subnormal_epsilon_expected;
 }
 
+let rms_reduction_order_stress = {
+  name = "reduction-order stress";
+  count = 5;
+  epsilon_bits = 1L;
+  input = f64_bytes (1.0 :: List.init 4 (fun _ -> ldexp 1.0 (-27)));
+  gamma = f64_bytes (List.init 5 (fun _ -> 1.0));
+  expected =
+    bytes_of_hex
+      "a8f4979b77e30140a8f4979b77e3513ea8f4979b77e3513e\
+       a8f4979b77e3513ea8f4979b77e3513e";
+}
+
 let rms_op =
   VM.RMSNORM_FP_EPS (0, 1, 2, 3)
 
@@ -293,6 +305,23 @@ let check_rms_min_subnormal_epsilon () =
     state
     100
     (fixture_bits min_subnormal_epsilon.expected)
+
+let check_rms_reduction_order_stress () =
+  let state = make_rms_state rms_reduction_order_stress in
+  check "rms reduction-order stress succeeds" (VM.run state rms_code);
+  check_cells
+    "rms reduction-order stress"
+    state
+    100
+    (fixture_bits rms_reduction_order_stress.expected);
+  check
+    "rms reduction-order stress first cell"
+    (List.hd (fixture_bits rms_reduction_order_stress.expected)
+     = 0x4001e3779b97f4a8L);
+  check
+    "rms reduction-order stress distinguishes grouped sum"
+    (List.hd (fixture_bits rms_reduction_order_stress.expected)
+     <> 0x4001e3779b97f4a7L)
 
 let check_rms_row_composition () =
   let state =
@@ -992,6 +1021,7 @@ let () =
   check_rms_golden ();
   check_rms_signed_zero_and_subnormal ();
   check_rms_min_subnormal_epsilon ();
+  check_rms_reduction_order_stress ();
   check_rms_row_composition ();
   check_rms_missing_and_nonfinite_revert ();
   check_rms_invalid_epsilon_reverts ();
