@@ -181,6 +181,40 @@ let one_block_state ?(input = List.init 128 (fun _ -> 1.0)) q1 =
   set_f64_memory state 20000 input;
   state
 
+let fp16_bytes bits =
+  String.init 2 (fun index ->
+    Char.chr ((bits lsr (index * 8)) land 0xff))
+
+let expected_fp16 bits =
+  let sign = if bits land 0x8000 = 0 then 1.0 else -1.0 in
+  let exponent = (bits lsr 10) land 0x1f in
+  let fraction = bits land 0x03ff in
+  match exponent, fraction with
+  | 31, _ -> None
+  | 0, 0 -> Some (Int64.bits_of_float (sign *. 0.0))
+  | 0, _ ->
+    Some (Int64.bits_of_float (sign *. ldexp (float_of_int fraction) (-24)))
+  | _ ->
+    Some
+      (Int64.bits_of_float
+         (sign *. ldexp (1024.0 +. float_of_int fraction) (exponent - 25)))
+
+let check_fp16_scale_decode_exhaustive () =
+  let finite = ref 0 in
+  let rejected = ref 0 in
+  for bits = 0 to 0xffff do
+    match expected_fp16 bits, VM.fp16_le_to_fp64 (fp16_bytes bits) 0 with
+    | None, None -> incr rejected
+    | Some expected, Some observed
+      when Int64.equal expected (Int64.bits_of_float observed) ->
+      incr finite
+    | _ ->
+      failwith
+        (Printf.sprintf "fp16 scale decode mismatch for 0x%04x" bits)
+  done;
+  check "fp16 finite encoding count" (!finite = 63488);
+  check "fp16 rejected encoding count" (!rejected = 2048)
+
 let check_golden_fixture () =
   let input = f64_bytes input_values in
   check
@@ -639,6 +673,7 @@ let check_fload_session () =
 
 let () =
   check_golden_fixture ();
+  check_fp16_scale_decode_exhaustive ();
   check_sign_and_scale_edges ();
   check_accumulation_order_stress ();
   check_output_overflow_reverts ();
