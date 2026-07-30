@@ -420,11 +420,10 @@ Current result:
 LiteNode runtime tests now also pin deterministic finite binary64
 left-to-right accumulation for `ATTENTION_SCORES_FP` dot products and
 `ATTENTION_WEIGHTED_SUM_FP` weighted reductions with cancellation vectors.
-This is useful local evidence for the P0-plus attention surface, but it does
-not promote either opcode beyond local-candidate math. LiteNode now reports
-both under the `host-fp-local-candidate` runtime profile; any fixed-point,
-software-FP, or consensus-ready attention claim must be a separate proven
-profile rather than an overclaim on the current FP opcodes.
+LiteNode reports both under the `deterministic-fp64-accumulation`
+consensus-candidate profile. They still require profile-root binding and
+independent cross-platform conformance before any consensus-ready attention
+claim.
 
 LiteNode also reports `ROPE_APPLY_INDEXED_FP` under the current
 `host-fp-local-candidate` runtime profile. The local profile covers finite
@@ -459,14 +458,14 @@ cross-platform conformance for signed-zero, subnormal, overflow, aliasing,
 effort, and atomic writeback behavior. This also keeps these opcodes from being
 mislabeled as fixed-point authority.
 
-LiteNode also reports `CAUSAL_DEPTHWISE_CONV1D_FP` under the current
-`host-fp-local-candidate` runtime profile. The local profile covers finite
-input/kernel reads, positive shape parameters, causal depthwise indexing,
-left-to-right kernel accumulation with deterministic binary64 multiply/add,
-input/kernel snapshot before writeback, and finite output atomicity. This is a
-generic sequence primitive, not a model- or SSM-specific fused path, and still
-requires cross-platform conformance plus bound profile roots before a
-consensus-ready claim.
+LiteNode also reports `CAUSAL_DEPTHWISE_CONV1D_FP` under the same
+`deterministic-fp64-accumulation` consensus-candidate profile. The profile
+covers finite input/kernel reads, positive shape parameters, causal depthwise
+indexing, left-to-right kernel accumulation with deterministic binary64
+multiply/add, input/kernel snapshot before writeback, and finite output
+atomicity. This is a generic sequence primitive, not a model- or SSM-specific
+fused path, and still requires cross-platform conformance plus bound profile
+roots before a consensus-ready claim.
 
 The saved report is:
 

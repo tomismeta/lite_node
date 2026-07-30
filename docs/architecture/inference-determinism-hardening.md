@@ -27,7 +27,7 @@ The VM already has three relevant numerical surfaces:
 | --- | --- | --- |
 | Legacy host-float FP | `MATMUL_FP`, `RMSNORM_FP`, `SILU_FP`, `ARGMAX_FP`, `ATTENTION_KV_FP`, `ROPE_APPLY_FP`, `VECDOT_FP` | Classified as `Consensus_unsafe` by opcode policy. These are useful reference points, but they are not the plain inference consensus path. |
 | Existing Q16 fixed point | `SOFTMAX_Q16_INPLACE`, `LAYERNORM_Q16_INPLACE`, `RMSNORM_Q16_INPLACE`, `SILU_Q16_INPLACE`, `ROPE_APPLY_Q16`, `ATTENTION_KV_Q16`, `VECDOT_Q16`, `ARGMAX_Q16` | Classified as `Program_only` and admitted by inference only under `tensor.fixed`. This is the closest existing deterministic math profile. |
-| Inference proof surface | `LOAD_F32_LE_FP`, `LOAD_F64_LE_FP`, `LINEAR_Q1_G128_FP`, `SIGMOID_FP`, `SOFTPLUS_FP`, `SILU_FP`, `CAUSAL_DEPTHWISE_CONV1D_FP`, `GATED_DELTA_RULE_FP`, `RMSNORM_FP_EPS`, `L2NORM_FP`, `ELEMWISE_MUL_FP`, `RESIDUAL_ADD_FP`, `ROPE_APPLY_INDEXED_FP`, `ATTENTION_SCORES_FP`, `SOFTMAX_FP`, `ATTENTION_WEIGHTED_SUM_FP`, `ARGMAX_FP` | Selectively admitted by the inference harness under explicit capabilities. Byte loaders are exact ingress; FP arithmetic kernels remain local candidate execution until their numerical profiles are hardened. |
+| Inference proof surface | `LOAD_F32_LE_FP`, `LOAD_F64_LE_FP`, `LINEAR_Q1_G128_FP`, `SIGMOID_FP`, `SOFTPLUS_FP`, `SILU_FP`, `CAUSAL_DEPTHWISE_CONV1D_FP`, `GATED_DELTA_RULE_FP`, `RMSNORM_FP_EPS`, `L2NORM_FP`, `ELEMWISE_MUL_FP`, `RESIDUAL_ADD_FP`, `ROPE_APPLY_INDEXED_FP`, `ATTENTION_SCORES_FP`, `SOFTMAX_FP`, `ATTENTION_WEIGHTED_SUM_FP`, `ARGMAX_FP` | Selectively admitted by the inference harness under explicit capabilities. Byte ingress, comparison, Q1 linear, normalization, elementwise arithmetic, and finite accumulation now report narrow consensus-candidate profiles; exp/trig/log-style math remains local-only. |
 
 The existing `host_float_hit` policy mechanism is correct and should remain:
 plain legacy/program admission still identifies host-floating-point opcodes as
@@ -43,7 +43,12 @@ does not prove deterministic math; the profile root must bind the math.
 
 | Profile | Admission role | Purpose |
 | --- | --- | --- |
-| `host-fp` | Local and attested-only | Current proof/demo path using native floating point and host math functions. This profile is useful for fast engineering but not validator-portable. |
+| `host-fp-local-candidate` / `host-fp-exp-local-candidate` | Local and attested-only | Current proof/demo path for primitives still relying on native host math functions, especially exp/trig/log-style operations. These profiles are useful for fast engineering but not validator-portable. |
+| `byte-ingress-exact` | Consensus candidate | Exact little-endian f32/f64 byte loading from authenticated ranges. |
+| `deterministic-q1-g128-fp64-linear` | Consensus candidate | Q1-G128 projection with exact binary16 scale decode, pinned sign mapping, and deterministic binary64 accumulation order. |
+| `deterministic-fp64-normalization` | Consensus candidate | RMSNorm/L2Norm finite binary64 reductions with explicit epsilon and deterministic sqrt/divide/output multiply policy. |
+| `deterministic-fp64-elementwise` | Consensus candidate | Elementwise add/multiply over finite binary64 cells with aliasing and atomicity policy. |
+| `deterministic-fp64-accumulation` | Consensus candidate | Finite binary64 multiply/add reductions for attention scores, weighted sums, and causal depthwise convolution. |
 | `q16-exact` | First consensus candidate | Integer-defined fixed-point math using exact Q16 semantics where model quality allows it. |
 | `soft-fp-exact` | Future consensus candidate | Software-defined floating point or table-driven math if Q16 changes model behavior too much. |
 
@@ -81,10 +86,10 @@ kernels.
 | P0 | `RMSNORM_FP_EPS`, `L2NORM_FP` | Repeated throughout prompt prefill; reductions and `sqrt` now use LiteNode's deterministic finite binary64 core locally. | Bind exact oracle roots and cross-platform conformance before consensus promotion. |
 | P0 | `SOFTMAX_FP` | Attention correctness and token distribution depend on it; max comparison is deterministic locally, but `exp` is still native. | Define exact exponential behavior or use deterministic fixed-point/table implementation. |
 | P0 | `GATED_DELTA_RULE_FP` | Stateful recurrence with many operands and large rollback surface. | Specify state layout, update order, math functions, aliasing, and failure atomicity. |
-| P1 | `ATTENTION_SCORES_FP`, `ATTENTION_WEIGHTED_SUM_FP` | Attention composition boundary; mostly reductions. | Specify accumulation order and scale semantics. |
+| P1 | `ATTENTION_SCORES_FP`, `ATTENTION_WEIGHTED_SUM_FP` | Attention composition boundary; finite reductions without native exp/trig. | Keep under `deterministic-fp64-accumulation`; bind profile roots and cross-platform conformance before consensus-ready admission. |
 | P1 | `ROPE_APPLY_INDEXED_FP` | Uses trigonometric functions and exponentiation. | Prefer table/indexed deterministic contract over host trig. |
 | P1 | `SIGMOID_FP`, `SOFTPLUS_FP`, `SILU_FP` | Nonlinear activations. | Define deterministic exp/log1p behavior or lower to fixed-point profile. |
-| P2 | `LOAD_F32_LE_FP`, `LOAD_F64_LE_FP`, `ARGMAX_FP`, `ELEMWISE_MUL_FP`, `RESIDUAL_ADD_FP`, `CAUSAL_DEPTHWISE_CONV1D_FP` | Lower mathematical risk or mostly data movement/vector arithmetic. | Still need edge vectors, aliasing rules, and failure atomicity. |
+| P2 | `LOAD_F32_LE_FP`, `LOAD_F64_LE_FP`, `ARGMAX_FP`, `ELEMWISE_MUL_FP`, `RESIDUAL_ADD_FP`, `CAUSAL_DEPTHWISE_CONV1D_FP` | Lower mathematical risk or mostly data movement/vector arithmetic. | Keep the existing narrow candidate profiles; still need edge vectors, aliasing rules, failure atomicity, and cross-platform conformance. |
 
 ## First Qualification Corpus
 
@@ -110,7 +115,8 @@ The practical decision from this corpus is conservative:
 | --- | --- |
 | `q16-exact` viable | immutable range reads; argmax only when ordering preservation is proven |
 | wider fixed point needed | residual add, elementwise multiply, attention weighted sum |
-| deterministic software FP required | Q1 projection, RMSNorm, L2Norm, SiLU, sigmoid, softplus, gated delta rule, indexed RoPE, attention scores, softmax |
+| deterministic FP64 candidate, still awaiting profile-root/cross-platform proof | Q1 projection, RMSNorm, L2Norm, residual add, elementwise multiply, causal depthwise convolution, attention scores, attention weighted sum |
+| deterministic software transcendental still required | SiLU, sigmoid, softplus, gated delta rule, indexed RoPE, softmax |
 
 This means the existing Q16 surface is useful, but it is not the broad answer
 for Bonsai-class inference. The next LiteNode work should prioritize exact

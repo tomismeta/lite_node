@@ -228,6 +228,17 @@ let of_name = function
         "pin signed-zero, subnormal, overflow, aliasing, effort, and atomic writeback policy";
       ];
     }
+  | "deterministic-fp64-accumulation" as name ->
+    Ok {
+      name;
+      consensus_status = Consensus_candidate;
+      summary = "deterministic finite binary64 accumulation profile";
+      required_actions = [
+        "bind the numerical profile root in the model or request authority";
+        "qualify software-defined binary64 multiply/add reductions and scale transforms across validators";
+        "pin loop order, signed-zero, subnormal, overflow, aliasing, effort, and atomic writeback policy";
+      ];
+    }
   | "deterministic-q1-g128-fp64-linear" as name ->
     Ok {
       name;
@@ -293,9 +304,10 @@ let current_runtime_profile ~opcode =
   | "GATED_DELTA_RULE_FP" ->
     Some "host-fp-exp-local-candidate"
   | "CAUSAL_DEPTHWISE_CONV1D_FP"
-  | "ROPE_APPLY_INDEXED_FP"
   | "ATTENTION_SCORES_FP"
-  | "ATTENTION_WEIGHTED_SUM_FP"
+  | "ATTENTION_WEIGHTED_SUM_FP" ->
+    Some "deterministic-fp64-accumulation"
+  | "ROPE_APPLY_INDEXED_FP"
   | "SIGMOID_FP"
   | "SOFTPLUS_FP"
   | "SILU_FP" ->
@@ -829,11 +841,11 @@ let arithmetic_domain ~profile ~opcode =
     "deterministic-binary64-comparison"
   | "deterministic-fp64-comparison", "ARGMAX_FP" ->
     "deterministic-binary64-comparison"
-  | "host-fp-local-candidate", "ATTENTION_SCORES_FP" ->
+  | "deterministic-fp64-accumulation", "ATTENTION_SCORES_FP" ->
     "deterministic-binary64-attention-score-dot-scale"
-  | "host-fp-local-candidate", "ATTENTION_WEIGHTED_SUM_FP" ->
+  | "deterministic-fp64-accumulation", "ATTENTION_WEIGHTED_SUM_FP" ->
     "deterministic-binary64-attention-weighted-sum"
-  | "host-fp-local-candidate", "CAUSAL_DEPTHWISE_CONV1D_FP" ->
+  | "deterministic-fp64-accumulation", "CAUSAL_DEPTHWISE_CONV1D_FP" ->
     "deterministic-binary64-causal-depthwise-convolution"
   | "host-fp-local-candidate", _ -> "native-binary64-host-floating-point"
   | name, _ -> name
@@ -860,10 +872,10 @@ let rounding_mode ~profile ~opcode =
     "not-applicable-deterministic-comparison"
   | "deterministic-fp64-comparison", "ARGMAX_FP" ->
     "not-applicable-deterministic-comparison"
-  | ( "host-fp-local-candidate",
+  | ( "deterministic-fp64-accumulation",
       ( "ATTENTION_SCORES_FP" | "ATTENTION_WEIGHTED_SUM_FP" ) ) ->
     "deterministic-binary64-roundTiesToEven"
-  | "host-fp-local-candidate", "CAUSAL_DEPTHWISE_CONV1D_FP" ->
+  | "deterministic-fp64-accumulation", "CAUSAL_DEPTHWISE_CONV1D_FP" ->
     "deterministic-binary64-roundTiesToEven"
   | ("q16-exact" | "q32-exact"), _ -> "integer-profile-defined"
   | "soft-fp-exact", _ -> "software-profile-defined"

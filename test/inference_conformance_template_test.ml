@@ -1073,9 +1073,19 @@ let check_attention_profile_gates () =
       check
         (opcode ^ " runtime profile")
         (match Profile.current_runtime_profile ~opcode with
-         | Some "host-fp-local-candidate" -> true
+         | Some "deterministic-fp64-accumulation" -> true
          | _ -> false);
       let gate = profile_gate opcode in
+      check
+        (opcode ^ " consensus candidate")
+        (String.equal
+           (string_value "consensus_status" gate)
+           "consensus_candidate");
+      check
+        (opcode ^ " profile name")
+        (String.equal
+           (string_value "name" gate)
+           "deterministic-fp64-accumulation");
       check
         (opcode ^ " local semantics")
         (list_contains_substring
@@ -1086,13 +1096,28 @@ let check_attention_profile_gates () =
         (list_contains_substring
            obligation_needle
            (string_list_value "consensus_obligations" gate));
+      (match
+         Profile.validate_for_opcode
+           ~opcode
+           ~profile:"host-fp-local-candidate"
+       with
+       | Error (Profile.Unsupported_opcode_profile { opcode = actual; profile; expected }) ->
+         check (opcode ^ " old host profile opcode") (String.equal actual opcode);
+         check
+           (opcode ^ " old host profile rejected")
+           (String.equal profile "host-fp-local-candidate");
+         check
+           (opcode ^ " old host profile expected")
+           (String.equal expected "deterministic-fp64-accumulation")
+       | Error error -> failwith (Profile.error_message error)
+       | Ok _ -> failwith (opcode ^ " should reject old host profile"));
       match Profile.validate_for_opcode ~opcode ~profile:"q16-exact" with
       | Error (Profile.Unsupported_opcode_profile { opcode = actual; profile; expected }) ->
         check (opcode ^ " overclaim opcode") (String.equal actual opcode);
         check (opcode ^ " overclaim profile") (String.equal profile "q16-exact");
         check
           (opcode ^ " overclaim expected")
-          (String.equal expected "host-fp-local-candidate")
+          (String.equal expected "deterministic-fp64-accumulation")
       | Error error -> failwith (Profile.error_message error)
       | Ok _ -> failwith (opcode ^ " should reject profile overclaim"))
     [
@@ -1129,6 +1154,11 @@ let check_attention_profile_gates () =
            (string_value "rounding_mode" contract)
            "deterministic-binary64-roundTiesToEven");
       check
+        (opcode ^ " contract profile")
+        (String.equal
+           (string_value "profile_name" contract)
+           "deterministic-fp64-accumulation");
+      check
         (opcode ^ " deterministic sequence")
         (list_contains_substring
            sequence_needle
@@ -1146,9 +1176,17 @@ let check_causal_conv_profile_gate () =
   check
     "causal conv runtime profile"
     (match Profile.current_runtime_profile ~opcode:"CAUSAL_DEPTHWISE_CONV1D_FP" with
-     | Some "host-fp-local-candidate" -> true
+     | Some "deterministic-fp64-accumulation" -> true
      | _ -> false);
   let gate = profile_gate "CAUSAL_DEPTHWISE_CONV1D_FP" in
+  check
+    "causal conv consensus candidate"
+    (String.equal (string_value "consensus_status" gate) "consensus_candidate");
+  check
+    "causal conv profile name"
+    (String.equal
+       (string_value "name" gate)
+       "deterministic-fp64-accumulation");
   check
     "causal conv local indexing semantics"
     (list_contains_substring
@@ -1187,11 +1225,33 @@ let check_causal_conv_profile_gate () =
           (string_value "rounding_mode" contract)
           "deterministic-binary64-roundTiesToEven");
      check
+       "causal conv contract profile"
+       (String.equal
+          (string_value "profile_name" contract)
+          "deterministic-fp64-accumulation");
+     check
        "causal conv deterministic accumulation sequence"
        (list_contains_substring
           "accumulate_kernel_left_to_right"
           (string_list_value "operation_sequence" contract))
    | _ -> failwith "missing causal conv profile contract");
+  (match
+     Profile.validate_for_opcode
+       ~opcode:"CAUSAL_DEPTHWISE_CONV1D_FP"
+       ~profile:"host-fp-local-candidate"
+   with
+   | Error (Profile.Unsupported_opcode_profile { opcode; profile; expected }) ->
+     check
+       "causal conv old host profile opcode"
+       (String.equal opcode "CAUSAL_DEPTHWISE_CONV1D_FP");
+     check
+       "causal conv old host profile rejected"
+       (String.equal profile "host-fp-local-candidate");
+     check
+       "causal conv old host profile expected"
+       (String.equal expected "deterministic-fp64-accumulation")
+   | Error error -> failwith (Profile.error_message error)
+   | Ok _ -> failwith "expected causal conv old host profile rejection");
   match
     Profile.validate_for_opcode
       ~opcode:"CAUSAL_DEPTHWISE_CONV1D_FP"
@@ -1204,7 +1264,7 @@ let check_causal_conv_profile_gate () =
     check "causal conv overclaim profile" (String.equal profile "q16-exact");
     check
       "causal conv overclaim expected"
-      (String.equal expected "host-fp-local-candidate")
+      (String.equal expected "deterministic-fp64-accumulation")
   | Error error -> failwith (Profile.error_message error)
   | Ok _ -> failwith "expected causal conv profile overclaim rejection"
 
