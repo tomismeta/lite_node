@@ -457,7 +457,26 @@ let check_remaining_p0_profile_obligations () =
       "L2NORM_FP", "inverse norm", "inverse-norm edge vectors";
       "SOFTMAX_FP", "maximum score", "probability and ordering";
       "GATED_DELTA_RULE_FP", "next-state cells", "state-transition";
-    ]
+    ];
+  let l2_gate = profile_gate "L2NORM_FP" in
+  let l2_blockers = string_list_value "consensus_blocker_codes" l2_gate in
+  check
+    "l2 reduction blocker"
+    (List.mem "fp64_reduction_conformance" l2_blockers);
+  check
+    "l2 inverse-root blocker"
+    (List.mem "host_fp_sqrt" l2_blockers);
+  let oracle_root gate =
+    match List.assoc_opt "profile_contract" gate with
+    | Some (`Assoc contract) -> string_value "oracle_vector_root" contract
+    | _ -> failwith "missing profile contract"
+  in
+  check
+    "l2 oracle vectors are bound"
+    (not
+       (String.equal
+          (oracle_root l2_gate)
+          (oracle_root (profile_gate "ARGMAX_FP"))))
 
 let check_argmax_profile_gate () =
   check

@@ -2686,7 +2686,8 @@ let exec_one st op =
               input_values;
             let sum_sq = Int64.float_of_bits !sum_sq_bits in
             let mean_sq = sum_sq /. float_of_int n in
-            let inv_rms = 1.0 /. sqrt (mean_sq +. epsilon) in
+            let inverse_input = mean_sq +. epsilon in
+            let inv_rms = 1.0 /. sqrt inverse_input in
             let inv_rms_bits = Int64.bits_of_float inv_rms in
             let output =
               Array.init n (fun i ->
@@ -2696,7 +2697,11 @@ let exec_one st op =
                 | None -> None)
             in
             if not !ok
-               || not (finite_fp64 sum_sq && finite_fp64 inv_rms)
+               || not
+                    (finite_fp64 sum_sq
+                     && finite_fp64 mean_sq
+                     && finite_fp64 inverse_input
+                     && finite_fp64 inv_rms)
                || not (Array.for_all Option.is_some output) then
               revert st
             else begin
@@ -2718,27 +2723,43 @@ let exec_one st op =
        else if not (add_dyn_product st [n; 3] 1) then
          revert st
        else
-         (match read_fp64_array st.memory.data addr n with
-          | Some input_values ->
-            let sum_sq =
-              Array.fold_left
-                (fun acc value -> acc +. (value *. value))
-                0.0
-                input_values
-            in
-            let inv_norm = 1.0 /. sqrt (sum_sq +. epsilon) in
-            let output =
-              Array.init n (fun i -> input_values.(i) *. inv_norm)
-            in
-            if not (finite_fp64 sum_sq && finite_fp64 inv_norm)
-               || not (Array.for_all finite_fp64 output) then
-              revert st
-            else begin
-              for i = 0 to n - 1 do
-                mem_set_fp64 st.memory.data (addr + i) output.(i)
-              done;
-              true
-            end
+        (match read_fp64_bits_array st.memory.data addr n with
+         | Some input_values ->
+           let ok = ref true in
+           let sum_sq_bits = ref 0L in
+           Array.iter
+             (fun value ->
+                match Inference_fp64.mul value value with
+                | Some square ->
+                  (match Inference_fp64.add !sum_sq_bits square with
+                   | Some next -> sum_sq_bits := next
+                   | None -> ok := false)
+                | None -> ok := false)
+             input_values;
+           let sum_sq = Int64.float_of_bits !sum_sq_bits in
+           let inverse_input = sum_sq +. epsilon in
+           let inv_norm = 1.0 /. sqrt inverse_input in
+           let inv_norm_bits = Int64.bits_of_float inv_norm in
+           let output =
+             Array.init n (fun i ->
+               Inference_fp64.mul input_values.(i) inv_norm_bits)
+           in
+           if not !ok
+              || not
+                   (finite_fp64 sum_sq
+                    && finite_fp64 inverse_input
+                    && finite_fp64 inv_norm)
+              || not (Array.for_all Option.is_some output) then
+             revert st
+           else begin
+             for i = 0 to n - 1 do
+               mem_set_fp64_bits
+                 st.memory.data
+                 (addr + i)
+                 (Option.get output.(i))
+             done;
+             true
+           end
           | _ -> revert st)
      | _ -> revert st)
   | SILU_FP (rs_addr, rs_n) ->

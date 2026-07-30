@@ -456,6 +456,21 @@ let check_rms_overflow_reverts () =
     "rms sum overflow keeps input"
     state
     100
+    (fixture_bits fixture.input);
+  let fixture = {
+    name = "inverse-root overflow";
+    count = 1;
+    epsilon_bits = Int64.bits_of_float max_float;
+    input = f64_bytes [sqrt max_float];
+    gamma = f64_bytes [1.0];
+    expected = f64_bytes [sqrt max_float];
+  } in
+  let state = make_rms_state fixture in
+  check "rms inverse-root overflow rejects" (not (VM.run state rms_code));
+  check_cells
+    "rms inverse-root overflow keeps input"
+    state
+    100
     (fixture_bits fixture.input)
 
 let check_rms_strict_operands () =
@@ -618,6 +633,20 @@ let check_l2_overflow_reverts () =
   check "l2 sum overflow rejects" (not (VM.run state l2_code));
   check_cells
     "l2 sum overflow keeps input"
+    state
+    100
+    (fixture_bits fixture.l2_input);
+  let fixture = {
+    l2_name = "l2 inverse-root overflow";
+    l2_count = 1;
+    l2_epsilon_bits = Int64.bits_of_float max_float;
+    l2_input = f64_bytes [sqrt max_float];
+    l2_expected = f64_bytes [sqrt max_float];
+  } in
+  let state = make_l2_state fixture in
+  check "l2 inverse-root overflow rejects" (not (VM.run state l2_code));
+  check_cells
+    "l2 inverse-root overflow keeps input"
     state
     100
     (fixture_bits fixture.l2_input)

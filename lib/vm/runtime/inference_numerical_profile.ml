@@ -299,8 +299,9 @@ let local_semantics ~opcode =
     [
       "epsilon is read from an integer register as binary64 bits and must be finite and positive";
       "input cells are finite binary64 values";
-      "sum of squares is accumulated left-to-right in native binary64";
+      "sum of squares is accumulated left-to-right with deterministic finite binary64 multiply/add";
       "inverse norm is computed as 1.0 / sqrt(sum_sq + epsilon)";
+      "output multiply uses deterministic finite binary64 multiply";
       "outputs are written only after the complete finite output vector is computed";
     ]
   | "SOFTMAX_FP" ->
@@ -418,7 +419,7 @@ let consensus_obligations ~opcode =
     ]
   | "RMSNORM_FP_EPS" ->
     [
-      "replace or qualify native binary64 division and sqrt";
+      "replace or qualify native binary64 division, epsilon addition, and sqrt in the inverse-root path";
       "qualify deterministic binary64 reduction and output multiplication";
       "pin signed-zero, subnormal, overflow, underflow, and non-finite behavior";
       "define exact epsilon-bit interpretation and range-overlap rejection";
@@ -426,7 +427,8 @@ let consensus_obligations ~opcode =
     ]
   | "L2NORM_FP" ->
     [
-      "replace or qualify native binary64 reduction, division, multiplication, and sqrt";
+      "replace or qualify native binary64 division, epsilon addition, and sqrt in the inverse-root path";
+      "qualify deterministic binary64 reduction and output multiplication";
       "pin epsilon-bit interpretation, signed-zero, subnormal, overflow, and non-finite behavior";
       "define exact output encoding and in-place writeback atomicity";
       "pass independent cross-platform conformance for inverse-norm edge vectors";
@@ -544,6 +546,7 @@ let consensus_blocker_codes ~opcode =
     [
       "epsilon_bit_interpretation";
       "fp64_reduction_conformance";
+      "host_fp_epsilon_add";
       "host_fp_sqrt";
       "host_fp_divide";
       "fp64_output_multiply_conformance";
@@ -555,9 +558,11 @@ let consensus_blocker_codes ~opcode =
   | "L2NORM_FP" ->
     [
       "epsilon_bit_interpretation";
-      "host_fp_reduction";
+      "fp64_reduction_conformance";
+      "host_fp_epsilon_add";
       "host_fp_sqrt";
       "host_fp_divide";
+      "fp64_output_multiply_conformance";
       "signed_zero_subnormal_policy";
       "atomic_writeback";
       "cross_platform_conformance";
@@ -610,7 +615,9 @@ let arithmetic_domain ~profile ~opcode =
   | "host-fp-local-candidate", "LINEAR_Q1_G128_FP" ->
     "q1-g128-binary16-scale-deterministic-binary64-accumulator"
   | "host-fp-local-candidate", "RMSNORM_FP_EPS" ->
-    "deterministic-binary64-reduction-host-sqrt-divide"
+    "deterministic-binary64-reduction-output-mul-host-inverse-root"
+  | "host-fp-local-candidate", "L2NORM_FP" ->
+    "deterministic-binary64-reduction-output-mul-host-inverse-root"
   | "host-fp-local-candidate", _ -> "native-binary64-host-floating-point"
   | name, _ -> name
 
@@ -708,7 +715,7 @@ let edge_value_policy ~opcode =
     [
       "epsilon_must_decode_to_finite_positive_binary64";
       "reject_missing_or_nonfinite_operands";
-      "reject_nonfinite_reduction_inverse_or_output";
+      "reject_nonfinite_reduction_inverse_root_input_or_output";
       "preserve_destination_on_reject";
     ]
   | _ ->
@@ -743,6 +750,17 @@ let oracle_vector_root ~opcode =
         "invalid_epsilon_revert";
         "alias_effort_revert";
         "overflow_revert";
+        "inverse_root_overflow_revert";
+      ]
+    | "L2NORM_FP" ->
+      [
+        "model_epsilon";
+        "minimum_subnormal_epsilon";
+        "row_composition";
+        "invalid_epsilon_revert";
+        "shape_effort_revert";
+        "overflow_revert";
+        "inverse_root_overflow_revert";
       ]
     | _ -> ["profile_gate_only"]
   in
