@@ -228,10 +228,18 @@ let check_q1_profile_obligations () =
                "binary16_scale_decode"
                (string_list_value "consensus_blocker_codes" gate));
           check
-            "q1 host fp blocker code"
+            "q1 fp64 conformance blocker code"
             (List.mem
-               "host_fp_multiply_add"
-               (string_list_value "consensus_blocker_codes" gate))
+               "fp64_mul_add_conformance"
+               (string_list_value "consensus_blocker_codes" gate));
+          (match List.assoc_opt "profile_contract" gate with
+           | Some (`Assoc contract) ->
+             check
+               "q1 contract rounding mode"
+               (String.equal
+                  (string_value "rounding_mode" contract)
+                  "ieee754-roundTiesToEven")
+           | _ -> failwith "missing q1 profile contract")
         | _ -> failwith "missing q1 profile gate")
      | _ -> failwith "template json must be object")
 

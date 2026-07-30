@@ -23,6 +23,7 @@ module Plan = Octra_vm.Inference_plan
 module Program_effects = Octra_vm.Program_effects
 module Req = Octra_vm.Execution_requirement
 module Request = Octra_vm.Inference_request
+module Fp64 = Octra_vm.Inference_fp64
 module Store = Octra_vm.Inference_store
 module Target = Octra_vm.Inference_target
 module VM = Octra_vm.Contract_vm
@@ -214,6 +215,33 @@ let check_fp16_scale_decode_exhaustive () =
   done;
   check "fp16 finite encoding count" (!finite = 63488);
   check "fp16 rejected encoding count" (!rejected = 2048)
+
+let expect_bits label actual expected =
+  match actual with
+  | Some bits -> check label (Int64.equal bits expected)
+  | None -> failwith (label ^ " returned non-finite")
+
+let check_fp64_core_edges () =
+  let bits value = Int64.bits_of_float value in
+  expect_bits "fp64 add min-subnormal"
+    (Fp64.add 1L 1L)
+    2L;
+  expect_bits "fp64 mul underflow tie to even"
+    (Fp64.mul 1L (bits 0.5))
+    0L;
+  expect_bits "fp64 mul finite"
+    (Fp64.mul (bits 1.5) (bits 2.0))
+    (bits 3.0);
+  expect_bits "fp64 positive zero plus negative zero"
+    (Fp64.add 0L Int64.min_int)
+    0L;
+  expect_bits "fp64 negative zero plus negative zero"
+    (Fp64.add Int64.min_int Int64.min_int)
+    Int64.min_int;
+  check "fp64 add overflow rejects"
+    (Fp64.add 0x7fefffffffffffffL 0x7fefffffffffffffL = None);
+  check "fp64 mul overflow rejects"
+    (Fp64.mul 0x7fefffffffffffffL (bits 2.0) = None)
 
 let check_golden_fixture () =
   let input = f64_bytes input_values in
@@ -674,6 +702,7 @@ let check_fload_session () =
 let () =
   check_golden_fixture ();
   check_fp16_scale_decode_exhaustive ();
+  check_fp64_core_edges ();
   check_sign_and_scale_edges ();
   check_accumulation_order_stress ();
   check_output_overflow_reverts ();

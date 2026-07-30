@@ -1,0 +1,7 @@
+(* SPDX-License-Identifier: BSD-3-Clause *)
+(* Copyright (c) 2023-2026 Octra Labs <dev@octra.org> *)
+
+val finite : int64 -> bool
+val add : int64 -> int64 -> int64 option
+val mul : int64 -> int64 -> int64 option
+val negate : int64 -> int64

@@ -281,7 +281,7 @@ let local_semantics ~opcode =
       "binary16 scale decode uses integer bit fields and binary exponent shifts";
       "finite binary16 scales include zero, signed zero, subnormal, normal, and max-finite values";
       "sign bit 1 maps to +1.0 and sign bit 0 maps to -1.0";
-      "loop order is row, column, block, item with a native binary64 accumulator";
+      "loop order is row, column, block, item with a deterministic finite binary64 accumulator";
       "input cells, decoded scales, and final outputs must be finite before writeback";
       "destination cells are written only after the full output buffer is computed";
     ]
@@ -411,7 +411,7 @@ let consensus_obligations ~opcode =
   | "LINEAR_Q1_G128_FP" ->
     [
       "pin binary16 scale decode for zero, signed zero, subnormal, normal, NaN, and infinity";
-      "replace or qualify native binary64 multiply/add rounding and accumulator behavior";
+      "qualify deterministic binary64 multiply/add rounding and accumulator behavior";
       "define exact output encoding, overflow policy, and writeback atomicity";
       "pass independent cross-platform conformance for scale, sign, and accumulation edge vectors";
     ]
@@ -532,7 +532,7 @@ let consensus_blocker_codes ~opcode =
     [
       "binary16_scale_decode";
       "q1_sign_mapping";
-      "host_fp_multiply_add";
+      "fp64_mul_add_conformance";
       "accumulation_order";
       "finite_overflow_policy";
       "atomic_writeback";
@@ -605,16 +605,18 @@ let arithmetic_domain ~profile ~opcode =
   | "q32-exact", _ -> "integer-q32"
   | "soft-fp-exact", _ -> "software-defined-floating-point"
   | "host-fp-local-candidate", "LINEAR_Q1_G128_FP" ->
-    "q1-g128-binary16-scale-native-binary64-accumulator"
+    "q1-g128-binary16-scale-deterministic-binary64-accumulator"
   | "host-fp-local-candidate", _ -> "native-binary64-host-floating-point"
   | name, _ -> name
 
-let rounding_mode ~profile =
-  match profile.name with
-  | "q16-exact" | "q32-exact" -> "integer-profile-defined"
-  | "soft-fp-exact" -> "software-profile-defined"
-  | "byte-ingress-exact" -> "exact-byte-decode"
-  | "host-fp-local-candidate" -> "host-runtime-native"
+let rounding_mode ~profile ~opcode =
+  match profile.name, opcode with
+  | "host-fp-local-candidate", "LINEAR_Q1_G128_FP" ->
+    "ieee754-roundTiesToEven"
+  | ("q16-exact" | "q32-exact"), _ -> "integer-profile-defined"
+  | "soft-fp-exact", _ -> "software-profile-defined"
+  | "byte-ingress-exact", _ -> "exact-byte-decode"
+  | "host-fp-local-candidate", _ -> "host-runtime-native"
   | _ -> "profile-defined"
 
 let operation_sequence ~opcode =
@@ -756,7 +758,7 @@ let contract_json_for_opcode ~opcode profile =
     "profile_name", `String profile.name;
     "opcode", `String opcode;
     "arithmetic_domain", `String (arithmetic_domain ~profile ~opcode);
-    "rounding_mode", `String (rounding_mode ~profile);
+    "rounding_mode", `String (rounding_mode ~profile ~opcode);
     "operation_sequence",
     `List (List.map (fun value -> `String value) (operation_sequence ~opcode));
     "edge_value_policy",

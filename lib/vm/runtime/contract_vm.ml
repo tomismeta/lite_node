@@ -553,8 +553,18 @@ let mem_read_fp64 mem a =
     if finite_fp64 value then Some value else None
   | _ -> None
 
+let mem_read_fp64_bits mem a =
+  match Hashtbl.find_opt mem a with
+  | Some (VInt z) when Z.fits_int64 z ->
+    let bits = Z.to_int64 z in
+    if Inference_fp64.finite bits then Some bits else None
+  | _ -> None
+
 let mem_set_fp64 mem a f =
   Hashtbl.replace mem a (VInt (fp64_to_z f))
+
+let mem_set_fp64_bits mem a bits =
+  Hashtbl.replace mem a (VInt (Z.of_int64 bits))
 
 let f32_le_to_fp64 data offset =
   let bits =
@@ -1025,6 +1035,11 @@ let same_range left left_n right right_n =
 
 let read_fp64_array mem addr n =
   let values = Array.init n (fun i -> mem_read_fp64 mem (addr + i)) in
+  if Array.for_all Option.is_some values then Some (Array.map Option.get values)
+  else None
+
+let read_fp64_bits_array mem addr n =
+  let values = Array.init n (fun i -> mem_read_fp64_bits mem (addr + i)) in
   if Array.for_all Option.is_some values then Some (Array.map Option.get values)
   else None
 
@@ -2285,53 +2300,57 @@ let exec_one st op =
                   && q1_n <= String.length q1 - off ->
              if not (add_dyn_product st [m; n; k] 512) then revert st
              else
-               let lhs_values =
-                 Array.init lhs_n (fun i -> mem_read_fp64 st.memory.data (lhs + i))
-               in
-               if not (Array.for_all Option.is_some lhs_values) then revert st
-               else
-                 let lhs_values = Array.map Option.get lhs_values in
+               (match read_fp64_bits_array st.memory.data lhs lhs_n with
+               | None -> revert st
+               | Some lhs_values ->
                  (match decode_q1_g128_scales q1 off blocks with
                   | None -> revert st
                   | Some scales ->
-                    let output = Array.make dst_n 0.0 in
+                    let scale_bits = Array.map Int64.bits_of_float scales in
+                    let output = Array.make dst_n 0L in
+                    let ok = ref true in
                     for row = 0 to m - 1 do
                       for col = 0 to n - 1 do
-                        let acc = ref 0.0 in
+                        let acc = ref 0L in
                         for block = 0 to blocks_per_output - 1 do
                           let q1_block = (col * blocks_per_output) + block in
-                          let scale = Array.unsafe_get scales q1_block in
+                          let scale = Array.unsafe_get scale_bits q1_block in
                           let block_offset = off + (q1_block * block_bytes) in
                           for item = 0 to group - 1 do
                             let sign_byte =
                               Char.code q1.[block_offset + 2 + (item lsr 3)]
                             in
-                            let sign =
+                            let scale =
                               if (sign_byte lsr (item land 7)) land 1 = 1 then
-                                1.0
+                                scale
                               else
-                                -1.0
+                                Inference_fp64.negate scale
                             in
                             let lhs_value =
                               Array.unsafe_get
                                 lhs_values
                                 ((row * k) + (block * group) + item)
                             in
-                            acc := !acc +. (lhs_value *. sign *. scale)
+                            match Inference_fp64.mul lhs_value scale with
+                            | Some product ->
+                              (match Inference_fp64.add !acc product with
+                               | Some next -> acc := next
+                               | None -> ok := false)
+                            | None -> ok := false
                           done
                         done;
                         Array.unsafe_set output ((row * n) + col) !acc
                       done
                     done;
-                    if not (Array.for_all finite_fp64 output) then revert st
+                    if not !ok then revert st
                     else begin
                       for i = 0 to dst_n - 1 do
-                        mem_set_fp64 st.memory.data
+                        mem_set_fp64_bits st.memory.data
                           (dst + i)
                           (Array.unsafe_get output i)
                       done;
                       true
-                    end)
+                    end))
            | _ -> revert st)
         | _ -> revert st)
      | _ -> revert st)

@@ -20,7 +20,7 @@ with a scalar oracle and VM conformance gate.
 
 | Opcode | Current implementation surface | Determinism risk | Required hardening |
 | --- | --- | --- | --- |
-| `LINEAR_Q1_G128_FP` | `contract_vm.ml` decodes Q1-G128 blocks, binary16-like scales, sign bits, and accumulates into native `float`. | Native binary64 multiplication/addition and scale decode are local-profile behavior unless the exact decode, accumulation, rounding, and finite policy are contract-bound. | Pin byte layout, scale decode, sign mapping, loop order, accumulator profile, finite rejection, aliasing, and output encoding. |
+| `LINEAR_Q1_G128_FP` | `contract_vm.ml` decodes Q1-G128 blocks, binary16-like scales, sign bits, and accumulates with LiteNode's finite binary64 core. | Scale/sign interpretation and accumulator order are now contract-bound locally; independent cross-platform oracle qualification is still required before consensus promotion. | Pin byte layout, scale decode, sign mapping, loop order, accumulator profile, finite rejection, aliasing, and output encoding. |
 | `RMSNORM_FP_EPS` | Reads explicit epsilon bits, computes sum of squares, `sqrt`, and gamma multiply using native `float`. | `sqrt`, reduction behavior, signed-zero/subnormal treatment, and multiplication order are not yet consensus-owned. | Define exact epsilon input, reduction order, inverse-root implementation, gamma read/order, non-finite policy, and rollback behavior. |
 | `L2NORM_FP` | Same native reduction/sqrt shape as RMSNorm without gamma. | Same as RMSNorm; smaller surface but still depends on native `sqrt` and reduction semantics. | Define exact inverse-norm semantics, edge vectors near zero, signed-zero/subnormal behavior, and failure atomicity. |
 | `SOFTMAX_FP` | Uses max-subtraction, native `exp`, sum, and division over native `float`. | Highest math risk in this set because `exp`, sum, and division can change probabilities and token/order behavior. | Replace or pin `exp`, sum, division, tie behavior, overflow/underflow, in-place behavior, and finite-result rules. |
@@ -308,7 +308,7 @@ Initial P0 focus:
 
 | Opcode | Current accepted profile | Consensus status | Pinned locally | Why not ready |
 | --- | --- | --- | --- | --- |
-| `LINEAR_Q1_G128_FP` | `host-fp-local-candidate` | `local_only` | Q1 scale/sign edge vectors, binary16 zero/signed-zero/subnormal/max-finite scale vectors, NaN/infinity scale rejection, finite rejection, overflow rollback, effort floor, output atomicity, and destination/lhs snapshot behavior. | Uses native binary64 multiplication/addition after Q1 scale/sign decode. |
+| `LINEAR_Q1_G128_FP` | `host-fp-local-candidate` | `local_only` | Q1 scale/sign edge vectors, exhaustive binary16 scale decode, NaN/infinity scale rejection, finite rejection, overflow rollback, effort floor, output atomicity, and destination/lhs snapshot behavior. | Uses LiteNode's deterministic finite binary64 add/mul core; still needs independent cross-platform oracle qualification. |
 | `RMSNORM_FP_EPS` | `host-fp-local-candidate` | `local_only` | Explicit epsilon bits, minimum-subnormal epsilon, row composition, signed-zero/subnormal acceptance, finite rejection, alias rejection, effort floor, and output atomicity. | Uses native binary64 reduction, division, multiplication, and `sqrt`. |
 
 The next acceptable status change for either opcode requires a runtime
