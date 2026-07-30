@@ -382,8 +382,8 @@ Failure/atomicity status:
 | Opcode | Declared failure cases | Counted rejection cases | Counted cases accepted |
 | --- | ---: | ---: | ---: |
 | `LINEAR_Q1_G128_FP` | 7 | 6 | 6 |
-| `RMSNORM_FP_EPS` | 7 | 5 | 5 |
-| `L2NORM_FP` | 7 | 5 | 5 |
+| `RMSNORM_FP_EPS` | 7 | 6 | 6 |
+| `L2NORM_FP` | 7 | 6 | 6 |
 | `SOFTMAX_FP` | 7 | 5 | 5 |
 | `GATED_DELTA_RULE_FP` | 7 | 6 | 6 |
 
@@ -391,10 +391,12 @@ Uncounted cases are intentionally observational today:
 
 - `output_input_aliasing`, because some operations are in-place or safe-copy
   candidates rather than unconditional rejections;
-- `finite_square_overflow`, because the deterministic overflow profile still
-  needs an explicit protocol decision; and
 - `overflow_without_max_subtract`, because that validates stable softmax
   behavior rather than reject-before-write behavior.
+
+`finite_square_overflow` is now counted for `RMSNORM_FP_EPS` and `L2NORM_FP`
+under the current deterministic normalization profile: finite square/reduction
+overflow must reject before output writeback.
 
 LiteNode now also pins `SOFTMAX_FP` locally for extreme finite scores:
 equal `max_float` scores produce uniform probabilities after max subtraction,

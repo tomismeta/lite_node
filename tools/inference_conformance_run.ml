@@ -679,6 +679,10 @@ let unchanged_result state (name, base, cells, before) =
 
 let failure_expectation expected =
   if starts_with "reject_before_write" expected then `Must_reject
+  else if starts_with
+            "deterministic_profile_must_define_reject_or_infinite_reduction"
+            expected then
+    `Must_reject
   else if starts_with "reject_or_documented_safe_copy" expected then `Observation
   else `Observation
 
