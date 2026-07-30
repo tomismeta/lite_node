@@ -194,6 +194,17 @@ let of_name = function
         "preserve decode atomicity before exposing loaded cells to arithmetic kernels";
       ];
     }
+  | "deterministic-fp64-comparison" as name ->
+    Ok {
+      name;
+      consensus_status = Consensus_candidate;
+      summary = "deterministic finite binary64 comparison profile";
+      required_actions = [
+        "bind the numerical profile root in the model or request authority";
+        "pin cross-platform finite-value ordering, signed-zero tie, and selected-index encoding";
+        "preserve non-finite rejection and destination atomicity before validator admission";
+      ];
+    }
   | "q16-exact" as name ->
     Ok {
       name;
@@ -237,7 +248,6 @@ let current_runtime_profile ~opcode =
   | "SOFTMAX_FP"
   | "GATED_DELTA_RULE_FP"
   | "CAUSAL_DEPTHWISE_CONV1D_FP"
-  | "ARGMAX_FP"
   | "ROPE_APPLY_INDEXED_FP"
   | "ATTENTION_SCORES_FP"
   | "ATTENTION_WEIGHTED_SUM_FP"
@@ -247,6 +257,8 @@ let current_runtime_profile ~opcode =
   | "ELEMWISE_MUL_FP"
   | "RESIDUAL_ADD_FP" ->
     Some "host-fp-local-candidate"
+  | "ARGMAX_FP" ->
+    Some "deterministic-fp64-comparison"
   | _ -> None
 
 let validate_for_opcode ~opcode ~profile =
@@ -378,6 +390,7 @@ let local_semantics ~opcode =
       "comparison uses deterministic finite binary64 greater-than";
       "ties keep the lowest zero-based index, including signed-zero ties";
       "the selected index is written only after the full input span is read";
+      "no native host math or floating-point arithmetic is used";
     ]
   | "ROPE_APPLY_INDEXED_FP" ->
     [
@@ -512,6 +525,7 @@ let consensus_obligations ~opcode =
     ]
   | "ARGMAX_FP" ->
     [
+      "bind the deterministic comparison profile root before consensus admission";
       "qualify the deterministic binary64 comparison relation for signed zero and all finite values";
       "reject non-finite logits before selection and preserve destination on rejection";
       "pin first-maximum tie behavior, selected-index encoding, and effort";
@@ -754,6 +768,8 @@ let arithmetic_domain ~profile ~opcode =
     "deterministic-binary64-silu-nonpositive-exp-gate-host-exp"
   | "host-fp-local-candidate", "ARGMAX_FP" ->
     "deterministic-binary64-comparison"
+  | "deterministic-fp64-comparison", "ARGMAX_FP" ->
+    "deterministic-binary64-comparison"
   | "host-fp-local-candidate", "ATTENTION_SCORES_FP" ->
     "deterministic-binary64-attention-score-dot-scale"
   | "host-fp-local-candidate", "ATTENTION_WEIGHTED_SUM_FP" ->
@@ -780,6 +796,8 @@ let rounding_mode ~profile ~opcode =
       | "RESIDUAL_ADD_FP" ) ) ->
     "deterministic-binary64-roundTiesToEven-with-host-math"
   | "host-fp-local-candidate", "ARGMAX_FP" ->
+    "not-applicable-deterministic-comparison"
+  | "deterministic-fp64-comparison", "ARGMAX_FP" ->
     "not-applicable-deterministic-comparison"
   | ( "host-fp-local-candidate",
       ( "ATTENTION_SCORES_FP" | "ATTENTION_WEIGHTED_SUM_FP" ) ) ->

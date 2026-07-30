@@ -250,12 +250,15 @@ let check_q1_profile_obligations () =
      | _ -> failwith "template json must be object")
 
 let profile_gate opcode =
-  match Profile.of_name "host-fp-local-candidate" with
-  | Error error -> failwith (Profile.error_message error)
-  | Ok profile ->
-    (match Profile.to_json_for_opcode ~opcode profile with
-     | `Assoc gate -> gate
-     | _ -> failwith "profile gate must be object")
+  match Profile.current_runtime_profile ~opcode with
+  | None -> failwith ("missing runtime profile for " ^ opcode)
+  | Some profile_name ->
+    match Profile.of_name profile_name with
+    | Error error -> failwith (Profile.error_message error)
+    | Ok profile ->
+      (match Profile.to_json_for_opcode ~opcode profile with
+       | `Assoc gate -> gate
+       | _ -> failwith "profile gate must be object")
 
 let check_profile_root () =
   match Profile.of_name "host-fp-local-candidate" with
@@ -570,9 +573,14 @@ let check_argmax_profile_gate () =
   check
     "argmax runtime profile"
     (match Profile.current_runtime_profile ~opcode:"ARGMAX_FP" with
-     | Some "host-fp-local-candidate" -> true
+     | Some "deterministic-fp64-comparison" -> true
      | _ -> false);
   let gate = profile_gate "ARGMAX_FP" in
+  check
+    "argmax consensus candidate"
+    (String.equal
+       (string_value "consensus_status" gate)
+       "consensus_candidate");
   check
     "argmax local tie semantics"
     (list_contains_substring
@@ -583,10 +591,21 @@ let check_argmax_profile_gate () =
     (list_contains_substring
        "deterministic finite binary64"
        (string_list_value "local_semantics" gate));
+  check
+    "argmax records no host math"
+    (list_contains_substring
+       "no native host math"
+       (string_list_value "local_semantics" gate));
   let blockers = string_list_value "consensus_blocker_codes" gate in
   check
     "argmax comparison blocker"
     (List.mem "fp64_comparison_conformance" blockers);
+  check
+    "argmax no host exp blocker"
+    (not (List.mem "host_fp_exp" blockers));
+  check
+    "argmax no host arithmetic blocker"
+    (not (List.mem "host_fp_arithmetic" blockers));
   check
     "argmax ordering obligation"
     (list_contains_substring
@@ -598,15 +617,30 @@ let check_argmax_profile_gate () =
        "argmax comparison rounding mode"
        (String.equal
           (string_value "rounding_mode" contract)
-          "not-applicable-deterministic-comparison")
+          "not-applicable-deterministic-comparison");
+     check
+       "argmax profile name"
+       (String.equal
+          (string_value "profile_name" contract)
+          "deterministic-fp64-comparison")
    | _ -> failwith "missing argmax profile contract");
+  (match
+     Profile.validate_for_opcode
+       ~opcode:"ARGMAX_FP"
+       ~profile:"deterministic-fp64-comparison"
+   with
+   | Ok profile ->
+     check
+       "argmax deterministic profile accepted"
+       (String.equal profile.Profile.name "deterministic-fp64-comparison")
+   | Error error -> failwith (Profile.error_message error));
   match Profile.validate_for_opcode ~opcode:"ARGMAX_FP" ~profile:"q16-exact" with
   | Error (Profile.Unsupported_opcode_profile { opcode; profile; expected }) ->
     check "argmax overclaim opcode" (String.equal opcode "ARGMAX_FP");
     check "argmax overclaim profile" (String.equal profile "q16-exact");
     check
       "argmax overclaim expected"
-      (String.equal expected "host-fp-local-candidate")
+      (String.equal expected "deterministic-fp64-comparison")
   | Error error -> failwith (Profile.error_message error)
   | Ok _ -> failwith "expected argmax profile overclaim rejection"
 

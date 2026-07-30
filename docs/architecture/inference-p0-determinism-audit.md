@@ -458,14 +458,17 @@ P0-plus runner now reports per-fixture `profile_gates` plus an aggregate
 `profile_gate_count` and `classified_profile_gate_count`; the composite
 logits-tail case reports the component profiles for `RMSNORM_FP_EPS`,
 `LINEAR_Q1_G128_FP`, and `ARGMAX_FP`. Its `profile_consensus_status_counts`
-should also remain `local_only` for the current host-FP pack. Like P0 execution
-reports, `execution_status` is the VM output result and top-level `status`
-includes any strict consensus-readiness gate. The explicit top-k boundary is:
+now separate the deterministic `ARGMAX_FP` comparison candidate from remaining
+local-only host-FP math. Like P0 execution reports, `execution_status` is the VM
+output result and top-level `status` includes any strict consensus-readiness
+gate. The explicit top-k boundary is:
 
-LiteNode now reports `ARGMAX_FP` under the current `host-fp-local-candidate`
-runtime profile. Its local semantics are finite binary64 input reads,
-deterministic binary64 greater-than comparison, lowest-index tie selection, and
-selected-index writeback after the input span is read. Fixed-point or
+LiteNode now reports `ARGMAX_FP` under a `deterministic-fp64-comparison`
+consensus-candidate profile. Its semantics are finite binary64 input reads,
+deterministic binary64 greater-than comparison, lowest-index tie selection,
+selected-index writeback after the input span is read, and no native host math
+or floating-point arithmetic. Consensus-ready admission still requires profile
+root binding and cross-platform comparison conformance. Fixed-point or
 ranked-token claims must come from separate ordering-preservation evidence.
 
 ```text
