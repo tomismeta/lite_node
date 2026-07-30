@@ -604,12 +604,11 @@ let fp16_le_to_fp64 data offset =
   match exponent, fraction with
   | 0, 0 -> Some (sign *. 0.0)
   | 0, _ ->
-    Some (sign *. (float_of_int fraction /. 1024.0) *. (2.0 ** -14.0))
+    Some (sign *. ldexp (float_of_int fraction) (-24))
   | 31, _ -> None
   | _ ->
     Some
-      (sign *. (1.0 +. (float_of_int fraction /. 1024.0))
-       *. (2.0 ** (float_of_int (exponent - 15))))
+      (sign *. ldexp (1024.0 +. float_of_int fraction) (exponent - 25))
 
 let make_u64 z =
   if validate_u64 z then Some (VU64 z) else None

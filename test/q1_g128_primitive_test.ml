@@ -209,6 +209,8 @@ let check_sign_and_scale_edges () =
   let scale_zero = "\000\000" in
   let scale_negative_zero = "\000\128" in
   let scale_min_subnormal = "\001\000" in
+  let scale_negative_min_subnormal = "\001\128" in
+  let scale_one_and_half = "\000\062" in
   let scale_max_finite = "\255\123" in
   List.iter
     (fun (name, q1, expected) ->
@@ -239,6 +241,12 @@ let check_sign_and_scale_edges () =
       "positive min-subnormal scale",
       q1_block scale_min_subnormal (String.make 16 '\255'),
       ldexp 1.0 (-17);
+      "negative min-subnormal scale",
+      q1_block scale_negative_min_subnormal (String.make 16 '\255'),
+      ~-. (ldexp 1.0 (-17));
+      "fractional normal scale",
+      q1_block scale_one_and_half (String.make 16 '\255'),
+      192.0;
       "positive max-finite scale",
       q1_block scale_max_finite (String.make 16 '\255'),
       8384512.0;

@@ -278,6 +278,7 @@ let local_semantics ~opcode =
   | "LINEAR_Q1_G128_FP" ->
     [
       "Q1-G128 blocks are 18 bytes: little-endian binary16 scale followed by 128 sign bits";
+      "binary16 scale decode uses integer bit fields and binary exponent shifts";
       "finite binary16 scales include zero, signed zero, subnormal, normal, and max-finite values";
       "sign bit 1 maps to +1.0 and sign bit 0 maps to -1.0";
       "loop order is row, column, block, item with a native binary64 accumulator";
