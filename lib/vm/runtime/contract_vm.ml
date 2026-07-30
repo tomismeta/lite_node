@@ -2451,41 +2451,45 @@ let exec_one st op =
           if not (add_dyn_product st [timesteps; channels; width] 1) then
             revert st
           else
-            let input_values =
-              Array.init values_n (fun i ->
-                mem_read_fp64 st.memory.data (input + i))
-            in
-            let kernel_values =
-              Array.init kernel_n (fun i ->
-                mem_read_fp64 st.memory.data (kernel + i))
-            in
-            if not (Array.for_all Option.is_some input_values)
-               || not (Array.for_all Option.is_some kernel_values) then
-              revert st
-            else
-              let input_values = Array.map Option.get input_values in
-              let kernel_values = Array.map Option.get kernel_values in
-              let output = Array.make values_n 0.0 in
-              for t = 0 to timesteps - 1 do
-                for c = 0 to channels - 1 do
-                  let acc = ref 0.0 in
-                  for k = 0 to width - 1 do
-                    if t >= k then
-                      acc :=
-                        !acc
-                        +. (input_values.(((t - k) * channels) + c)
-                            *. kernel_values.((c * width) + k))
-                  done;
-                  output.((t * channels) + c) <- !acc
-                done
-              done;
-              if not (Array.for_all finite_fp64 output) then revert st
-              else begin
-                for i = 0 to values_n - 1 do
-                  mem_set_fp64 st.memory.data (dst + i) output.(i)
-                done;
-                true
-              end
+            (match read_fp64_bits_array st.memory.data input values_n,
+                   read_fp64_bits_array st.memory.data kernel kernel_n with
+             | Some input_values, Some kernel_values ->
+               let output = Array.make values_n 0L in
+               let ok = ref true in
+               for t = 0 to timesteps - 1 do
+                 for c = 0 to channels - 1 do
+                   let acc = ref 0L in
+                   for k = 0 to width - 1 do
+                     if t >= k then
+                       match
+                         Inference_fp64.mul
+                           (Array.unsafe_get
+                              input_values
+                              (((t - k) * channels) + c))
+                           (Array.unsafe_get
+                              kernel_values
+                              ((c * width) + k))
+                       with
+                       | Some product ->
+                         (match Inference_fp64.add !acc product with
+                          | Some next -> acc := next
+                          | None -> ok := false)
+                       | None -> ok := false
+                   done;
+                   Array.unsafe_set output ((t * channels) + c) !acc
+                 done
+               done;
+               if not !ok then revert st
+               else begin
+                 for i = 0 to values_n - 1 do
+                   mem_set_fp64_bits
+                     st.memory.data
+                     (dst + i)
+                     (Array.unsafe_get output i)
+                 done;
+                 true
+               end
+             | _ -> revert st)
         | _ -> revert st)
      | _ -> revert st)
   | GATED_DELTA_RULE_FP

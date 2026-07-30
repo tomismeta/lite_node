@@ -811,10 +811,38 @@ let check_causal_conv_profile_gate () =
        "snapshotted before output writeback"
        (string_list_value "local_semantics" gate));
   check
+    "causal conv deterministic multiply/add semantics"
+    (list_contains_substring
+       "deterministic finite binary64 multiplication and addition"
+       (string_list_value "local_semantics" gate));
+  check
     "causal conv edge obligation"
     (list_contains_substring
        "causal-convolution edge vectors"
        (string_list_value "consensus_obligations" gate));
+  let blockers = string_list_value "consensus_blocker_codes" gate in
+  check
+    "causal conv no generic host arithmetic blocker"
+    (not (List.mem "host_fp_arithmetic" blockers));
+  check
+    "causal conv multiply blocker"
+    (List.mem "fp64_multiply_conformance" blockers);
+  check
+    "causal conv add blocker"
+    (List.mem "fp64_add_conformance" blockers);
+  (match List.assoc_opt "profile_contract" gate with
+   | Some (`Assoc contract) ->
+     check
+       "causal conv deterministic rounding"
+       (String.equal
+          (string_value "rounding_mode" contract)
+          "deterministic-binary64-roundTiesToEven");
+     check
+       "causal conv deterministic accumulation sequence"
+       (list_contains_substring
+          "accumulate_kernel_left_to_right"
+          (string_list_value "operation_sequence" contract))
+   | _ -> failwith "missing causal conv profile contract");
   match
     Profile.validate_for_opcode
       ~opcode:"CAUSAL_DEPTHWISE_CONV1D_FP"

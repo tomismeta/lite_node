@@ -427,9 +427,10 @@ multiply/add from being mislabeled as fixed-point or consensus authority.
 LiteNode also reports `CAUSAL_DEPTHWISE_CONV1D_FP` under the current
 `host-fp-local-candidate` runtime profile. The local profile covers finite
 input/kernel reads, positive shape parameters, causal depthwise indexing,
-left-to-right kernel accumulation, input/kernel snapshot before writeback, and
-finite output atomicity. This is a generic sequence primitive, not a model- or
-SSM-specific fused path, and still requires protocol-owned arithmetic before a
+left-to-right kernel accumulation with deterministic binary64 multiply/add,
+input/kernel snapshot before writeback, and finite output atomicity. This is a
+generic sequence primitive, not a model- or SSM-specific fused path, and still
+requires cross-platform conformance plus bound profile roots before a
 consensus-ready claim.
 
 The saved report is:

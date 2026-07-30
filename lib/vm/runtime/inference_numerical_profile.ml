@@ -364,7 +364,7 @@ let local_semantics ~opcode =
       "input and kernel cells are finite binary64 values";
       "timesteps, channels, and width must be positive";
       "each output cell uses causal depthwise indexing over matching channels";
-      "accumulation is left-to-right by kernel index using native binary64";
+      "accumulation is left-to-right by kernel index using deterministic finite binary64 multiplication and addition";
       "input and kernel ranges are snapshotted before output writeback";
       "outputs are written only after the complete finite output tensor is computed";
     ]
@@ -495,7 +495,7 @@ let consensus_obligations ~opcode =
     ]
   | "CAUSAL_DEPTHWISE_CONV1D_FP" ->
     [
-      "replace or qualify native binary64 multiplication and addition";
+      "qualify deterministic binary64 multiplication and addition";
       "pin causal depthwise indexing, kernel-order accumulation, finite rejection, and effort";
       "define input/kernel snapshot behavior, output encoding, alias handling, and writeback atomicity";
       "pass independent cross-platform conformance for causal-convolution edge vectors";
@@ -649,6 +649,17 @@ let consensus_blocker_codes ~opcode =
       "atomic_writeback";
       "cross_platform_conformance";
     ]
+  | "CAUSAL_DEPTHWISE_CONV1D_FP" ->
+    [
+      "fp64_multiply_conformance";
+      "fp64_add_conformance";
+      "causal_indexing";
+      "kernel_accumulation_order";
+      "finite_overflow_policy";
+      "snapshot_alias_policy";
+      "atomic_writeback";
+      "cross_platform_conformance";
+    ]
   | opcode ->
     match current_runtime_profile ~opcode with
     | Some "host-fp-local-candidate" ->
@@ -694,6 +705,8 @@ let arithmetic_domain ~profile ~opcode =
     "deterministic-binary64-attention-score-dot-scale"
   | "host-fp-local-candidate", "ATTENTION_WEIGHTED_SUM_FP" ->
     "deterministic-binary64-attention-weighted-sum"
+  | "host-fp-local-candidate", "CAUSAL_DEPTHWISE_CONV1D_FP" ->
+    "deterministic-binary64-causal-depthwise-convolution"
   | "host-fp-local-candidate", _ -> "native-binary64-host-floating-point"
   | name, _ -> name
 
@@ -714,6 +727,8 @@ let rounding_mode ~profile ~opcode =
     "not-applicable-deterministic-comparison"
   | ( "host-fp-local-candidate",
       ( "ATTENTION_SCORES_FP" | "ATTENTION_WEIGHTED_SUM_FP" ) ) ->
+    "deterministic-binary64-roundTiesToEven"
+  | "host-fp-local-candidate", "CAUSAL_DEPTHWISE_CONV1D_FP" ->
     "deterministic-binary64-roundTiesToEven"
   | ("q16-exact" | "q32-exact"), _ -> "integer-profile-defined"
   | "soft-fp-exact", _ -> "software-profile-defined"
@@ -810,6 +825,16 @@ let operation_sequence ~opcode =
       "finite_output_check";
       "atomic_output_writeback";
     ]
+  | "CAUSAL_DEPTHWISE_CONV1D_FP" ->
+    [
+      "snapshot_input_and_kernel";
+      "iterate_timestep_channel_kernel_left_to_right";
+      "skip_future_kernel_positions";
+      "multiply_input_kernel_deterministic";
+      "accumulate_kernel_left_to_right_deterministic";
+      "finite_output_check";
+      "atomic_output_writeback";
+    ]
   | _ ->
     [
       "primitive_defined_snapshot";
@@ -869,6 +894,14 @@ let edge_value_policy ~opcode =
       "reject_missing_or_nonfinite_operands";
       "reject_nonfinite_or_overflowed_output";
       "reject_output_input_overlap";
+      "preserve_destination_on_reject";
+    ]
+  | "CAUSAL_DEPTHWISE_CONV1D_FP" ->
+    [
+      "reject_missing_or_nonfinite_operands";
+      "reject_invalid_shape_or_effort";
+      "reject_nonfinite_or_overflowed_output";
+      "input_and_kernel_are_snapshotted_before_writeback";
       "preserve_destination_on_reject";
     ]
   | _ ->
@@ -993,6 +1026,19 @@ let oracle_vector_root ~opcode =
         "nonfinite_operand_revert";
         "overflow_revert";
         "output_overlap_revert";
+        "shape_effort_revert";
+      ]
+    | "CAUSAL_DEPTHWISE_CONV1D_FP" ->
+      [
+        "golden";
+        "causal_indexing";
+        "channel_isolation";
+        "left_to_right_accumulation";
+        "input_alias_snapshot";
+        "kernel_alias_snapshot";
+        "missing_operand_revert";
+        "nonfinite_operand_revert";
+        "overflow_revert";
         "shape_effort_revert";
       ]
     | _ -> ["profile_gate_only"]
