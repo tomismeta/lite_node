@@ -49,6 +49,27 @@ let check_arithmetic_edges () =
     "fp64 add overflow rejects"
     (Fp64.add 0x7fefffffffffffffL 0x7fefffffffffffffL = None);
   expect_bits
+    "fp64 sub finite"
+    (Fp64.sub 0x4008000000000000L 0x4000000000000000L)
+    0x3ff0000000000000L;
+  expect_bits
+    "fp64 sub exact cancellation"
+    (Fp64.sub 0x3ff0000000000000L 0x3ff0000000000000L)
+    0L;
+  expect_bits
+    "fp64 sub negative zero minus positive zero"
+    (Fp64.sub Int64.min_int 0L)
+    Int64.min_int;
+  check
+    "fp64 sub overflow rejects"
+    (Fp64.sub
+       0x7fefffffffffffffL
+       (Int64.logor Int64.min_int 0x7fefffffffffffffL)
+     = None);
+  check
+    "fp64 sub non-finite rejects"
+    (Fp64.sub 0x7ff0000000000000L 0x3ff0000000000000L = None);
+  expect_bits
     "fp64 mul underflow tie to even"
     (Fp64.mul 1L 0x3fe0000000000000L)
     0L;

@@ -3,6 +3,7 @@
 
 val finite : int64 -> bool
 val add : int64 -> int64 -> int64 option
+val sub : int64 -> int64 -> int64 option
 val mul : int64 -> int64 -> int64 option
 val div : int64 -> int64 -> int64 option
 val sqrt : int64 -> int64 option

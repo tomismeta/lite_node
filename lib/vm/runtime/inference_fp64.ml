@@ -193,6 +193,9 @@ let add left right =
           exponent
   | _ -> None
 
+let sub left right =
+  add left (negate right)
+
 let mul left right =
   match decode left, decode right with
   | Some left, Some right ->

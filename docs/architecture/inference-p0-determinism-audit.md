@@ -418,6 +418,11 @@ output encoding are protocol-owned; max selection, score-shift,
 exponential-sum, and probability-division steps now use LiteNode's finite
 binary64 core.
 
+`fp64_subtract_conformance` is now represented by the named `Inference_fp64.sub`
+helper. The helper is deliberately defined through the same deterministic
+finite binary64 `add` plus sign-bit negation path used before, so this documents
+and tests the subtraction profile without changing runtime arithmetic.
+
 LiteNode reports `GATED_DELTA_RULE_FP` under the same
 `host-fp-exp-local-candidate` profile. The recurrence shape, query-scale
 sqrt/division, dot products, beta updates, state mutation order, and output

@@ -2718,9 +2718,9 @@ let exec_one st op =
                          done;
                          let value =
                            match
-                             Inference_fp64.add
+                             Inference_fp64.sub
                                v_values.(v_base + row)
-                               (Inference_fp64.negate !memory)
+                               !memory
                            with
                            | Some diff ->
                              Inference_fp64.mul
@@ -3276,9 +3276,9 @@ let exec_one st op =
             let sum_exp_bits = ref 0L in
             for index = 0 to count - 1 do
               match
-                Inference_fp64.add
+                Inference_fp64.sub
                   (Array.unsafe_get score_values index)
-                  (Inference_fp64.negate !max_score_bits)
+                  !max_score_bits
               with
               | Some shifted_bits ->
                 (match Inference_fp64.compare shifted_bits 0L with
