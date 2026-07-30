@@ -488,6 +488,12 @@ let check_remaining_p0_profile_obligations () =
     "softmax subtract blocker"
     (List.mem "fp64_subtract_conformance" softmax_blockers);
   check
+    "softmax comparison blocker"
+    (List.mem "fp64_comparison_conformance" softmax_blockers);
+  check
+    "softmax host comparison retired"
+    (not (List.mem "host_fp_comparison" softmax_blockers));
+  check
     "softmax reduction blocker"
     (List.mem "fp64_reduction_conformance" softmax_blockers);
   check
@@ -534,10 +540,27 @@ let check_argmax_profile_gate () =
        "lowest zero-based index"
        (string_list_value "local_semantics" gate));
   check
+    "argmax deterministic comparison semantics"
+    (list_contains_substring
+       "deterministic finite binary64"
+       (string_list_value "local_semantics" gate));
+  let blockers = string_list_value "consensus_blocker_codes" gate in
+  check
+    "argmax comparison blocker"
+    (List.mem "fp64_comparison_conformance" blockers);
+  check
     "argmax ordering obligation"
     (list_contains_substring
        "ordering preservation"
        (string_list_value "consensus_obligations" gate));
+  (match List.assoc_opt "profile_contract" gate with
+   | Some (`Assoc contract) ->
+     check
+       "argmax comparison rounding mode"
+       (String.equal
+          (string_value "rounding_mode" contract)
+          "not-applicable-deterministic-comparison")
+   | _ -> failwith "missing argmax profile contract");
   match Profile.validate_for_opcode ~opcode:"ARGMAX_FP" ~profile:"q16-exact" with
   | Error (Profile.Unsupported_opcode_profile { opcode; profile; expected }) ->
     check "argmax overclaim opcode" (String.equal opcode "ARGMAX_FP");

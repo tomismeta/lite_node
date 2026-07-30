@@ -221,6 +221,11 @@ let expect_bits label actual expected =
   | Some bits -> check label (Int64.equal bits expected)
   | None -> failwith (label ^ " returned non-finite")
 
+let expect_compare label actual expected =
+  match actual with
+  | Some value -> check label (value = expected)
+  | None -> failwith (label ^ " returned non-finite")
+
 let check_fp64_core_edges () =
   let bits value = Int64.bits_of_float value in
   expect_bits "fp64 int conversion"
@@ -274,7 +279,24 @@ let check_fp64_core_edges () =
   check "fp64 div by zero rejects"
     (Fp64.div (bits 1.0) 0L = None);
   check "fp64 div overflow rejects"
-    (Fp64.div 0x7fefffffffffffffL (bits 0.5) = None)
+    (Fp64.div 0x7fefffffffffffffL (bits 0.5) = None);
+  expect_compare "fp64 compare equal zeros"
+    (Fp64.compare 0L Int64.min_int)
+    0;
+  expect_compare "fp64 compare min-subnormal greater zero"
+    (Fp64.compare 1L 0L)
+    1;
+  expect_compare "fp64 compare negative subnormal less negative zero"
+    (Fp64.compare (Int64.logor Int64.min_int 1L) Int64.min_int)
+    (-1);
+  expect_compare "fp64 compare max finite greater one"
+    (Fp64.compare 0x7fefffffffffffffL (bits 1.0))
+    1;
+  expect_compare "fp64 compare negative order"
+    (Fp64.compare (bits (-2.0)) (bits (-1.0)))
+    (-1);
+  check "fp64 compare non-finite rejects"
+    (Fp64.compare 0x7ff0000000000000L (bits 1.0) = None)
 
 let check_golden_fixture () =
   let input = f64_bytes input_values in

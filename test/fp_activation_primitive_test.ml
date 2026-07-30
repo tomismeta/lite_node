@@ -460,6 +460,16 @@ let check_argmax_fp () =
   check "argmax signed-zero tie succeeds"
     (VM.run signed_zero [|VM.ARGMAX_FP (2, 0, 1); VM.STOP|]);
   check "argmax signed-zero tie chooses first" (int_reg signed_zero 2 = 0);
+  let subnormal = fresh_state () in
+  set_int_reg subnormal 0 100;
+  set_int_reg subnormal 1 4;
+  set_f64_bits subnormal 100 (Int64.logor Int64.min_int 1L);
+  set_f64_bits subnormal 101 Int64.min_int;
+  set_f64_bits subnormal 102 1L;
+  set_f64_bits subnormal 103 0L;
+  check "argmax subnormal ordering succeeds"
+    (VM.run subnormal [|VM.ARGMAX_FP (2, 0, 1); VM.STOP|]);
+  check "argmax subnormal ordering chooses positive min" (int_reg subnormal 2 = 2);
   let alias = fresh_state () in
   set_int_reg alias 0 100;
   set_int_reg alias 1 2;

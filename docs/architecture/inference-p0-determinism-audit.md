@@ -23,7 +23,7 @@ with a scalar oracle and VM conformance gate.
 | `LINEAR_Q1_G128_FP` | `contract_vm.ml` decodes Q1-G128 blocks, binary16-like scales, sign bits, and accumulates with LiteNode's finite binary64 core. | Scale/sign interpretation and accumulator order are now contract-bound locally; independent cross-platform oracle qualification is still required before consensus promotion. | Pin byte layout, scale decode, sign mapping, loop order, accumulator profile, finite rejection, aliasing, and output encoding. |
 | `RMSNORM_FP_EPS` | Reads explicit epsilon bits; sum of squares, count division, epsilon addition, reciprocal division, and output multiply use LiteNode's finite binary64 core; inverse-root `sqrt` remains native. | Inverse-root `sqrt`, signed-zero/subnormal treatment, and independent reduction/division qualification are not yet consensus-owned. | Define exact epsilon input, reduction order, inverse-root implementation, gamma read/order, non-finite policy, and rollback behavior. |
 | `L2NORM_FP` | Same deterministic reduction/output multiply shape as RMSNorm without gamma. | Same as RMSNorm; smaller surface but still depends on the native inverse-root path. | Define exact inverse-norm semantics, edge vectors near zero, signed-zero/subnormal behavior, and failure atomicity. |
-| `SOFTMAX_FP` | Uses left-to-right max selection, deterministic finite binary64 score shift, exponential sum, and probability division; `exp` remains native. | Highest math risk in this set because `exp` and comparison can change probabilities and token/order behavior. | Replace or pin `exp`, tie behavior, overflow/underflow, in-place behavior, and finite-result rules. |
+| `SOFTMAX_FP` | Uses deterministic finite binary64 left-to-right max selection, score shift, exponential sum, and probability division; `exp` remains native. | Highest math risk in this set because native `exp` can change probabilities and token/order behavior. | Replace or pin `exp`, tie behavior, overflow/underflow, in-place behavior, and finite-result rules. |
 | `GATED_DELTA_RULE_FP` | Stateful recurrence with native decay `exp` and native query-scale `sqrt`; integer key-dimension conversion, reciprocal division, recurrence dot products, beta-delta updates, state updates, and output scaling multiply use LiteNode's finite binary64 core. | Highest state risk: small numeric drift compounds; decay/scale and recurrence ordering are not yet consensus-owned. | Pin layout, head mapping, loop nesting, decay math, scale math, state update order, aliasing, software-fp effort, and atomicity. |
 
 The software-fp effort charge is intentionally unchanged in this local-only
@@ -362,8 +362,9 @@ LiteNode now also pins `SOFTMAX_FP` locally for extreme finite scores:
 equal `max_float` scores produce uniform probabilities after max subtraction,
 and a score dominated by `max_float` underflows to a zero probability without
 rejecting the finite input. This remains host-FP local-candidate behavior until
-`exp`, division, comparison, and output encoding are protocol-owned; the
-score-shift and exponential-sum steps now use LiteNode's finite binary64 core.
+`exp` and output encoding are protocol-owned; max selection, score-shift,
+exponential-sum, and probability-division steps now use LiteNode's finite
+binary64 core.
 
 ## P0-Plus Execution Gate
 
@@ -449,9 +450,9 @@ includes any strict consensus-readiness gate. The explicit top-k boundary is:
 
 LiteNode now reports `ARGMAX_FP` under the current `host-fp-local-candidate`
 runtime profile. Its local semantics are finite binary64 input reads,
-native greater-than comparison, lowest-index tie selection, and selected-index
-writeback after the input span is read. Fixed-point or ranked-token claims must
-come from separate ordering-preservation evidence.
+deterministic binary64 greater-than comparison, lowest-index tie selection, and
+selected-index writeback after the input span is read. Fixed-point or
+ranked-token claims must come from separate ordering-preservation evidence.
 
 ```text
 /home/exedev/evidence/octra-inference/determinism-p0-plus-topk-boundary-20260730-025306/p0-plus-topk-boundary.cjson

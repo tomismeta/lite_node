@@ -87,13 +87,14 @@ Minimum vectors:
 Current opcode: `SOFTMAX_FP`.
 
 Current status: local host-FP candidate. High-risk because token probabilities
-and attention weights depend on `exp`, summation, and division.
+and attention weights still depend on native `exp`; max selection, summation,
+and division use LiteNode's deterministic finite binary64 core locally.
 
 Required contract decisions:
 
 | Topic | Decision required |
 | --- | --- |
-| Max subtraction | Exact max scan order and tie behavior. |
+| Max subtraction | Deterministic finite binary64 max scan order and tie behavior. |
 | Exponential | Deterministic `exp` approximation or table semantics. |
 | Sum | Fixed accumulation order and accumulator width/domain. |
 | Division | Exact probability rounding and normalization rule. |

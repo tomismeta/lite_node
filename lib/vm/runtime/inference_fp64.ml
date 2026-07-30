@@ -222,6 +222,30 @@ let div left right =
         (left.exponent - right.exponent)
   | _ -> None
 
+let compare_magnitude left right =
+  let exponent = min left.exponent right.exponent in
+  let left_value =
+    Z.shift_left left.significand (left.exponent - exponent)
+  in
+  let right_value =
+    Z.shift_left right.significand (right.exponent - exponent)
+  in
+  Z.compare left_value right_value
+
+let compare left right =
+  match decode left, decode right with
+  | Some left, Some right ->
+    let left_zero = Z.sign left.significand = 0 in
+    let right_zero = Z.sign right.significand = 0 in
+    if left_zero && right_zero then
+      Some 0
+    else if left.negative <> right.negative then
+      Some (if left.negative then -1 else 1)
+    else
+      let cmp = compare_magnitude left right in
+      Some (if left.negative then -cmp else cmp)
+  | _ -> None
+
 let of_int value =
   let value = Z.of_int value in
   if Z.sign value = 0 then

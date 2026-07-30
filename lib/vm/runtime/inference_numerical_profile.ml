@@ -309,7 +309,7 @@ let local_semantics ~opcode =
   | "SOFTMAX_FP" ->
     [
       "score cells are finite binary64 values";
-      "maximum score is selected left-to-right before exponentiation";
+      "maximum score is selected left-to-right with deterministic finite binary64 comparison before exponentiation";
       "score-minus-maximum shifts use deterministic finite binary64 subtraction";
       "exp is applied to each shifted score using native binary64";
       "exponentials are summed left-to-right with deterministic finite binary64 addition";
@@ -369,7 +369,7 @@ let local_semantics ~opcode =
   | "ARGMAX_FP" ->
     [
       "input cells are finite binary64 values";
-      "comparison uses native binary64 greater-than";
+      "comparison uses deterministic finite binary64 greater-than";
       "ties keep the lowest zero-based index, including signed-zero ties";
       "the selected index is written only after the full input span is read";
     ]
@@ -440,8 +440,9 @@ let consensus_obligations ~opcode =
     ]
   | "SOFTMAX_FP" ->
     [
-      "replace or qualify native binary64 exp and comparison behavior";
+      "replace or qualify native binary64 exp behavior";
       "qualify deterministic binary64 score shifting, exponential summation, and probability division";
+      "qualify deterministic binary64 comparison for maximum-score selection";
       "pin max-subtract semantics, ties, underflow, overflow, and non-finite rejection";
       "define exact output encoding and overlap/writeback atomicity";
       "pass independent cross-platform conformance for probability and ordering edge vectors";
@@ -498,7 +499,7 @@ let consensus_obligations ~opcode =
     ]
   | "ARGMAX_FP" ->
     [
-      "define the exact binary64 comparison relation for signed zero and all finite values";
+      "qualify the deterministic binary64 comparison relation for signed zero and all finite values";
       "reject non-finite logits before selection and preserve destination on rejection";
       "pin first-maximum tie behavior, selected-index encoding, and effort";
       "prove ordering preservation before mapping fixed-point logits to token authority";
@@ -576,7 +577,7 @@ let consensus_blocker_codes ~opcode =
     ]
   | "SOFTMAX_FP" ->
     [
-      "host_fp_comparison";
+      "fp64_comparison_conformance";
       "fp64_subtract_conformance";
       "host_fp_exp";
       "fp64_reduction_conformance";
@@ -610,6 +611,15 @@ let consensus_blocker_codes ~opcode =
       "signed_zero_subnormal_policy";
       "finite_overflow_policy";
       "overlap_policy";
+      "atomic_writeback";
+      "cross_platform_conformance";
+    ]
+  | "ARGMAX_FP" ->
+    [
+      "fp64_comparison_conformance";
+      "first_max_tie_policy";
+      "selected_index_encoding";
+      "finite_rejection";
       "atomic_writeback";
       "cross_platform_conformance";
     ]
@@ -649,9 +659,11 @@ let arithmetic_domain ~profile ~opcode =
   | "host-fp-local-candidate", "RESIDUAL_ADD_FP" ->
     "deterministic-binary64-elementwise-add"
   | "host-fp-local-candidate", "SOFTMAX_FP" ->
-    "deterministic-binary64-shift-sum-divide-host-exp-comparison"
+    "deterministic-binary64-compare-shift-sum-divide-host-exp"
   | "host-fp-local-candidate", "GATED_DELTA_RULE_FP" ->
     "deterministic-binary64-recurrence-divide-host-exp-sqrt"
+  | "host-fp-local-candidate", "ARGMAX_FP" ->
+    "deterministic-binary64-comparison"
   | "host-fp-local-candidate", _ -> "native-binary64-host-floating-point"
   | name, _ -> name
 
@@ -667,6 +679,8 @@ let rounding_mode ~profile ~opcode =
       | "ELEMWISE_MUL_FP"
       | "RESIDUAL_ADD_FP" ) ) ->
     "deterministic-binary64-roundTiesToEven-with-host-math"
+  | "host-fp-local-candidate", "ARGMAX_FP" ->
+    "not-applicable-deterministic-comparison"
   | ("q16-exact" | "q32-exact"), _ -> "integer-profile-defined"
   | "soft-fp-exact", _ -> "software-profile-defined"
   | "byte-ingress-exact", _ -> "exact-byte-decode"
@@ -713,7 +727,7 @@ let operation_sequence ~opcode =
   | "SOFTMAX_FP" ->
     [
       "snapshot_scores";
-      "select_max_left_to_right";
+      "select_max_left_to_right_deterministic";
       "subtract_max_deterministic";
       "exp_each_score";
       "sum_exponentials_left_to_right_deterministic";
@@ -736,6 +750,12 @@ let operation_sequence ~opcode =
       "apply_query_scale_multiply_deterministic";
       "finite_output_and_state_check";
       "atomic_output_and_state_writeback";
+    ]
+  | "ARGMAX_FP" ->
+    [
+      "snapshot_logits";
+      "select_first_max_left_to_right_deterministic";
+      "write_selected_index";
     ]
   | _ ->
     [
@@ -760,6 +780,13 @@ let edge_value_policy ~opcode =
       "epsilon_must_decode_to_finite_positive_binary64";
       "reject_missing_or_nonfinite_operands";
       "reject_nonfinite_reduction_inverse_root_input_or_output";
+      "preserve_destination_on_reject";
+    ]
+  | "ARGMAX_FP" ->
+    [
+      "reject_missing_or_nonfinite_operands";
+      "signed_zero_values_compare_equal";
+      "preserve_first_index_on_equal_max";
       "preserve_destination_on_reject";
     ]
   | _ ->
@@ -836,6 +863,16 @@ let oracle_vector_root ~opcode =
         "nonfinite_score_revert";
         "partial_overlap_revert";
         "bad_count_revert";
+        "effort_revert";
+      ]
+    | "ARGMAX_FP" ->
+      [
+        "finite_argmax";
+        "equal_max_tie";
+        "signed_zero_tie";
+        "negative_and_subnormal_ordering";
+        "nonfinite_revert";
+        "empty_revert";
         "effort_revert";
       ]
     | "GATED_DELTA_RULE_FP" ->

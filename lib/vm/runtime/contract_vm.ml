@@ -3136,18 +3136,16 @@ let exec_one st op =
          (match read_fp64_bits_array st.memory.data scores count with
          | Some score_values ->
             let max_score_bits = ref (Array.unsafe_get score_values 0) in
-            let max_score = ref (Int64.float_of_bits !max_score_bits) in
+            let ok = ref true in
             for index = 1 to count - 1 do
               let value_bits = Array.unsafe_get score_values index in
-              let value = Int64.float_of_bits value_bits in
-              if value > !max_score then begin
-                max_score_bits := value_bits;
-                max_score := value
-              end
+              match Inference_fp64.compare value_bits !max_score_bits with
+              | Some cmp when cmp > 0 -> max_score_bits := value_bits
+              | Some _ -> ()
+              | None -> ok := false
             done;
             let exps = Array.make count 0L in
             let sum_exp_bits = ref 0L in
-            let ok = ref true in
             for index = 0 to count - 1 do
               match
                 Inference_fp64.add
@@ -3354,14 +3352,22 @@ let exec_one st op =
      | Some addr, Some n when valid_large_mem_span addr n ->
        if not (add_dyn_effort st (n / 2)) then revert st
        else
-         (match read_fp64_array st.memory.data addr n with
+         (match read_fp64_bits_array st.memory.data addr n with
           | Some values ->
             let best = ref 0 in
+            let ok = ref true in
             for index = 1 to n - 1 do
-              if values.(index) > values.(!best) then best := index
+              match Inference_fp64.compare values.(index) values.(!best) with
+              | Some cmp when cmp > 0 -> best := index
+              | Some _ -> ()
+              | None -> ok := false
             done;
-            setr st rd (VInt (Z.of_int !best));
-            true
+            if not !ok then
+              revert st
+            else begin
+              setr st rd (VInt (Z.of_int !best));
+              true
+            end
           | None -> revert st)
      | _ -> revert st)
   | JMP addr ->

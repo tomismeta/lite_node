@@ -79,7 +79,7 @@ kernels.
 | --- | --- | --- | --- |
 | P0 | `LINEAR_Q1_G128_FP` | Runtime hotspot and core compressed projection path. | Specify Q1 block format, fp16 scale decode, sign handling, accumulation order, and binary64 or fixed-point profile. |
 | P0 | `RMSNORM_FP_EPS`, `L2NORM_FP` | Repeated throughout prompt prefill; uses reductions and `sqrt`. | Decide whether FP64 reduction plus host `sqrt` remains local-only or becomes deterministic software math. |
-| P0 | `SOFTMAX_FP` | Attention correctness and token distribution depend on it; uses `exp`. | Define exact exponential behavior or use deterministic fixed-point/table implementation. |
+| P0 | `SOFTMAX_FP` | Attention correctness and token distribution depend on it; max comparison is deterministic locally, but `exp` is still native. | Define exact exponential behavior or use deterministic fixed-point/table implementation. |
 | P0 | `GATED_DELTA_RULE_FP` | Stateful recurrence with many operands and large rollback surface. | Specify state layout, update order, math functions, aliasing, and failure atomicity. |
 | P1 | `ATTENTION_SCORES_FP`, `ATTENTION_WEIGHTED_SUM_FP` | Attention composition boundary; mostly reductions. | Specify accumulation order and scale semantics. |
 | P1 | `ROPE_APPLY_INDEXED_FP` | Uses trigonometric functions and exponentiation. | Prefer table/indexed deterministic contract over host trig. |
