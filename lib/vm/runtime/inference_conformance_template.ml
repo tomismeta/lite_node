@@ -536,7 +536,10 @@ let profile_json (template : t) =
       ~opcode:template.opcode
       ~profile:template.profile
   with
-  | Ok profile -> Inference_numerical_profile.to_json profile
+  | Ok profile ->
+    Inference_numerical_profile.to_json_for_opcode
+      ~opcode:template.opcode
+      profile
   | Error error ->
     `Assoc [
       "name", `String template.profile;

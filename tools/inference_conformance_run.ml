@@ -116,7 +116,7 @@ let profile_gate_json opcode fields =
   | None -> `Null
   | Some profile ->
     (match Profile.validate_for_opcode ~opcode ~profile with
-     | Ok gate -> Profile.to_json gate
+     | Ok gate -> Profile.to_json_for_opcode ~opcode gate
      | Error error ->
        fail (Profile.error_message error))
 

@@ -214,6 +214,18 @@ host-fp-local-candidate
 That profile is accepted only as local candidate execution. It is reported as
 `local_only`, with required actions to bind exact arithmetic, replace or qualify
 host math, and pass cross-platform conformance before validator admission.
+Conformance JSON includes:
+
+```text
+profile_gate.name
+profile_gate.consensus_status
+profile_gate.local_semantics
+profile_gate.consensus_obligations
+```
+
+`local_semantics` records what the current VM does today.
+`consensus_obligations` records what must become protocol-owned before the
+opcode can be promoted out of `local_only`.
 
 Templates that declare an unknown profile are rejected. Templates that claim a
 profile the current runtime does not implement, such as `soft-fp-exact` for

@@ -38,3 +38,4 @@ val status_string : consensus_status -> string
 val current_runtime_profile : opcode:string -> string option
 val validate_for_opcode : opcode:string -> profile:string -> (t, error) result
 val to_json : t -> Yojson.Safe.t
+val to_json_for_opcode : opcode:string -> t -> Yojson.Safe.t

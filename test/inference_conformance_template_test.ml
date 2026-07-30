@@ -49,6 +49,39 @@ let failure case =
     "unchanged_spans", `List [`String "output"];
   ]
 
+let assoc_value name fields =
+  match List.assoc_opt name fields with
+  | Some value -> value
+  | None -> failwith ("missing json field: " ^ name)
+
+let string_value name fields =
+  match assoc_value name fields with
+  | `String value -> value
+  | _ -> failwith ("json field must be a string: " ^ name)
+
+let string_list_value name fields =
+  match assoc_value name fields with
+  | `List values ->
+    List.map
+      (function
+        | `String value -> value
+        | _ -> failwith ("json field must be a string list: " ^ name))
+      values
+  | _ -> failwith ("json field must be a list: " ^ name)
+
+let contains_substring needle value =
+  let needle_len = String.length needle in
+  let value_len = String.length value in
+  let rec loop index =
+    if index + needle_len > value_len then false
+    else if String.sub value index needle_len = needle then true
+    else loop (index + 1)
+  in
+  needle_len = 0 || loop 0
+
+let list_contains_substring needle values =
+  List.exists (contains_substring needle) values
+
 let template ?(opcode = "RMSNORM_FP_EPS") ?(primitive = "rmsnorm_fp_eps")
     ?(effects = ["memory_read"; "memory_write"]) ?(memory_access = "read_write")
     ?(profile = "host-fp-local-candidate") ?(vm_semantics_root = hex_root 'd')
@@ -111,9 +144,46 @@ let check_accepts_template () =
       check
         "profile gate"
         (match List.assoc_opt "profile_gate" fields with
-         | Some (`Assoc _) -> true
+         | Some (`Assoc gate) ->
+           String.equal (string_value "opcode" gate) "RMSNORM_FP_EPS"
+           && list_contains_substring
+                "sqrt"
+                (string_list_value "consensus_obligations" gate)
+           && list_contains_substring
+                "epsilon"
+                (string_list_value "local_semantics" gate)
          | _ -> false)
     | _ -> failwith "template json must be object"
+
+let check_q1_profile_obligations () =
+  match
+    Template.of_json
+      (template
+         ~opcode:"LINEAR_Q1_G128_FP"
+         ~primitive:"linear_q1_0_g128_fp"
+         ())
+  with
+  | Error error -> failwith (Template.error_message error)
+  | Ok result ->
+    (match Template.to_json result with
+     | `Assoc fields ->
+       (match List.assoc_opt "profile_gate" fields with
+        | Some (`Assoc gate) ->
+          check
+            "q1 profile opcode"
+            (String.equal (string_value "opcode" gate) "LINEAR_Q1_G128_FP");
+          check
+            "q1 local sign semantics"
+            (list_contains_substring
+               "sign bit"
+               (string_list_value "local_semantics" gate));
+          check
+            "q1 consensus binary16 obligation"
+            (list_contains_substring
+               "binary16 scale"
+               (string_list_value "consensus_obligations" gate))
+        | _ -> failwith "missing q1 profile gate")
+     | _ -> failwith "template json must be object")
 
 let check_rejects_unknown_opcode () =
   match Template.of_json (template ~opcode:"MODEL_SPECIFIC_FASTPATH" ()) with
@@ -241,6 +311,7 @@ let check_rejects_single_delta_expected_span () =
 
 let () =
   check_accepts_template ();
+  check_q1_profile_obligations ();
   check_rejects_unknown_opcode ();
   check_rejects_effect_drift ();
   check_rejects_missing_failure_cases ();

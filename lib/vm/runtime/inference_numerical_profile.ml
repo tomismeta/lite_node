@@ -111,6 +111,46 @@ let validate_for_opcode ~opcode ~profile =
   | Ok parsed, Some expected ->
     Error (Unsupported_opcode_profile { opcode; profile = parsed.name; expected })
 
+let local_semantics ~opcode =
+  match opcode with
+  | "LINEAR_Q1_G128_FP" ->
+    [
+      "Q1-G128 blocks are 18 bytes: little-endian binary16 scale followed by 128 sign bits";
+      "sign bit 1 maps to +1.0 and sign bit 0 maps to -1.0";
+      "loop order is row, column, block, item with a native binary64 accumulator";
+      "input cells, decoded scales, and final outputs must be finite before writeback";
+      "destination cells are written only after the full output buffer is computed";
+    ]
+  | "RMSNORM_FP_EPS" ->
+    [
+      "epsilon is read from an integer register as binary64 bits and must be finite and positive";
+      "input and gamma cells are finite binary64 values and their ranges must not overlap";
+      "sum of squares is accumulated left-to-right in native binary64";
+      "inverse RMS is computed as 1.0 / sqrt((sum_sq / count) + epsilon)";
+      "outputs are written only after the complete finite output vector is computed";
+    ]
+  | _ -> []
+
+let consensus_obligations ~opcode =
+  match opcode with
+  | "LINEAR_Q1_G128_FP" ->
+    [
+      "pin binary16 scale decode for zero, signed zero, subnormal, normal, NaN, and infinity";
+      "replace or qualify native binary64 multiply/add rounding and accumulator behavior";
+      "define exact output encoding, overflow policy, and writeback atomicity";
+      "pass independent cross-platform conformance for scale, sign, and accumulation edge vectors";
+    ]
+  | "RMSNORM_FP_EPS" ->
+    [
+      "replace or qualify native binary64 reduction, division, multiplication, and sqrt";
+      "pin signed-zero, subnormal, overflow, underflow, and non-finite behavior";
+      "define exact epsilon-bit interpretation and range-overlap rejection";
+      "pass independent cross-platform conformance for reduction and sqrt edge vectors";
+    ]
+  | _ -> [
+      "write primitive-specific deterministic math obligations before promotion";
+    ]
+
 let to_json profile =
   `Assoc [
     "name", `String profile.name;
@@ -119,3 +159,23 @@ let to_json profile =
     "required_actions",
     `List (List.map (fun action -> `String action) profile.required_actions);
   ]
+
+let to_json_for_opcode ~opcode profile =
+  match to_json profile with
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       @ [
+         "opcode", `String opcode;
+         "local_semantics",
+         `List
+           (List.map
+              (fun value -> `String value)
+              (local_semantics ~opcode));
+         "consensus_obligations",
+         `List
+           (List.map
+              (fun value -> `String value)
+              (consensus_obligations ~opcode));
+       ])
+  | value -> value
