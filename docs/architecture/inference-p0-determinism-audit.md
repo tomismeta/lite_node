@@ -393,7 +393,10 @@ The P0-plus pack is still diagnostic and model-neutral. It adds coverage for
 attention math, indexed RoPE, argmax tie behavior, and the final logits-tail
 composition. `ARGMAX_FP` only returns the selected index, so producer top-k
 ordering manifests are preserved as `producer_only` evidence. The explicit
-top-k boundary is:
+P0-plus runner now reports per-fixture `profile_gates` plus an aggregate
+`profile_gate_count`; the composite logits-tail case reports the component
+profiles for `RMSNORM_FP_EPS`, `LINEAR_Q1_G128_FP`, and `ARGMAX_FP`. The
+explicit top-k boundary is:
 
 LiteNode now reports `ARGMAX_FP` under the current `host-fp-local-candidate`
 runtime profile. Its local semantics are finite binary64 input reads,

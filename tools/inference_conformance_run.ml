@@ -135,6 +135,34 @@ let profile_gate_json opcode fields =
         | Error error ->
           fail (Profile.error_message error)))
 
+let runtime_profile_gate_json opcode =
+  match Profile.current_runtime_profile ~opcode with
+  | None -> `Null
+  | Some profile ->
+    (match Profile.validate_for_opcode ~opcode ~profile with
+     | Ok gate ->
+       (match Profile.to_json_for_opcode ~opcode gate with
+        | `Assoc fields ->
+          `Assoc (fields @ ["profile_source", `String "current_runtime_profile"])
+        | value -> value)
+     | Error error -> fail (Profile.error_message error))
+
+let non_null_profile_gates gates =
+  List.filter_map
+    (function
+      | `Null -> None
+      | gate -> Some gate)
+    gates
+
+let p0_plus_profile_gates opcode fields =
+  match opcode with
+  | "LOGITS_TAIL_PATH" ->
+    non_null_profile_gates
+      (List.map
+         runtime_profile_gate_json
+         ["RMSNORM_FP_EPS"; "LINEAR_Q1_G128_FP"; "ARGMAX_FP"])
+  | _ -> non_null_profile_gates [profile_gate_json opcode fields]
+
 let check_template_identity template_path opcode primitive fields =
   (match opt_string_field "opcode" fields with
    | Some value when not (String.equal value opcode) ->
@@ -993,12 +1021,15 @@ let execute_p0_plus_fixture root_dir entry =
     | value -> fail ("unsupported P0-plus opcode: " ^ value)
   in
   let accepted = ran && matched in
+  let profile_gates = p0_plus_profile_gates opcode fixture in
   accepted,
   `Assoc [
     "case", `String case_name;
     "opcode", `String opcode;
     "primitive", `String primitive;
     "manifest", `String manifest_path;
+    "profile_gates", `List profile_gates;
+    "profile_gate_count", `Int (List.length profile_gates);
     "status", `String (if accepted then "accepted" else "rejected");
     "vm_run", `String (if ran then "accepted" else "rejected");
     "output_status", `String (if matched then "matched" else "mismatch");
@@ -1021,6 +1052,19 @@ let run_p0_plus_pack path =
   in
   let results = List.map (execute_p0_plus_fixture root_dir) entries in
   let accepted = List.for_all fst results in
+  let profile_gate_count =
+    List.fold_left
+      (fun count (_, result) ->
+         match result with
+         | `Assoc fields ->
+           (match field "profile_gate_count" fields with
+            | Some (`Int value) -> count + value
+            | Some (`Intlit value) -> count + int_of_string value
+            | _ -> count)
+         | _ -> count)
+      0
+      results
+  in
   `Assoc [
     "status", `String (if accepted then "accepted" else "rejected");
     "diagnostic_only", `Bool true;
@@ -1030,6 +1074,7 @@ let run_p0_plus_pack path =
     "accepted_count", `Int (List.length (List.filter fst results));
     "rejected_count",
     `Int (List.length (List.filter (fun (ok, _) -> not ok) results));
+    "profile_gate_count", `Int profile_gate_count;
     "results", `List (List.map snd results);
   ]
 
