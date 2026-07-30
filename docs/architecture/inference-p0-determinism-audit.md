@@ -89,9 +89,10 @@ The first accepted producer indexes are:
 ```text
 /home/exedev/evidence/octra-inference/determinism-ingestion-corpus-vm-templates-20260730-004544/p0-vm-execution-templates.cjson
 /home/exedev/evidence/octra-inference/determinism-ingestion-corpus-vm-templates-corrected-20260730-011945/p0-vm-execution-templates.cjson
+/home/exedev/evidence/octra-inference/determinism-ingestion-corpus-effort-authority-20260730-014647/p0-vm-execution-templates.cjson
 ```
 
-Both indexes currently execute all five positive P0 templates and match every
+These indexes currently execute all five positive P0 templates and match every
 declared output span. The saved LiteNode reports live beside the indexes as
 `litenode-positive-execution-report.cjson`.
 
@@ -106,11 +107,9 @@ tools/inference_conformance_run.exe \
 The saved reports live beside the indexes as
 `litenode-failure-atomicity-report.cjson`.
 
-Observed VM effort does not match producer `expected_effort` yet. Treat that
-field as a producer estimate until `octra-inference` either emits exact
-`Contract_vm` effort or renames the field to make the estimate boundary
-unambiguous. `--strict-effort` is available when exact effort becomes part of
-the contract.
+The effort-authority artifact emits exact `Contract_vm` effort for this corpus,
+so `--strict-effort` passes there. Earlier template artifacts remain useful
+historical fixtures, but their `expected_effort` values are estimates.
 
 Required template schema:
 
@@ -176,9 +175,9 @@ assumptions, HuggingFace assumptions, or Bonsai/Qwen-specific fields.
   near-tie token-selection failure for Q16.16.
 - Do not add model-specific fast paths to the VM.
 
-## Next Acceptance Gate
+## Schema Acceptance Gate
 
-The next useful LiteNode gate is:
+The LiteNode schema gate is:
 
 ```text
 inference_conformance_check --template-dir <p0-template-dir>
@@ -200,19 +199,19 @@ Acceptance means only:
 - required effects match the opcode class; and
 - failure cases are present.
 
-After that, LiteNode can wire execution without negotiating schema again.
+After that, LiteNode can execute templates without negotiating schema again.
 
 ## Current Positive Execution Gate
 
-Status on 2026-07-30:
+Status on 2026-07-30, using the effort-authority artifact:
 
-| Opcode | VM run | Output spans | Producer effort vs observed effort |
-| --- | --- | --- | --- |
-| `LINEAR_Q1_G128_FP` | accepted | matched | `256` vs `201` |
-| `RMSNORM_FP_EPS` | accepted | matched | `32` vs `67` |
-| `L2NORM_FP` | accepted | matched | `24` vs `53` |
-| `SOFTMAX_FP` | accepted | matched | `64` vs `133` |
-| `GATED_DELTA_RULE_FP` | accepted | matched | `96` vs `222` |
+| Opcode | VM run | Output spans | Expected effort | Observed effort | Strict effort |
+| --- | --- | --- | ---: | ---: | --- |
+| `LINEAR_Q1_G128_FP` | accepted | matched | `201` | `201` | matched |
+| `RMSNORM_FP_EPS` | accepted | matched | `67` | `67` | matched |
+| `L2NORM_FP` | accepted | matched | `53` | `53` | matched |
+| `SOFTMAX_FP` | accepted | matched | `133` | `133` | matched |
+| `GATED_DELTA_RULE_FP` | accepted | matched | `222` | `222` | matched |
 
 This is a positive arithmetic ingestion gate, not a validator-grade
 determinism claim. It proves the producer fixtures now agree with the current
