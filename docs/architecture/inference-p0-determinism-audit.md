@@ -418,13 +418,15 @@ now route through a deterministic sign branch: nonnegative inputs use
 `exp(-x)`, negative inputs use `exp(x)`, and the runtime rejects any path where
 the native `exp` input is not both finite and nonpositive. The surrounding
 `1.0 + exp`, ratio, and SiLU multiply steps use the VM's deterministic
-binary64 add/divide/multiply helpers. `SOFTPLUS_FP` remains explicitly
-native-`log1p`-bound. None of these activation opcodes should be promoted to a
-consensus-ready profile until the remaining native transcendental functions
-are replaced or independently qualified. The activation effort schedule is
-unchanged in this local-only profile; it must be repriced before any broader
-admission claim because the deterministic helper path does more host work than
-the earlier native float mapping.
+binary64 add/divide/multiply helpers. `SOFTPLUS_FP` uses the same deterministic
+positive/nonpositive branch policy and nonpositive exp-domain gate; its
+positive-branch addition also uses deterministic binary64 addition.
+`SOFTPLUS_FP` remains explicitly native-`log1p`-bound. None of these activation
+opcodes should be promoted to a consensus-ready profile until the remaining
+native transcendental functions are replaced or independently qualified. The
+activation effort schedule is unchanged in this local-only profile; it must be
+repriced before any broader admission claim because the deterministic helper
+path does more host work than the earlier native float mapping.
 
 LiteNode also reports `ELEMWISE_MUL_FP` and `RESIDUAL_ADD_FP` under the current
 `host-fp-local-candidate` runtime profile. Their runtime tests already pin

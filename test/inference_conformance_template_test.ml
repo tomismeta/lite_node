@@ -673,7 +673,7 @@ let check_activation_profile_gates () =
       | Ok _ -> failwith (opcode ^ " should reject profile overclaim"))
     [
       "SIGMOID_FP", "native exp only sees finite nonpositive inputs", "nonpositive exp-domain gate";
-      "SOFTPLUS_FP", "log1p", "softplus edge vectors";
+      "SOFTPLUS_FP", "log1p receives finite nonnegative inputs", "native binary64 exp and log1p";
       "SILU_FP", "SiLU reuses the SIGMOID_FP sign branch", "deterministic sigmoid reuse";
     ];
   let sigmoid_gate = profile_gate "SIGMOID_FP" in
@@ -708,6 +708,43 @@ let check_activation_profile_gates () =
           "native_exp_input_must_be_finite_and_nonpositive"
           (string_list_value "edge_value_policy" contract))
    | _ -> failwith "missing sigmoid profile contract");
+  let softplus_gate = profile_gate "SOFTPLUS_FP" in
+  let softplus_blockers =
+    string_list_value "consensus_blocker_codes" softplus_gate
+  in
+  check
+    "softplus host exp blocker"
+    (List.mem "host_fp_exp" softplus_blockers);
+  check
+    "softplus host log1p blocker"
+    (List.mem "host_fp_log1p" softplus_blockers);
+  check
+    "softplus add blocker"
+    (List.mem "fp64_add_conformance" softplus_blockers);
+  check
+    "softplus generic host add retired"
+    (not (List.mem "host_fp_add" softplus_blockers));
+  check
+    "softplus generic host arithmetic retired"
+    (not (List.mem "host_fp_arithmetic" softplus_blockers));
+  (match List.assoc_opt "profile_contract" softplus_gate with
+   | Some (`Assoc contract) ->
+     check
+       "softplus operation records exp gate"
+       (list_contains_substring
+          "check_exp_input_nonpositive_deterministic"
+          (string_list_value "operation_sequence" contract));
+     check
+       "softplus operation records log1p gate"
+       (list_contains_substring
+          "check_log1p_input_nonnegative_deterministic"
+          (string_list_value "operation_sequence" contract));
+     check
+       "softplus edge records log1p gate"
+       (List.mem
+          "native_log1p_input_must_be_finite_and_nonnegative"
+          (string_list_value "edge_value_policy" contract))
+   | _ -> failwith "missing softplus profile contract");
   let silu_gate = profile_gate "SILU_FP" in
   let silu_blockers =
     string_list_value "consensus_blocker_codes" silu_gate

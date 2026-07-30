@@ -327,6 +327,18 @@ let check_activation_large_magnitude_edges () =
   check
     "sigmoid large negative saturates"
     (f64_bits sigmoid 101 = Int64.bits_of_float 0.0);
+  let softplus = fresh_state () in
+  set_int_reg softplus 0 100;
+  set_int_reg softplus 1 2;
+  set_f64_values softplus 100 [max_float; -. max_float];
+  check "softplus large magnitude succeeds"
+    (VM.run softplus [|VM.SOFTPLUS_FP (0, 1); VM.STOP|]);
+  check
+    "softplus large positive preserves magnitude"
+    (f64_bits softplus 100 = Int64.bits_of_float max_float);
+  check
+    "softplus large negative saturates"
+    (f64_bits softplus 101 = Int64.bits_of_float 0.0);
   let silu = fresh_state () in
   set_int_reg silu 0 100;
   set_int_reg silu 1 2;
@@ -360,6 +372,19 @@ let check_activation_zero_subnormal_edges () =
     (f64_bits sigmoid 101 = Int64.bits_of_float 0.5);
   check "sigmoid positive subnormal finite" (finite_f64_bits (f64_bits sigmoid 102));
   check "sigmoid negative subnormal finite" (finite_f64_bits (f64_bits sigmoid 103));
+  let softplus = fresh_state () in
+  set_int_reg softplus 0 100;
+  set_int_reg softplus 1 4;
+  set_f64_bits softplus 100 (Int64.bits_of_float 0.0);
+  set_f64_bits softplus 101 (Int64.bits_of_float (-0.0));
+  set_f64_bits softplus 102 pos_min_subnormal;
+  set_f64_bits softplus 103 neg_min_subnormal;
+  check "softplus zero/subnormal succeeds"
+    (VM.run softplus [|VM.SOFTPLUS_FP (0, 1); VM.STOP|]);
+  check "softplus positive zero finite" (finite_f64_bits (f64_bits softplus 100));
+  check "softplus negative zero finite" (finite_f64_bits (f64_bits softplus 101));
+  check "softplus positive subnormal finite" (finite_f64_bits (f64_bits softplus 102));
+  check "softplus negative subnormal finite" (finite_f64_bits (f64_bits softplus 103));
   let silu = fresh_state () in
   set_int_reg silu 0 100;
   set_int_reg silu 1 4;
@@ -393,6 +418,7 @@ let check_activation_effort_accounting () =
         (f64_bits one_under 100 = Int64.bits_of_float 1.0))
     [
       "sigmoid", VM.SIGMOID_FP (0, 1);
+      "softplus", VM.SOFTPLUS_FP (0, 1);
       "silu", VM.SILU_FP (0, 1);
     ]
 

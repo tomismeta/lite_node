@@ -1132,6 +1132,31 @@ let fp64_silu_bits bits =
   | Some sigmoid -> Inference_fp64.mul bits sigmoid
   | None -> None
 
+let fp64_log1p_nonnegative_bits bits =
+  match Inference_fp64.compare bits 0L with
+  | Some cmp when cmp >= 0 ->
+    let input = Int64.float_of_bits bits in
+    let output = log1p input in
+    if finite_fp64 input && finite_fp64 output then
+      Some (Int64.bits_of_float output)
+    else None
+  | _ -> None
+
+let fp64_softplus_bits bits =
+  match Inference_fp64.compare bits 0L with
+  | Some cmp when cmp > 0 ->
+    (match fp64_exp_nonpositive_bits (Inference_fp64.negate bits) with
+     | Some exp_bits ->
+       (match fp64_log1p_nonnegative_bits exp_bits with
+        | Some tail_bits -> Inference_fp64.add bits tail_bits
+        | None -> None)
+     | None -> None)
+  | Some _ ->
+    (match fp64_exp_nonpositive_bits bits with
+     | Some exp_bits -> fp64_log1p_nonnegative_bits exp_bits
+     | None -> None)
+  | None -> None
+
 let gated_delta_rule_effort timesteps v_heads value_dim key_dim =
   let scale_product factors scale =
     match Cost.product factors with
@@ -2486,8 +2511,7 @@ let exec_one st op =
   | SOFTPLUS_FP (rs_addr, rs_n) ->
     (match read_int st rs_addr, read_int st rs_n with
      | Some addr, Some n ->
-       map_fp64_inplace st addr n (fun x ->
-         if x > 0.0 then x +. log1p (exp (-. x)) else log1p (exp x))
+       map_fp64_bits_inplace st addr n fp64_softplus_bits
      | _ -> revert st)
   | CAUSAL_DEPTHWISE_CONV1D_FP
       (rs_dst, rs_input, rs_kernel, rs_t, rs_c, rs_w) ->

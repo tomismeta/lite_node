@@ -327,7 +327,9 @@ let local_semantics ~opcode =
   | "SOFTPLUS_FP" ->
     [
       "input cells are finite binary64 values and are updated in place";
-      "positive inputs use x + log1p(exp(-x)) and other inputs use log1p(exp(x))";
+      "positive inputs use exp(-x) and other inputs use exp(x), so native exp only sees finite nonpositive inputs";
+      "log1p receives finite nonnegative inputs produced by the exp branch";
+      "positive-branch x + log1p(exp(-x)) uses deterministic finite binary64 addition";
       "outputs are written only after the complete finite output vector is computed";
     ]
   | "SILU_FP" ->
@@ -461,8 +463,10 @@ let consensus_obligations ~opcode =
     ]
   | "SOFTPLUS_FP" ->
     [
-      "replace or qualify native binary64 exp, log1p, addition, and branch behavior";
-      "pin positive/negative branch boundary, signed-zero, subnormal, overflow, and non-finite behavior";
+      "replace or qualify native binary64 exp and log1p";
+      "pin deterministic positive/nonpositive branch boundary and nonpositive exp-domain gate";
+      "qualify deterministic binary64 positive-branch addition";
+      "pin signed-zero, subnormal, overflow, and non-finite behavior";
       "define in-place writeback atomicity and effort";
       "pass independent cross-platform conformance for softplus edge vectors";
     ]
@@ -613,7 +617,7 @@ let consensus_blocker_codes ~opcode =
       "fp64_comparison_conformance";
       "host_fp_exp";
       "host_fp_log1p";
-      "host_fp_add";
+      "fp64_add_conformance";
       "activation_branch_policy";
       "signed_zero_subnormal_policy";
       "finite_overflow_policy";
@@ -745,7 +749,7 @@ let arithmetic_domain ~profile ~opcode =
   | "host-fp-local-candidate", "SIGMOID_FP" ->
     "deterministic-binary64-sigmoid-nonpositive-exp-gate-host-exp"
   | "host-fp-local-candidate", "SOFTPLUS_FP" ->
-    "native-binary64-softplus-host-exp-log1p"
+    "deterministic-binary64-softplus-nonpositive-exp-gate-host-exp-log1p"
   | "host-fp-local-candidate", "SILU_FP" ->
     "deterministic-binary64-silu-nonpositive-exp-gate-host-exp"
   | "host-fp-local-candidate", "ARGMAX_FP" ->
@@ -770,6 +774,7 @@ let rounding_mode ~profile ~opcode =
       ( "SOFTMAX_FP"
       | "GATED_DELTA_RULE_FP"
       | "SIGMOID_FP"
+      | "SOFTPLUS_FP"
       | "SILU_FP"
       | "ELEMWISE_MUL_FP"
       | "RESIDUAL_ADD_FP" ) ) ->
@@ -850,10 +855,12 @@ let operation_sequence ~opcode =
   | "SOFTPLUS_FP" ->
     [
       "snapshot_input";
-      "select_positive_or_nonpositive_branch_host_compare";
+      "select_positive_or_nonpositive_branch_deterministic";
+      "check_exp_input_nonpositive_deterministic";
       "compute_exp_host";
+      "check_log1p_input_nonnegative_deterministic";
       "compute_log1p_host";
-      "add_positive_branch_host";
+      "add_positive_branch_tail_deterministic";
       "finite_output_check";
       "atomic_output_writeback";
     ]
@@ -964,7 +971,8 @@ let edge_value_policy ~opcode =
   | "SOFTPLUS_FP" ->
     [
       "reject_missing_or_nonfinite_operands";
-      "positive_branch_boundary_is_host_greater_than_zero";
+      "native_exp_input_must_be_finite_and_nonpositive";
+      "native_log1p_input_must_be_finite_and_nonnegative";
       "reject_nonfinite_output";
       "preserve_destination_on_reject";
     ]
