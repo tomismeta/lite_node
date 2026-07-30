@@ -181,6 +181,7 @@ let profile_status_counts values =
 let consensus_ready_gate ~profile_gate_count ~unprofiled_count status_counts =
   let ready =
     profile_gate_count > 0
+    && Profile.classified_gate_count status_counts = profile_gate_count
     && unprofiled_count = 0
     && Profile.status_counts_are_consensus_ready status_counts
   in
@@ -205,6 +206,7 @@ let consensus_ready_required_passes ~profile_gate_count ~unprofiled_count status
   (not !require_consensus_ready)
   ||
   (profile_gate_count > 0
+   && Profile.classified_gate_count status_counts = profile_gate_count
    && unprofiled_count = 0
    && Profile.status_counts_are_consensus_ready status_counts)
 
@@ -1138,6 +1140,9 @@ let run_p0_plus_pack path =
       results
   in
   let status_counts = Profile.status_counts_of_json_gates profile_gates in
+  let classified_profile_gate_count =
+    Profile.classified_gate_count status_counts
+  in
   let accepted =
     execution_accepted
     &&
@@ -1157,6 +1162,7 @@ let run_p0_plus_pack path =
     "rejected_count",
     `Int (List.length (List.filter (fun (ok, _) -> not ok) results));
     "profile_gate_count", `Int profile_gate_count;
+    "classified_profile_gate_count", `Int classified_profile_gate_count;
     "profile_consensus_status_counts",
     Profile.status_counts_json status_counts;
     "consensus_ready_gate",
@@ -1194,6 +1200,9 @@ let run_index path =
   let status_counts =
     profile_status_counts (List.map snd results)
   in
+  let classified_profile_gate_count =
+    Profile.classified_gate_count status_counts
+  in
   let unprofiled_count = List.length results - profile_gate_count in
   let accepted =
     execution_accepted
@@ -1212,6 +1221,7 @@ let run_index path =
     "template_index", `String path;
     "template_count", `Int (List.length results);
     "profile_gate_count", `Int profile_gate_count;
+    "classified_profile_gate_count", `Int classified_profile_gate_count;
     "unprofiled_template_count", `Int unprofiled_count;
     "profile_consensus_status_counts",
     Profile.status_counts_json status_counts;

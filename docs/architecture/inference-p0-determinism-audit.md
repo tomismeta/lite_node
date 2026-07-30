@@ -100,9 +100,10 @@ The first accepted producer indexes are:
 These indexes currently execute all five positive P0 templates and match every
 declared output span. The saved LiteNode reports live beside the indexes as
 `litenode-positive-execution-report.cjson`.
-Positive execution reports also include `profile_gate_count` and
-`unprofiled_template_count` so an accepted VM run can be audited for profile
-coverage without walking every per-template result. They also include
+Positive execution reports also include `profile_gate_count`,
+`classified_profile_gate_count`, and `unprofiled_template_count` so an
+accepted VM run can be audited for profile coverage without walking every
+per-template result. They also include
 `profile_consensus_status_counts`, which should remain `local_only` for the
 current host-FP P0 math until a deterministic runtime profile lands.
 Passing `--require-consensus-ready` turns that diagnostic boundary into a hard
@@ -246,14 +247,16 @@ profile_gate.consensus_blocker_codes
 ```
 
 Checker reports also include `profile_gate_count` and
-`unprofiled_template_count` so producer indexes, single templates, and template
-directories can be audited without parsing every template body. The companion
+`classified_profile_gate_count` plus `unprofiled_template_count` so producer
+indexes, single templates, and template directories can be audited without
+parsing every template body. The companion
 `profile_consensus_status_counts` object summarizes how many present profile
 gates are `local_only`, `consensus_candidate`, `consensus_ready`, or unknown.
 Unknown covers malformed gates or unrecognized `consensus_status` values.
 Passing `--require-consensus-ready` rejects any report with unprofiled,
-`local_only`, `consensus_candidate`, or unknown profile gates. Rejection reasons
-are emitted as stable strings in `consensus_ready_gate.blockers`.
+unclassified, `local_only`, `consensus_candidate`, or unknown profile gates.
+Rejection reasons are emitted as stable strings in
+`consensus_ready_gate.blockers`.
 `schema_status` remains the producer/template shape result in both normal and
 strict mode; top-level `status` additionally includes the active readiness gate.
 `consensus_blocker_codes` is the stable, machine-readable list of primitive
@@ -419,12 +422,12 @@ attention math, indexed RoPE, argmax tie behavior, and the final logits-tail
 composition. `ARGMAX_FP` only returns the selected index, so producer top-k
 ordering manifests are preserved as `producer_only` evidence. The explicit
 P0-plus runner now reports per-fixture `profile_gates` plus an aggregate
-`profile_gate_count`; the composite logits-tail case reports the component
-profiles for `RMSNORM_FP_EPS`, `LINEAR_Q1_G128_FP`, and `ARGMAX_FP`. Its
-`profile_consensus_status_counts` should also remain `local_only` for the
-current host-FP pack. Like P0 execution reports, `execution_status` is the VM
-output result and top-level `status` includes any strict consensus-readiness
-gate. The explicit top-k boundary is:
+`profile_gate_count` and `classified_profile_gate_count`; the composite
+logits-tail case reports the component profiles for `RMSNORM_FP_EPS`,
+`LINEAR_Q1_G128_FP`, and `ARGMAX_FP`. Its `profile_consensus_status_counts`
+should also remain `local_only` for the current host-FP pack. Like P0 execution
+reports, `execution_status` is the VM output result and top-level `status`
+includes any strict consensus-readiness gate. The explicit top-k boundary is:
 
 LiteNode now reports `ARGMAX_FP` under the current `host-fp-local-candidate`
 runtime profile. Its local semantics are finite binary64 input reads,

@@ -73,6 +73,12 @@ let add_gate_status counts gate =
 let status_counts_of_json_gates gates =
   List.fold_left add_gate_status empty_status_counts gates
 
+let classified_gate_count counts =
+  counts.local_only
+  + counts.consensus_candidate
+  + counts.consensus_ready
+  + counts.unknown
+
 let status_counts_are_consensus_ready counts =
   counts.consensus_ready > 0
   && counts.local_only = 0
@@ -83,7 +89,11 @@ let add_if condition value values =
   if condition then value :: values else values
 
 let consensus_ready_blockers ~profile_gate_count ~unprofiled_count counts =
+  let classified_count = classified_gate_count counts in
   []
+  |> add_if
+       (classified_count <> profile_gate_count)
+       "unclassified_profile_gates"
   |> add_if (counts.unknown > 0) "unknown_profile_gates"
   |> add_if (counts.consensus_candidate > 0) "consensus_candidate_profile_gates"
   |> add_if (counts.local_only > 0) "local_only_profile_gates"

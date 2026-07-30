@@ -244,6 +244,7 @@ let check_profile_status_counts () =
   in
   (match Profile.status_counts_json counts with
    | `Assoc fields ->
+     check "classified count" (Profile.classified_gate_count counts = 6);
      check "local-only count" (int_value "local_only" fields = 2);
      check "candidate count" (int_value "consensus_candidate" fields = 1);
      check "ready count" (int_value "consensus_ready" fields = 1);
@@ -255,7 +256,7 @@ let check_profile_status_counts () =
        "mixed consensus-ready blockers"
        (list_equal
           (Profile.consensus_ready_blockers
-             ~profile_gate_count:5
+             ~profile_gate_count:6
              ~unprofiled_count:2
              counts)
           [
@@ -278,6 +279,13 @@ let check_profile_status_counts () =
           ~unprofiled_count:0
           ready_counts
         = []);
+     check
+       "unclassified gate blocker"
+       (Profile.consensus_ready_blockers
+          ~profile_gate_count:2
+          ~unprofiled_count:0
+          ready_counts
+        = ["unclassified_profile_gates"]);
      check
        "empty counts are not consensus-ready"
        (not

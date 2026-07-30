@@ -192,6 +192,7 @@ let profile_status_counts values =
 let consensus_ready_gate ~profile_gate_count ~unprofiled_count status_counts =
   let ready =
     profile_gate_count > 0
+    && Profile.classified_gate_count status_counts = profile_gate_count
     && unprofiled_count = 0
     && Profile.status_counts_are_consensus_ready status_counts
   in
@@ -216,6 +217,7 @@ let consensus_ready_required_passes ~profile_gate_count ~unprofiled_count status
   (not !require_consensus_ready)
   ||
   (profile_gate_count > 0
+   && Profile.classified_gate_count status_counts = profile_gate_count
    && unprofiled_count = 0
    && Profile.status_counts_are_consensus_ready status_counts)
 
@@ -651,6 +653,9 @@ let producer_index_report index_path =
       List.length templates - profile_gate_count
     in
     let profile_status_counts = profile_status_counts profile_gates in
+    let classified_profile_gate_count =
+      Profile.classified_gate_count profile_status_counts
+    in
     let missing =
       Template.p0_opcodes
       |> List.filter
@@ -690,6 +695,7 @@ let producer_index_report index_path =
       `List (List.map (fun opcode -> `String opcode) Template.p0_opcodes);
       "profile_gates", `List profile_gates;
       "profile_gate_count", `Int profile_gate_count;
+      "classified_profile_gate_count", `Int classified_profile_gate_count;
       "unprofiled_template_count", `Int unprofiled_template_count;
       "profile_consensus_status_counts",
       Profile.status_counts_json profile_status_counts;
@@ -741,6 +747,9 @@ let () =
             if profile_gate_present template_json then 1 else 0
           in
           let profile_status_counts = profile_status_counts [template_json] in
+          let classified_profile_gate_count =
+            Profile.classified_gate_count profile_status_counts
+          in
           let schema_status = "accepted" in
           let status =
             if
@@ -758,6 +767,8 @@ let () =
               "diagnostic_only", `Bool true;
               "template_count", `Int 1;
               "profile_gate_count", `Int profile_gate_count;
+              "classified_profile_gate_count",
+              `Int classified_profile_gate_count;
               "unprofiled_template_count", `Int (1 - profile_gate_count);
               "profile_consensus_status_counts",
               Profile.status_counts_json profile_status_counts;
@@ -785,6 +796,9 @@ let () =
       List.map (fun checked -> Template.to_json checked.template) templates
     in
     let status_counts = profile_status_counts template_jsons in
+    let classified_profile_gate_count =
+      Profile.classified_gate_count status_counts
+    in
     let unprofiled_count = List.length templates - profile_gate_count in
     let schema_status = "accepted" in
     let status =
@@ -803,6 +817,7 @@ let () =
         "diagnostic_only", `Bool true;
         "template_count", `Int (List.length templates);
         "profile_gate_count", `Int profile_gate_count;
+        "classified_profile_gate_count", `Int classified_profile_gate_count;
         "unprofiled_template_count", `Int unprofiled_count;
         "profile_consensus_status_counts",
         Profile.status_counts_json status_counts;
