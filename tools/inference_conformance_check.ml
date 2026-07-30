@@ -475,7 +475,22 @@ let profile_gate_entry path opcode fields =
       ])
   | Error _ -> None
 
-let producer_template_issues path opcode json =
+let template_identity_issues path opcode primitive fields =
+  let opcode_issues =
+    match string_field "opcode" fields with
+    | Some value when not (String.equal value opcode) ->
+      [issue ~opcode path ("template opcode mismatch: " ^ value)]
+    | _ -> []
+  in
+  let primitive_issues =
+    match primitive, string_field "primitive" fields with
+    | Some expected, Some value when not (String.equal value expected) ->
+      [issue ~opcode path ("template primitive mismatch: " ^ value)]
+    | _ -> []
+  in
+  opcode_issues @ primitive_issues
+
+let producer_template_issues path opcode primitive json =
   match json with
   | `Assoc fields ->
     let type_issue =
@@ -507,6 +522,7 @@ let producer_template_issues path opcode json =
       vm @ numerical @ effort
     in
     type_issue
+    @ template_identity_issues path opcode primitive fields
     @ root_issues
     @ profile_issues path opcode fields
     @ issues_for_program_effects path opcode fields
@@ -530,6 +546,7 @@ let producer_index_report index_path =
         (function
           | `Assoc entry_fields ->
             let opcode = string_field "opcode" entry_fields in
+            let primitive = string_field "primitive" entry_fields in
             let template_path = string_field "vm_execution_template" entry_fields in
             let path_issues =
               match template_path with
@@ -551,7 +568,7 @@ let producer_index_report index_path =
                      match opcode with Some value -> value | None -> "<unknown>"
                    in
                    let issues =
-                     producer_template_issues resolved opcode_value json
+                     producer_template_issues resolved opcode_value primitive json
                    in
                    let profile_gate =
                      match opcode, json with
