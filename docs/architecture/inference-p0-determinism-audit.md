@@ -58,7 +58,9 @@ The current branch already has useful controls:
 - fixed loop order in the OCaml implementation;
 - finite-output checks for the P0 primitives;
 - aliasing and span checks in the major writeback paths;
-- failure-path tests for individual primitives; and
+- failure-path tests for individual primitives, including gated-delta output
+  and next-state rollback on missing input, nonfinite decay, invalid shape,
+  insufficient effort, and product overflow; and
 - an ingestion checker for the producer-side determinism corpus.
 
 These are necessary controls. They are not sufficient for consensus

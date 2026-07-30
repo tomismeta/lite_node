@@ -384,6 +384,30 @@ let output_cells fixture =
 let state_cells fixture =
   fixture.dims.v_heads * fixture.dims.value_dim * fixture.dims.key_dim
 
+let set_result_sentinel state fixture =
+  for index = 0 to output_cells fixture - 1 do
+    set_f64_bits state (100 + index)
+      (Int64.bits_of_float (42.0 +. float_of_int index))
+  done;
+  for index = 0 to state_cells fixture - 1 do
+    set_f64_bits state (200 + index)
+      (Int64.bits_of_float (77.0 +. float_of_int index))
+  done
+
+let check_result_sentinel label state fixture =
+  for index = 0 to output_cells fixture - 1 do
+    check
+      (label ^ " keeps output " ^ string_of_int index)
+      (f64_bits state (100 + index)
+       = Int64.bits_of_float (42.0 +. float_of_int index))
+  done;
+  for index = 0 to state_cells fixture - 1 do
+    check
+      (label ^ " keeps next state " ^ string_of_int index)
+      (f64_bits state (200 + index)
+       = Int64.bits_of_float (77.0 +. float_of_int index))
+  done
+
 let dynamic_effort dims =
   let inner = dims.timesteps * dims.v_heads * dims.value_dim * dims.key_dim in
   let rows = dims.timesteps * dims.v_heads * dims.value_dim in
@@ -494,43 +518,42 @@ let check_alias_rejections () =
 let check_missing_and_nonfinite_reverts () =
   let fixture = zero_state_one_timestep in
   let state = make_state fixture in
-  set_f64_bits state 100 (Int64.bits_of_float 42.0);
+  set_result_sentinel state fixture;
   Hashtbl.remove state.VM.memory.data 300;
   check "missing q rejects" (not (VM.run state code));
-  check "missing q keeps output" (f64_bits state 100 = Int64.bits_of_float 42.0);
+  check_result_sentinel "missing q" state fixture;
   let state = make_state fixture in
-  set_f64_bits state 100 (Int64.bits_of_float 42.0);
+  set_result_sentinel state fixture;
   set_f64_bits state 600 0x7ff0000000000000L;
   check "nonfinite log decay rejects" (not (VM.run state code));
-  check "nonfinite log decay keeps output" (f64_bits state 100 = Int64.bits_of_float 42.0);
+  check_result_sentinel "nonfinite log decay" state fixture;
   let state = make_state fixture in
-  set_f64_bits state 100 (Int64.bits_of_float 42.0);
+  set_result_sentinel state fixture;
   set_f64_bits state 600 (Int64.bits_of_float 1000.0);
   check "nonfinite decay result rejects" (not (VM.run state code));
-  check "nonfinite decay result keeps output"
-    (f64_bits state 100 = Int64.bits_of_float 42.0)
+  check_result_sentinel "nonfinite decay result" state fixture
 
 let check_invalid_shape_and_effort_revert () =
   let fixture = zero_state_one_timestep in
   let state = make_state fixture in
-  set_f64_bits state 100 (Int64.bits_of_float 42.0);
+  set_result_sentinel state fixture;
   set_int_reg state 8 0;
   check "zero timesteps rejects" (not (VM.run state code));
-  check "zero timesteps keeps output" (f64_bits state 100 = Int64.bits_of_float 42.0);
+  check_result_sentinel "zero timesteps" state fixture;
   let exact_limit = 200 + dynamic_effort fixture.dims in
   let state = make_state ~limit:(exact_limit - 1) fixture in
-  set_f64_bits state 100 (Int64.bits_of_float 42.0);
+  set_result_sentinel state fixture;
   check "one-under effort rejects" (not (VM.run state op_only));
-  check "one-under effort keeps output" (f64_bits state 100 = Int64.bits_of_float 42.0);
+  check_result_sentinel "one-under effort" state fixture;
   let state = make_state ~limit:exact_limit fixture in
   check "exact effort succeeds" (VM.run state op_only);
   check_cells "exact effort output" state 100 (fixture_bits fixture.expected_output);
   let state = make_state fixture in
-  set_f64_bits state 100 (Int64.bits_of_float 42.0);
+  set_result_sentinel state fixture;
   set_int_reg state 8 max_int;
   set_int_reg state 11 max_int;
   check "product overflow rejects" (not (VM.run state code));
-  check "product overflow keeps output" (f64_bits state 100 = Int64.bits_of_float 42.0);
+  check_result_sentinel "product overflow" state fixture;
   let state = make_state fixture in
   set_f64_bits state 100 (Int64.bits_of_float 42.0);
   set_int_reg state 0 max_int;
