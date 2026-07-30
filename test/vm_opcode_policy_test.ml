@@ -34,7 +34,9 @@ let check_host_float label expected_name op =
   check (label ^ ": program-only")
     (Policy.program_only_opcode op = None);
   check (label ^ ": uses host float")
-    (Policy.uses_host_float op)
+    (Policy.uses_host_float op);
+  check (label ^ ": uses host float math")
+    (Policy.uses_host_float_math op)
 
 let check_program_only label expected_name op =
   check_info label Policy.Program_only expected_name op;
@@ -52,7 +54,9 @@ let check_profiled label expected_name op =
   check (label ^ ": program-only")
     (Policy.program_only_opcode op = None);
   check (label ^ ": unsafe")
-    (Policy.uses_host_float op)
+    (Policy.uses_host_float op);
+  check (label ^ ": not host-float math")
+    (not (Policy.uses_host_float_math op))
 
 let check_legacy_and_program label expected_name op =
   check_info label Policy.Legacy_and_program expected_name op;

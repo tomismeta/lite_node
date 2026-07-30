@@ -290,6 +290,9 @@ capability semantics, and effort schedules.
    `host_float_opcode` both identifies a numerical implementation and drives
    consensus rejection. Future exact and bounded FP profiles need separate
    numerical facts while retaining current admission behavior by default.
+   Inference byte ingress now uses `byte-ingress-exact` plus
+   `uses_host_float_math = false`; the broad rejection path is preserved while
+   transport is no longer mislabeled as arithmetic.
 
 10. **Text assembly is not round-trip complete.**
     The renderer emits legacy, unclassified Q16, and FP instructions that the

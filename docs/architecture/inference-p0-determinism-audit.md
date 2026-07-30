@@ -261,7 +261,9 @@ math under the `byte-ingress-exact` profile. They specify little-endian finite
 f32/f64 byte materialization from rooted source bytes into VM memory, including
 offset/count bounds, non-finite rejection, FLOAD-authenticated range binding,
 and decode atomicity. They are transport surfaces for model/session data, not
-arithmetic-kernel determinism claims.
+arithmetic-kernel determinism claims. Opcode policy keeps them under the broad
+consensus-unsafe program gate, but `uses_host_float_math` now distinguishes
+them from native floating-point arithmetic kernels.
 
 Initial P0 focus:
 

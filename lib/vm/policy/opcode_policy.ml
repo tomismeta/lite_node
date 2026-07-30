@@ -334,6 +334,11 @@ let program_only_opcode op =
 let uses_host_float op =
   Option.is_some (host_float_opcode op)
 
+let uses_host_float_math = function
+  | VM.LOAD_F32_LE_FP _
+  | VM.LOAD_F64_LE_FP _ -> false
+  | op -> uses_host_float op
+
 let first_host_float code =
   let hit = ref None in
   Array.iteri
