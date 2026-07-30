@@ -251,6 +251,11 @@ but execution reports attach the opcode's current runtime profile as an implicit
 diagnostic `profile_gate`. Any declared profile is still enforced before
 execution.
 
+LiteNode now also has an opcode-policy regression guard for the inference
+surface: every admitted inference-specialized opcode must either report a
+runtime numerical/ingress profile or be explicitly classified as a non-profile
+boundary such as `FLOAD` range binding or the still-experimental Q16 lane.
+
 `LOAD_F32_LE_FP` and `LOAD_F64_LE_FP` are intentionally separated from host-FP
 math under the `byte-ingress-exact` profile. They specify little-endian finite
 f32/f64 byte materialization from rooted source bytes into VM memory, including

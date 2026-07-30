@@ -14,7 +14,10 @@ Include at startup:
 
 
 module VM = Octra_vm.Contract_vm
+module Inference_policy = Octra_vm.Inference_opcode_policy
 module Policy = Octra_vm.Opcode_policy
+module Profile = Octra_vm.Inference_numerical_profile
+module Req = Octra_vm.Execution_requirement
 
 let check label condition =
   if not condition then failwith label
@@ -126,6 +129,7 @@ let legacy_and_program_cases = [
   ("stop", "STOP", VM.STOP);
   ("add", "ADD", VM.ADD (0, 1, 2));
   ("storage-read", "SLOAD", VM.SLOAD (0, "k"));
+  ("fload", "FLOAD", VM.FLOAD (0, 1));
   ("fhe", "FHE_ADD", VM.FHE_ADD (0, 1, 2, 3));
   ("blob-bytes", "LOAD_INT8_BYTES_TO_MEM",
    VM.LOAD_INT8_BYTES_TO_MEM (0, 1, 2, 3, 4));
@@ -134,6 +138,69 @@ let legacy_and_program_cases = [
   ("matmul-q16-outlier", "MATMUL_Q16", VM.MATMUL_Q16 (0, 1, 2, 3, 4, 5));
   ("shift-round-outlier", "SHIFT_ROUND_INPLACE", VM.SHIFT_ROUND_INPLACE (0, 1, 2));
 ]
+
+let capability name =
+  Req.{ name; root = String.make 64 'a' }
+
+let inference_requirement =
+  Req.{
+    vm_semantics_root = String.make 64 'b';
+    numerical_root = String.make 64 'c';
+    effort_root = String.make 64 'd';
+    capabilities =
+      List.map
+        capability
+        [
+          "storage.authenticated-range";
+          "tensor.fixed";
+          "tensor.q1-g128";
+          "tensor.strict-fp";
+          "tensor.argmax";
+          "tensor.rope-indexed";
+          "tensor.attention";
+          "sequence.causal-convolution";
+          "sequence.delta-rule";
+        ];
+    limits = {
+      max_model_bytes = 1;
+      max_view_bytes = 1;
+      max_session_bytes = 1;
+      max_scratch_bytes = 1;
+      max_output_bytes = 1;
+      max_advance_effort = 1;
+    };
+  }
+
+let explicit_non_profile_boundary opcode =
+  String.equal opcode "FLOAD"
+  ||
+  List.exists
+    (fun (_, name, _) -> String.equal name opcode)
+    program_only_cases
+
+let profile_boundary_cases =
+  host_float_cases
+  @ profiled_cases
+  @ program_only_cases
+  @ ["fload", "FLOAD", VM.FLOAD (0, 1)]
+
+let check_admitted_inference_profile_boundary () =
+  List.iter
+    (fun (_, opcode, op) ->
+      match
+        Inference_policy.violations
+          ~requirement:inference_requirement
+          [|op|]
+      with
+      | [] ->
+        (match Profile.current_runtime_profile ~opcode with
+         | Some _ -> ()
+         | None when explicit_non_profile_boundary opcode -> ()
+         | None ->
+           failwith
+             ("admitted inference opcode lacks profile boundary: " ^ opcode))
+      | _ -> ())
+    profile_boundary_cases
 
 let check_legacy_error () =
   let code = [|
@@ -177,4 +244,5 @@ let () =
       check_legacy_and_program label expected_name op)
     legacy_and_program_cases;
   check_legacy_error ();
-  check_first_host_float ()
+  check_first_host_float ();
+  check_admitted_inference_profile_boundary ()
