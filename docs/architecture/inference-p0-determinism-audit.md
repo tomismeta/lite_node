@@ -57,6 +57,8 @@ The current branch already has useful controls:
 - conformance templates reject unknown or over-claimed numerical profiles;
 - fixed loop order in the OCaml implementation;
 - finite-output checks for the P0 primitives;
+- L2Norm accepts the current host-FP minimum-positive-subnormal epsilon path
+  over signed-zero/subnormal inputs;
 - aliasing and span checks in the major writeback paths;
 - failure-path tests for individual primitives, including gated-delta output
   and next-state rollback on missing input, nonfinite decay, invalid shape,

@@ -450,6 +450,14 @@ let l2_single_model_epsilon = {
   l2_expected = l2_single_expected_model_epsilon;
 }
 
+let l2_min_subnormal_epsilon = {
+  l2_name = "l2 minimum subnormal epsilon";
+  l2_count = 4;
+  l2_epsilon_bits = 1L;
+  l2_input = min_subnormal_epsilon_input;
+  l2_expected = min_subnormal_epsilon_expected;
+}
+
 let l2_op =
   VM.L2NORM_FP (0, 1, 2)
 
@@ -483,6 +491,15 @@ let check_l2_golden () =
     state
     100
     (fixture_bits l2_single_model_epsilon.l2_expected)
+
+let check_l2_min_subnormal_epsilon () =
+  let state = make_l2_state l2_min_subnormal_epsilon in
+  check "l2 minimum subnormal epsilon succeeds" (VM.run state l2_code);
+  check_cells
+    l2_min_subnormal_epsilon.l2_name
+    state
+    100
+    (fixture_bits l2_min_subnormal_epsilon.l2_expected)
 
 let check_l2_row_composition () =
   let state =
@@ -982,6 +999,7 @@ let () =
   check_rms_overflow_reverts ();
   check_rms_strict_operands ();
   check_l2_golden ();
+  check_l2_min_subnormal_epsilon ();
   check_l2_row_composition ();
   check_l2_missing_nonfinite_and_invalid_epsilon ();
   check_l2_invalid_shape_and_effort ();
