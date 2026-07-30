@@ -1402,8 +1402,15 @@ let root_binding_json ~numerical_profile_root profile_gate =
     | Some _ -> "unbound"
     | None -> "unavailable"
   in
+  let classification =
+    match profile_root with
+    | Some root when String.equal root numerical_profile_root -> "none"
+    | Some _ -> "profile_root_mismatch"
+    | None -> "profile_root_unavailable"
+  in
   `Assoc [
     "status", `String status;
+    "classification", `String classification;
     "numerical_profile_root", `String numerical_profile_root;
     "profile_root",
     (match profile_root with
@@ -1414,6 +1421,7 @@ let root_binding_json ~numerical_profile_root profile_gate =
 let unavailable_root_binding_json =
   `Assoc [
     "status", `String "unavailable";
+    "classification", `String "profile_root_unavailable";
     "numerical_profile_root", `Null;
     "profile_root", `Null;
   ]

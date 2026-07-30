@@ -367,14 +367,32 @@ let check_profile_root_binding_counts () =
   | Ok profile ->
     let gate = Profile.to_json_for_opcode ~opcode:"RMSNORM_FP_EPS" profile in
     let root = Profile.root_for_opcode ~opcode:"RMSNORM_FP_EPS" profile in
+    let matched =
+      Profile.root_binding_json ~numerical_profile_root:root gate
+    in
+    let unbound =
+      Profile.root_binding_json ~numerical_profile_root:(hex_root 'e') gate
+    in
+    let unavailable = Profile.unavailable_root_binding_json in
     let counts =
       Profile.root_binding_counts_of_json
-        [
-          Profile.root_binding_json ~numerical_profile_root:root gate;
-          Profile.root_binding_json ~numerical_profile_root:(hex_root 'e') gate;
-          Profile.unavailable_root_binding_json;
-        ]
+        [matched; unbound; unavailable]
     in
+    let classification = function
+      | `Assoc fields -> string_value "classification" fields
+      | _ -> failwith "root binding json must be object"
+    in
+    check
+      "matched root classification"
+      (String.equal (classification matched) "none");
+    check
+      "unbound root classification"
+      (String.equal (classification unbound) "profile_root_mismatch");
+    check
+      "unavailable root classification"
+      (String.equal
+         (classification unavailable)
+         "profile_root_unavailable");
     (match Profile.root_binding_counts_json counts with
      | `Assoc fields ->
        check "matched root count" (int_value "matched" fields = 1);

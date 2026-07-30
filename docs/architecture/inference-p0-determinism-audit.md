@@ -297,6 +297,9 @@ still validate `numerical_profile_root` syntactically; profile-root equality is
 diagnostic in default mode and enforced only by `--require-consensus-ready`.
 Template and P0 execution reports expose that diagnostic as
 `profile_root_binding.status`: `matched`, `unbound`, or `unavailable`.
+They also expose `profile_root_binding.classification`, where `none` means the
+root is bound, `profile_root_mismatch` means the producer supplied a different
+numerical root, and `profile_root_unavailable` means the gate root was missing.
 
 `local_semantics` records what the current VM does today.
 `consensus_obligations` records what must become protocol-owned before the
