@@ -47,4 +47,5 @@ val validate_for_opcode : opcode:string -> profile:string -> (t, error) result
 val to_json : t -> Yojson.Safe.t
 val to_json_for_opcode : opcode:string -> t -> Yojson.Safe.t
 val status_counts_of_json_gates : Yojson.Safe.t list -> status_counts
+val status_counts_are_consensus_ready : status_counts -> bool
 val status_counts_json : status_counts -> Yojson.Safe.t

@@ -19,6 +19,7 @@ let template_index = ref None
 let p0_plus_pack = ref None
 let strict_effort = ref false
 let include_failures = ref false
+let require_consensus_ready = ref false
 
 let fail message =
   prerr_endline message;
@@ -37,12 +38,15 @@ let args = [
   "--include-failures",
   Arg.Set include_failures,
   "execute definitive failure/atomicity cases where the direct VM runner can";
+  "--require-consensus-ready",
+  Arg.Set require_consensus_ready,
+  "reject reports whose profile gates are not all consensus_ready";
 ]
 
 let usage =
   "inference_conformance_run --template-index <path> [--strict-effort] \
-   [--include-failures]\n\
-   or inference_conformance_run --p0-plus-pack <path>"
+   [--include-failures] [--require-consensus-ready]\n\
+   or inference_conformance_run --p0-plus-pack <path> [--require-consensus-ready]"
 
 let read_file path =
   let input = open_in_bin path in
@@ -173,6 +177,28 @@ let profile_status_counts values =
   values
   |> List.filter_map profile_gate_value
   |> Profile.status_counts_of_json_gates
+
+let consensus_ready_gate ~profile_gate_count ~unprofiled_count status_counts =
+  let ready =
+    profile_gate_count > 0
+    && unprofiled_count = 0
+    && Profile.status_counts_are_consensus_ready status_counts
+  in
+  `Assoc [
+    "required", `Bool !require_consensus_ready;
+    "status",
+    `String
+      (if not !require_consensus_ready then "not_required"
+       else if ready then "accepted"
+       else "rejected");
+  ]
+
+let consensus_ready_required_passes ~profile_gate_count ~unprofiled_count status_counts =
+  (not !require_consensus_ready)
+  ||
+  (profile_gate_count > 0
+   && unprofiled_count = 0
+   && Profile.status_counts_are_consensus_ready status_counts)
 
 let result_profile_gate_count result =
   if profile_gate_present result then 1 else 0
@@ -1101,6 +1127,14 @@ let run_p0_plus_pack path =
       results
   in
   let status_counts = Profile.status_counts_of_json_gates profile_gates in
+  let accepted =
+    accepted
+    &&
+    consensus_ready_required_passes
+      ~profile_gate_count
+      ~unprofiled_count:0
+      status_counts
+  in
   `Assoc [
     "status", `String (if accepted then "accepted" else "rejected");
     "diagnostic_only", `Bool true;
@@ -1113,6 +1147,11 @@ let run_p0_plus_pack path =
     "profile_gate_count", `Int profile_gate_count;
     "profile_consensus_status_counts",
     Profile.status_counts_json status_counts;
+    "consensus_ready_gate",
+    consensus_ready_gate
+      ~profile_gate_count
+      ~unprofiled_count:0
+      status_counts;
     "results", `List (List.map snd results);
   ]
 
@@ -1131,7 +1170,6 @@ let run_index path =
   in
   let results = List.map (execute_template root_dir) entries in
   let accepted = List.for_all fst results in
-  let status = if accepted then "accepted" else "rejected" in
   let profile_gate_count =
     List.fold_left
       (fun count (_, result) -> count + result_profile_gate_count result)
@@ -1141,6 +1179,16 @@ let run_index path =
   let status_counts =
     profile_status_counts (List.map snd results)
   in
+  let unprofiled_count = List.length results - profile_gate_count in
+  let accepted =
+    accepted
+    &&
+    consensus_ready_required_passes
+      ~profile_gate_count
+      ~unprofiled_count
+      status_counts
+  in
+  let status = if accepted then "accepted" else "rejected" in
   `Assoc [
     "status", `String status;
     "diagnostic_only", `Bool true;
@@ -1148,10 +1196,14 @@ let run_index path =
     "template_index", `String path;
     "template_count", `Int (List.length results);
     "profile_gate_count", `Int profile_gate_count;
-    "unprofiled_template_count",
-    `Int (List.length results - profile_gate_count);
+    "unprofiled_template_count", `Int unprofiled_count;
     "profile_consensus_status_counts",
     Profile.status_counts_json status_counts;
+    "consensus_ready_gate",
+    consensus_ready_gate
+      ~profile_gate_count
+      ~unprofiled_count
+      status_counts;
     "accepted_count",
     `Int (List.length (List.filter fst results));
     "rejected_count",

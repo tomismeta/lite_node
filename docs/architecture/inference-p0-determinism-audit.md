@@ -105,6 +105,8 @@ Positive execution reports also include `profile_gate_count` and
 coverage without walking every per-template result. They also include
 `profile_consensus_status_counts`, which should remain `local_only` for the
 current host-FP P0 math until a deterministic runtime profile lands.
+Passing `--require-consensus-ready` turns that diagnostic boundary into a hard
+gate; current host-FP artifacts are expected to reject under that flag.
 
 Failure/atomicity mode is available for definitive rejection cases:
 
@@ -244,6 +246,8 @@ Checker reports also include `profile_gate_count` and
 directories can be audited without parsing every template body. The companion
 `profile_consensus_status_counts` object summarizes how many present profile
 gates are `local_only`, `consensus_candidate`, `consensus_ready`, or unknown.
+Passing `--require-consensus-ready` rejects any report with unprofiled,
+`local_only`, `consensus_candidate`, or unknown profile gates.
 
 `local_semantics` records what the current VM does today.
 `consensus_obligations` records what must become protocol-owned before the

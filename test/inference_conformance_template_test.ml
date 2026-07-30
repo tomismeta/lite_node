@@ -230,7 +230,17 @@ let check_profile_status_counts () =
      check "local-only count" (int_value "local_only" fields = 2);
      check "candidate count" (int_value "consensus_candidate" fields = 1);
      check "ready count" (int_value "consensus_ready" fields = 1);
-     check "unknown count" (int_value "unknown" fields = 1)
+     check "unknown count" (int_value "unknown" fields = 1);
+     check
+       "mixed counts are not consensus-ready"
+       (not (Profile.status_counts_are_consensus_ready counts));
+     let ready_counts =
+       Profile.status_counts_of_json_gates
+         [`Assoc ["consensus_status", `String "consensus_ready"]]
+     in
+     check
+       "ready-only counts are consensus-ready"
+       (Profile.status_counts_are_consensus_ready ready_counts)
    | _ -> failwith "status counts json must be object")
 
 let check_p0_profile_gate_coverage () =

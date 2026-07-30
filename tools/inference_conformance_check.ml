@@ -18,6 +18,7 @@ module Profile = Octra_vm.Inference_numerical_profile
 let template_path = ref None
 let template_dir = ref None
 let template_index = ref None
+let require_consensus_ready = ref false
 
 let fail message =
   prerr_endline message;
@@ -33,12 +34,15 @@ let args = [
   "--template-index",
   Arg.String (fun value -> template_index := Some value),
   "producer template index json";
+  "--require-consensus-ready",
+  Arg.Set require_consensus_ready,
+  "reject reports whose profile gates are not all consensus_ready";
 ]
 
 let usage =
-  "inference_conformance_check --template <path>\n\
-   or inference_conformance_check --template-dir <dir>\n\
-   or inference_conformance_check --template-index <path>"
+  "inference_conformance_check --template <path> [--require-consensus-ready]\n\
+   or inference_conformance_check --template-dir <dir> [--require-consensus-ready]\n\
+   or inference_conformance_check --template-index <path> [--require-consensus-ready]"
 
 let read_json path =
   try Yojson.Safe.from_file path with
@@ -184,6 +188,28 @@ let profile_status_counts values =
   values
   |> List.filter_map profile_gate_value
   |> Profile.status_counts_of_json_gates
+
+let consensus_ready_gate ~profile_gate_count ~unprofiled_count status_counts =
+  let ready =
+    profile_gate_count > 0
+    && unprofiled_count = 0
+    && Profile.status_counts_are_consensus_ready status_counts
+  in
+  `Assoc [
+    "required", `Bool !require_consensus_ready;
+    "status",
+    `String
+      (if not !require_consensus_ready then "not_required"
+       else if ready then "accepted"
+       else "rejected");
+  ]
+
+let consensus_ready_required_passes ~profile_gate_count ~unprofiled_count status_counts =
+  (not !require_consensus_ready)
+  ||
+  (profile_gate_count > 0
+   && unprofiled_count = 0
+   && Profile.status_counts_are_consensus_ready status_counts)
 
 let template_profile_gate_present (checked : checked_template) =
   profile_gate_present (Template.to_json checked.template)
@@ -635,7 +661,16 @@ let producer_index_report index_path =
       @ missing
       @ duplicates
     in
-    let status = if issues = [] then "accepted" else "rejected" in
+    let status =
+      if
+        issues = []
+        && consensus_ready_required_passes
+             ~profile_gate_count
+             ~unprofiled_count:unprofiled_template_count
+             profile_status_counts
+      then "accepted"
+      else "rejected"
+    in
     `Assoc [
       "status", `String status;
       "diagnostic_only", `Bool true;
@@ -648,6 +683,11 @@ let producer_index_report index_path =
       "unprofiled_template_count", `Int unprofiled_template_count;
       "profile_consensus_status_counts",
       Profile.status_counts_json profile_status_counts;
+      "consensus_ready_gate",
+      consensus_ready_gate
+        ~profile_gate_count
+        ~unprofiled_count:unprofiled_template_count
+        profile_status_counts;
       "issue_count", `Int (List.length issues);
       "issues", `List (List.map issue_json issues);
     ]
@@ -690,15 +730,30 @@ let () =
           let profile_gate_count =
             if profile_gate_present template_json then 1 else 0
           in
+          let profile_status_counts = profile_status_counts [template_json] in
+          let status =
+            if
+              consensus_ready_required_passes
+                ~profile_gate_count
+                ~unprofiled_count:(1 - profile_gate_count)
+                profile_status_counts
+            then "accepted"
+            else "rejected"
+          in
           print_report_and_exit
             (`Assoc [
-              "status", `String "accepted";
+              "status", `String status;
               "diagnostic_only", `Bool true;
               "template_count", `Int 1;
               "profile_gate_count", `Int profile_gate_count;
               "unprofiled_template_count", `Int (1 - profile_gate_count);
               "profile_consensus_status_counts",
-              Profile.status_counts_json (profile_status_counts [template_json]);
+              Profile.status_counts_json profile_status_counts;
+              "consensus_ready_gate",
+              consensus_ready_gate
+                ~profile_gate_count
+                ~unprofiled_count:(1 - profile_gate_count)
+                profile_status_counts;
               "templates", `List [checked_template_json checked];
             ]))
      | _ -> fail (path ^ ": template must be an object"))
@@ -717,16 +772,31 @@ let () =
     let template_jsons =
       List.map (fun checked -> Template.to_json checked.template) templates
     in
+    let status_counts = profile_status_counts template_jsons in
+    let unprofiled_count = List.length templates - profile_gate_count in
+    let status =
+      if
+        consensus_ready_required_passes
+          ~profile_gate_count
+          ~unprofiled_count
+          status_counts
+      then "accepted"
+      else "rejected"
+    in
     print_report_and_exit
       (`Assoc [
-        "status", `String "accepted";
+        "status", `String status;
         "diagnostic_only", `Bool true;
         "template_count", `Int (List.length templates);
         "profile_gate_count", `Int profile_gate_count;
-        "unprofiled_template_count",
-        `Int (List.length templates - profile_gate_count);
+        "unprofiled_template_count", `Int unprofiled_count;
         "profile_consensus_status_counts",
-        Profile.status_counts_json (profile_status_counts template_jsons);
+        Profile.status_counts_json status_counts;
+        "consensus_ready_gate",
+        consensus_ready_gate
+          ~profile_gate_count
+          ~unprofiled_count
+          status_counts;
         "p0_opcodes",
         `List (List.map (fun opcode -> `String opcode) Template.p0_opcodes);
         "templates", `List (List.map checked_template_json templates);

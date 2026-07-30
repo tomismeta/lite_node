@@ -73,6 +73,11 @@ let add_gate_status counts gate =
 let status_counts_of_json_gates gates =
   List.fold_left add_gate_status empty_status_counts gates
 
+let status_counts_are_consensus_ready counts =
+  counts.local_only = 0
+  && counts.consensus_candidate = 0
+  && counts.unknown = 0
+
 let status_counts_json counts =
   `Assoc [
     "local_only", `Int counts.local_only;
