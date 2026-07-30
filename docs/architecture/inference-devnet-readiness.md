@@ -27,6 +27,8 @@ The current branch has demonstrated:
   fixtures; and
 - explicit top-k boundary: top-k evidence is reference-only unless a future
   `TOPK_FP` primitive is proposed and accepted.
+- a product-facing prefill session bundle shape with rooted open, prefill,
+  decode, finalize, and receipt-chain identities.
 
 This is not yet devnet validator readiness. The open blocker is validator-grade
 deterministic math for the admitted host-FP inference profile, plus product
@@ -40,6 +42,7 @@ session/runtime packaging.
 | P0-plus execution | `/home/exedev/evidence/octra-inference/determinism-p0-plus-corpus-20260730-022653` | accepted `9/9` |
 | P0-plus top-k boundary | `/home/exedev/evidence/octra-inference/determinism-p0-plus-topk-boundary-20260730-025306` | accepted `9/9` |
 | Recurrent-heavy performance fixture on rebased LiteNode | `/home/exedev/evidence/octra-inference/litenode-recurrent-heavy-reemitted-2ca5dfd-754b0a5-20260729` | accepted |
+| Prefill session bundle shape | `/home/exedev/evidence/octra-inference/prefill-session-bundle-55cd597-20260730-121116` | producer-shaped; not continuous LiteNode execution |
 
 Latest producer checkpoints consumed by LiteNode:
 
@@ -48,6 +51,7 @@ Latest producer checkpoints consumed by LiteNode:
 426d86e8c84664f4b8b6b3ba76d6f517960ef4b9 Add P0-plus determinism corpus
 cffcf90eb741d7c56bb9c984711a1232107e6da1 Classify P0-plus top-k evidence
 ee6180db7df5585e4e6558ef8505f9d5b0c80073 Record accepted P0-plus top-k boundary
+d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
 ```
 
 ## Readiness Gates
@@ -56,6 +60,7 @@ ee6180db7df5585e4e6558ef8505f9d5b0c80073 Record accepted P0-plus top-k boundary
 | --- | --- | --- |
 | Local correctness demo | Met | Prompt-to-token candidate proof with LiteNode-selected token and rooted outputs. |
 | Local performance demo | Partially met | Batch mode and opcode timing exist; full prompt runtime remains too slow for product use. |
+| Product session shape | Partially met | Producer emits open/prefill/decode/finalize roots and receipt chain; execution still depends on producer-visible layer packets. |
 | Share-with-Octra-devs architecture review | Met with caveats | One-VM architecture, model-neutral primitive surface, P0/P0-plus conformance gates, and explicit claim boundaries are documented. |
 | Mergeable runtime branch | Not met | Needs footprint reduction, rebased patch review, CI gates, and removal or quarantine of evidence-only tooling as appropriate. |
 | Devnet candidate | Not met | Requires deterministic math profile, target-owned prefill/decode session, resource scheduling, replay/restart evidence, and multi-node conformance. |
