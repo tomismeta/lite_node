@@ -160,7 +160,7 @@ let q1_state
 let q1_block scale sign_bytes =
   scale ^ sign_bytes
 
-let one_block_state q1 =
+let one_block_state ?(input = List.init 128 (fun _ -> 1.0)) q1 =
   let state =
     VM.create_state
       ~limit:1_000_000
@@ -178,7 +178,7 @@ let one_block_state q1 =
   set_int_reg state 4 1;
   set_int_reg state 5 128;
   set_int_reg state 6 1;
-  set_f64_memory state 20000 (List.init 128 (fun _ -> 1.0));
+  set_f64_memory state 20000 input;
   state
 
 let check_golden_fixture () =
@@ -206,6 +206,9 @@ let check_golden_fixture () =
 let check_sign_and_scale_edges () =
   let scale_one = "\000\060" in
   let scale_minus_one = "\000\188" in
+  let scale_zero = "\000\000" in
+  let scale_negative_zero = "\000\128" in
+  let scale_min_subnormal = "\001\000" in
   List.iter
     (fun (name, q1, expected) ->
       let state = one_block_state q1 in
@@ -226,7 +229,29 @@ let check_sign_and_scale_edges () =
       "balanced signs",
       q1_block scale_one (String.make 8 '\255' ^ String.make 8 '\000'),
       0.0;
+      "zero scale",
+      q1_block scale_zero (String.make 16 '\255'),
+      0.0;
+      "negative zero scale",
+      q1_block scale_negative_zero (String.make 16 '\255'),
+      0.0;
+      "positive min-subnormal scale",
+      q1_block scale_min_subnormal (String.make 16 '\255'),
+      ldexp 1.0 (-17);
     ]
+
+let check_output_overflow_reverts () =
+  let scale_one = "\000\060" in
+  let state =
+    one_block_state
+      ~input:(List.init 128 (fun _ -> max_float))
+      (q1_block scale_one (String.make 16 '\255'))
+  in
+  set_output_cell state 10000 42.0;
+  check "q1 output overflow rejects" (not (VM.run state q1_code));
+  check
+    "q1 output overflow keeps output"
+    (output_bytes state 10000 1 = f64_bytes [42.0])
 
 let check_profiled_run_equivalence () =
   let state, dst, _ = q1_state () in
@@ -570,6 +595,7 @@ let check_fload_session () =
 let () =
   check_golden_fixture ();
   check_sign_and_scale_edges ();
+  check_output_overflow_reverts ();
   check_profiled_run_equivalence ();
   check_invalid_input_reverts ();
   check_bad_q1_reverts ();

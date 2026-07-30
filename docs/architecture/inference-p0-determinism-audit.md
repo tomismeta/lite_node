@@ -240,7 +240,7 @@ Initial P0 focus:
 
 | Opcode | Current accepted profile | Consensus status | Pinned locally | Why not ready |
 | --- | --- | --- | --- | --- |
-| `LINEAR_Q1_G128_FP` | `host-fp-local-candidate` | `local_only` | Q1 scale/sign edge vectors, finite rejection, effort floor, output atomicity, and destination/lhs snapshot behavior. | Uses native binary64 multiplication/addition after Q1 scale/sign decode. |
+| `LINEAR_Q1_G128_FP` | `host-fp-local-candidate` | `local_only` | Q1 scale/sign edge vectors, binary16 zero/signed-zero/subnormal scale vectors, finite rejection, overflow rollback, effort floor, output atomicity, and destination/lhs snapshot behavior. | Uses native binary64 multiplication/addition after Q1 scale/sign decode. |
 | `RMSNORM_FP_EPS` | `host-fp-local-candidate` | `local_only` | Explicit epsilon bits, row composition, signed-zero/subnormal acceptance, finite rejection, alias rejection, effort floor, and output atomicity. | Uses native binary64 reduction, division, multiplication, and `sqrt`. |
 
 The next acceptable status change for either opcode requires a runtime
