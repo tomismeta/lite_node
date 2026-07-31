@@ -341,6 +341,24 @@ let check_multi_output_overflow_is_atomic () =
     "q1 multi-output overflow leaves all output unchanged"
     (output_bytes state 10000 2 = f64_bytes [42.0; 43.0])
 
+let check_multi_output_bad_scale_is_atomic () =
+  let scale_one = "\000\060" in
+  let scale_inf = "\000\124" in
+  let q1 =
+    q1_block scale_one (String.make 16 '\255')
+    ^ q1_block scale_inf (String.make 16 '\255')
+  in
+  let state = one_block_state q1 in
+  set_int_reg state 6 2;
+  set_output_cell state 10000 42.0;
+  set_output_cell state 10001 43.0;
+  check
+    "q1 multi-output bad scale rejects"
+    (not (VM.run state q1_code));
+  check
+    "q1 multi-output bad scale leaves all output unchanged"
+    (output_bytes state 10000 2 = f64_bytes [42.0; 43.0])
+
 let check_profiled_run_equivalence () =
   let state, dst, _ = q1_state () in
   let profiled, profile =
@@ -721,6 +739,7 @@ let () =
   check_accumulation_order_stress ();
   check_output_overflow_reverts ();
   check_multi_output_overflow_is_atomic ();
+  check_multi_output_bad_scale_is_atomic ();
   check_profiled_run_equivalence ();
   check_invalid_input_reverts ();
   check_bad_q1_reverts ();
