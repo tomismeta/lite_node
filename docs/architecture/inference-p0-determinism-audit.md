@@ -139,6 +139,13 @@ failure/atomicity evidence. The top-level `failure_case_gate` records whether
 failure cases were included, how many counted cases ran, and whether every
 counted case accepted.
 
+Runner reports also include a diagnostic `validator_readiness_gate`. That gate
+composes VM execution, punitive failure execution, consensus-ready profile
+status, and profile-root binding into one answer. It is expected to reject the
+current P0 artifacts even when positive execution and failure cases pass,
+because some P0 profiles are still local-only and the remaining
+consensus-candidate profiles still carry blocker codes.
+
 The saved reports live beside the indexes as
 `litenode-failure-atomicity-report.cjson`.
 The checker requires each executable failure case to carry `case`, `expected`,

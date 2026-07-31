@@ -305,28 +305,50 @@ let consensus_candidate_required_passes
 let add_blocker condition blocker blockers =
   if condition then blocker :: blockers else blockers
 
+let failure_cases_accepted
+    ~template_count
+    ~included_template_count
+    ~counted_failure_case_count
+    ~accepted_counted_failure_case_count =
+  template_count > 0
+  && included_template_count = template_count
+  && counted_failure_case_count > 0
+  && accepted_counted_failure_case_count = counted_failure_case_count
+
+let failure_case_blockers
+    ~template_count
+    ~included_template_count
+    ~counted_failure_case_count
+    ~accepted_counted_failure_case_count =
+  []
+  |> add_blocker
+       (included_template_count <> template_count)
+       "failure_cases_not_included"
+  |> add_blocker
+       (counted_failure_case_count = 0)
+       "no_counted_failure_cases"
+  |> add_blocker
+       (accepted_counted_failure_case_count <> counted_failure_case_count)
+       "failure_cases_rejected"
+
 let failure_case_gate
     ~template_count
     ~included_template_count
     ~counted_failure_case_count
     ~accepted_counted_failure_case_count =
   let passed =
-    template_count > 0
-    && included_template_count = template_count
-    && counted_failure_case_count > 0
-    && accepted_counted_failure_case_count = counted_failure_case_count
+    failure_cases_accepted
+      ~template_count
+      ~included_template_count
+      ~counted_failure_case_count
+      ~accepted_counted_failure_case_count
   in
   let blockers =
-    []
-    |> add_blocker
-         (included_template_count <> template_count)
-         "failure_cases_not_included"
-    |> add_blocker
-         (counted_failure_case_count = 0)
-         "no_counted_failure_cases"
-    |> add_blocker
-         (accepted_counted_failure_case_count <> counted_failure_case_count)
-         "failure_cases_rejected"
+    failure_case_blockers
+      ~template_count
+      ~included_template_count
+      ~counted_failure_case_count
+      ~accepted_counted_failure_case_count
   in
   `Assoc [
     "required", `Bool !require_failure_cases;
@@ -351,10 +373,79 @@ let failure_cases_required_pass
     ~accepted_counted_failure_case_count =
   (not !require_failure_cases)
   ||
-  (template_count > 0
-   && included_template_count = template_count
-   && counted_failure_case_count > 0
-   && accepted_counted_failure_case_count = counted_failure_case_count)
+  failure_cases_accepted
+    ~template_count
+    ~included_template_count
+    ~counted_failure_case_count
+    ~accepted_counted_failure_case_count
+
+let validator_readiness_gate
+    ~execution_accepted
+    ~template_count
+    ~profile_gate_count
+    ~unprofiled_count
+    ~root_binding_counts
+    ~included_template_count
+    ~counted_failure_case_count
+    ~accepted_counted_failure_case_count
+    status_counts =
+  let failure_cases_ready =
+    failure_cases_accepted
+      ~template_count
+      ~included_template_count
+      ~counted_failure_case_count
+      ~accepted_counted_failure_case_count
+  in
+  let profile_ready =
+    Profile.consensus_ready
+      ~profile_gate_count
+      ~unprofiled_count
+      status_counts
+  in
+  let roots_ready =
+    Profile.root_bindings_are_consensus_ready root_binding_counts
+  in
+  let blockers =
+    []
+    |> add_blocker (not execution_accepted) "execution_rejected"
+    |> add_blocker
+         (not failure_cases_ready)
+         "punitive_failure_cases_not_accepted"
+  in
+  let blockers =
+    blockers
+    @ failure_case_blockers
+        ~template_count
+        ~included_template_count
+        ~counted_failure_case_count
+        ~accepted_counted_failure_case_count
+    @ Profile.consensus_ready_blockers
+        ~profile_gate_count
+        ~unprofiled_count
+        status_counts
+    @ Profile.root_binding_blockers root_binding_counts
+  in
+  `Assoc [
+    "diagnostic_only", `Bool true;
+    "status",
+    `String
+      (if execution_accepted
+          && failure_cases_ready
+          && profile_ready
+          && roots_ready
+       then "accepted"
+       else "rejected");
+    "execution_status",
+    `String (if execution_accepted then "accepted" else "rejected");
+    "failure_case_status",
+    `String (if failure_cases_ready then "accepted" else "rejected");
+    "profile_status",
+    `String (if profile_ready then "accepted" else "rejected");
+    "profile_root_status",
+    `String (if roots_ready then "accepted" else "rejected");
+    "blockers",
+    `List (List.map (fun blocker -> `String blocker) blockers);
+  ]
 
 let profile_roots_required_passes ~root_binding_counts =
   Profile.root_bindings_required_pass
@@ -1612,6 +1703,17 @@ let run_index path =
     Profile.root_binding_gate_json
       ~required:!require_profile_roots_bound
       root_binding_counts;
+    "validator_readiness_gate",
+    validator_readiness_gate
+      ~execution_accepted
+      ~template_count
+      ~profile_gate_count
+      ~unprofiled_count
+      ~root_binding_counts
+      ~included_template_count:included_failure_template_count
+      ~counted_failure_case_count
+      ~accepted_counted_failure_case_count
+      status_counts;
     "consensus_candidate_gate",
     consensus_candidate_gate
       ~profile_gate_count
