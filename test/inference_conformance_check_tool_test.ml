@@ -169,6 +169,82 @@ let q1_failure_cases =
       (span "output" 10000 2);
   ]
 
+let lhs_input_range ?(encoding = "f64le") () =
+  `Assoc [
+    "name", `String "lhs";
+    "source",
+    `Assoc [
+      "path", `String "fixtures/input.bin";
+      "bytes", `Int 4096;
+      "sha256", `String (hex_root '1');
+    ];
+    "range_binding", `Assoc ["encoding", `String encoding];
+    "vm_memory",
+    `Assoc [
+      "base_address", `Int 2000;
+      "length_f64_cells", `Int 512;
+    ];
+  ]
+
+let q1_owner_input_range ?(encoding = "tensor.q1-g128")
+    ?(include_f64_length = false) () =
+  let vm_memory =
+    if include_f64_length then
+      `Assoc ["base_address", `Int 5000; "length_f64_cells", `Int 3]
+    else
+      `Assoc ["base_address", `Int 5000]
+  in
+  `Assoc [
+    "name", `String "q1_owner";
+    "source",
+    `Assoc [
+      "path", `String "fixtures/q1-owner.bin";
+      "bytes", `Int 18;
+      "sha256", `String (hex_root '3');
+    ];
+    "range_binding", `Assoc ["encoding", `String encoding];
+    "vm_memory", vm_memory;
+  ]
+
+let q1_input_ranges ?(q1_owner_encoding = "tensor.q1-g128") () =
+  [
+    lhs_input_range ();
+    q1_owner_input_range ~encoding:q1_owner_encoding ();
+  ]
+
+let q1_parameter_block ?(include_registers = true) ?(k = 128)
+    ?(byte_offset = 0) () =
+  let registers =
+    if include_registers then
+      [
+        "registers",
+        `Assoc [
+          "dst", `String "r0";
+          "lhs", `String "r1";
+          "q1_owner", `String "r2";
+          "byte_offset", `String "r3";
+          "m", `String "r4";
+          "k", `String "r5";
+          "n", `String "r6";
+        ];
+      ]
+    else
+      []
+  in
+  `Assoc
+    (registers
+     @ [
+       "values",
+       `Assoc [
+         "dst", `Int 10000;
+         "lhs", `Int 2000;
+         "byte_offset", `Int byte_offset;
+         "m", `Int 1;
+         "k", `Int k;
+         "n", `Int 1;
+       ];
+     ])
+
 let q1_template ?(session_abi_root = Abi.v1_root) ?(expected_effort = 201)
     ?(output_count_unit = "cells") ?(r1 = 2) () =
   `Assoc [
@@ -190,32 +266,8 @@ let q1_template ?(session_abi_root = Abi.v1_root) ?(expected_effort = 201)
       ];
     ];
     "input_memory_ranges",
-    `List [
-      `Assoc [
-        "name", `String "lhs";
-        "source",
-        `Assoc [
-          "path", `String "fixtures/input.bin";
-          "bytes", `Int 4096;
-          "sha256", `String (hex_root '1');
-        ];
-        "range_binding", `Assoc ["encoding", `String "f64le"];
-        "vm_memory",
-        `Assoc [
-          "base_address", `Int 2000;
-          "length_f64_cells", `Int 512;
-        ];
-      ];
-    ];
-    "parameter_addresses_and_scalar_params",
-    `Assoc [
-      "values",
-      `Assoc [
-        "m", `Int 1;
-        "k", `Int 128;
-        "n", `Int 1;
-      ];
-    ];
+    `List (q1_input_ranges ());
+    "parameter_addresses_and_scalar_params", q1_parameter_block ();
     "expected_output_byte_manifests",
     `List [
       `Assoc [
@@ -438,6 +490,94 @@ let check_rejects_q1_expected_effort_drift () =
          "expected_effort mismatch for LINEAR_Q1_G128_FP: expected 201 actual 204"
          (report_issues report)))
 
+let check_rejects_missing_q1_owner_input_range () =
+  with_temp_dir (fun dir ->
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "input_memory_ranges"
+              (`List [lhs_input_range ()]))
+    in
+    check "missing q1 owner range exits nonzero" (code = 1);
+    check
+      "missing q1 owner range issue"
+      (List.mem
+         "LINEAR_Q1_G128_FP requires q1_owner input range"
+         (report_issues report)))
+
+let check_rejects_q1_owner_f64le_range () =
+  with_temp_dir (fun dir ->
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "input_memory_ranges"
+              (`List (q1_input_ranges ~q1_owner_encoding:"f64le" ())))
+    in
+    check "q1 owner f64le range exits nonzero" (code = 1);
+    check
+      "q1 owner f64le range issue"
+      (List.mem
+         "LINEAR_Q1_G128_FP q1_owner input must be tensor.q1-g128"
+         (report_issues report)))
+
+let check_rejects_q1_owner_f64_cell_length () =
+  with_temp_dir (fun dir ->
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "input_memory_ranges"
+              (`List [
+                lhs_input_range ();
+                q1_owner_input_range ~include_f64_length:true ();
+              ]))
+    in
+    check "q1 owner f64 length exits nonzero" (code = 1);
+    check
+      "q1 owner f64 length issue"
+      (List.mem
+         "LINEAR_Q1_G128_FP q1_owner input must be raw bytes"
+         (report_issues report)))
+
+let check_rejects_q1_missing_register_metadata () =
+  with_temp_dir (fun dir ->
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "parameter_addresses_and_scalar_params"
+              (q1_parameter_block ~include_registers:false ()))
+    in
+    check "missing q1 register metadata exits nonzero" (code = 1);
+    check
+      "missing q1 register metadata issue"
+      (List.mem
+         "missing LINEAR_Q1_G128_FP register metadata"
+         (report_issues report)))
+
+let check_rejects_q1_bad_k_shape () =
+  with_temp_dir (fun dir ->
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "parameter_addresses_and_scalar_params"
+              (q1_parameter_block ~k:127 ()))
+    in
+    check "bad q1 k shape exits nonzero" (code = 1);
+    check
+      "bad q1 k shape issue"
+      (List.mem
+         "LINEAR_Q1_G128_FP k must be a multiple of 128"
+         (report_issues report)))
+
 let check_rejects_missing_q1_failure_case () =
   with_temp_dir (fun dir ->
     let failures =
@@ -622,6 +762,11 @@ let () =
   check_rejects_narrow_output_unit ();
   check_rejects_r1_output_count_drift ();
   check_rejects_q1_expected_effort_drift ();
+  check_rejects_missing_q1_owner_input_range ();
+  check_rejects_q1_owner_f64le_range ();
+  check_rejects_q1_owner_f64_cell_length ();
+  check_rejects_q1_missing_register_metadata ();
+  check_rejects_q1_bad_k_shape ();
   check_rejects_missing_q1_failure_case ();
   check_rejects_wrong_q1_failure_expectation ();
   check_rejects_q1_exact_alias_without_alias_mutation ();

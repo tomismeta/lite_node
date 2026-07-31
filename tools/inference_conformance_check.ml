@@ -1245,6 +1245,110 @@ let q1_expected_effort_issues path opcode fields =
              [issue ~opcode path
                 "missing LINEAR_Q1_G128_FP effort parameters m/k/n"])
 
+let range_named name ranges =
+  List.find_map
+    (function
+      | `Assoc fields when string_field "name" fields = Some name -> Some fields
+      | _ -> None)
+    ranges
+
+let range_encoding range_fields =
+  match assoc_field "range_binding" range_fields with
+  | Some binding_fields -> string_field "encoding" binding_fields
+  | None -> None
+
+let q1_input_range_issues path opcode fields =
+  if not (String.equal opcode "LINEAR_Q1_G128_FP") then []
+  else
+    match list_field "input_memory_ranges" fields with
+    | None -> []
+    | Some ranges ->
+      let lhs_issues =
+        match range_named "lhs" ranges with
+        | None -> [issue ~opcode path "LINEAR_Q1_G128_FP requires lhs input range"]
+        | Some lhs ->
+          if range_encoding lhs = Some "f64le" then []
+          else [issue ~opcode path "LINEAR_Q1_G128_FP lhs input must be f64le"]
+      in
+      let q1_issues =
+        match range_named "q1_owner" ranges with
+        | None ->
+          [issue ~opcode path "LINEAR_Q1_G128_FP requires q1_owner input range"]
+        | Some q1 ->
+          let encoding =
+            if range_encoding q1 = Some "tensor.q1-g128" then []
+            else
+              [issue ~opcode path
+                 "LINEAR_Q1_G128_FP q1_owner input must be tensor.q1-g128"]
+          in
+          let raw =
+            match assoc_field "vm_memory" q1 with
+            | Some vm_fields when int_field "length_f64_cells" vm_fields = None ->
+              []
+            | Some _ ->
+              [issue ~opcode path
+                 "LINEAR_Q1_G128_FP q1_owner input must be raw bytes"]
+            | None -> []
+          in
+          encoding @ raw
+      in
+      lhs_issues @ q1_issues
+
+let q1_parameter_issues path opcode fields =
+  if not (String.equal opcode "LINEAR_Q1_G128_FP") then []
+  else
+    match assoc_field "parameter_addresses_and_scalar_params" fields with
+    | None -> [issue ~opcode path "missing LINEAR_Q1_G128_FP parameter metadata"]
+    | Some params ->
+      let register_issues =
+        match assoc_field "registers" params with
+        | None ->
+          [issue ~opcode path "missing LINEAR_Q1_G128_FP register metadata"]
+        | Some registers ->
+          ["dst"; "lhs"; "q1_owner"; "byte_offset"; "m"; "k"; "n"]
+          |> List.filter_map (fun name ->
+            match string_field name registers with
+            | Some _ -> None
+            | None ->
+              Some
+                (issue ~opcode path
+                   ("missing LINEAR_Q1_G128_FP register: " ^ name)))
+      in
+      let value_issues =
+        match assoc_field "values" params with
+        | None ->
+          [issue ~opcode path "missing LINEAR_Q1_G128_FP parameter values"]
+        | Some values ->
+          let required =
+            ["dst"; "lhs"; "byte_offset"; "m"; "k"; "n"]
+            |> List.filter_map (fun name ->
+              match int_field name values with
+              | Some _ -> None
+              | None ->
+                Some
+                  (issue ~opcode path
+                     ("missing LINEAR_Q1_G128_FP parameter value: " ^ name)))
+          in
+          let shape =
+            match int_field "m" values, int_field "k" values, int_field "n" values with
+            | Some m, Some k, Some n when m <= 0 || k <= 0 || n <= 0 ->
+              [issue ~opcode path "LINEAR_Q1_G128_FP m/k/n must be positive"]
+            | Some _, Some k, Some _ when k mod 128 <> 0 ->
+              [issue ~opcode path
+                 "LINEAR_Q1_G128_FP k must be a multiple of 128"]
+            | _ -> []
+          in
+          let offset =
+            match int_field "byte_offset" values with
+            | Some value when value < 0 ->
+              [issue ~opcode path
+                 "LINEAR_Q1_G128_FP byte_offset must be nonnegative"]
+            | _ -> []
+          in
+          required @ shape @ offset
+      in
+      register_issues @ value_issues
+
 let producer_template_issues path opcode primitive json =
   match json with
   | `Assoc fields ->
@@ -1280,6 +1384,8 @@ let producer_template_issues path opcode primitive json =
     @ template_identity_issues path opcode primitive fields
     @ root_issues
     @ q1_expected_effort_issues path opcode fields
+    @ q1_input_range_issues path opcode fields
+    @ q1_parameter_issues path opcode fields
     @ profile_issues path opcode fields
     @ issues_for_program_effects path opcode fields
     @ source_path_issues path opcode fields

@@ -738,6 +738,15 @@ The static checker also validates the alias mutation shape. Exact
 `partial_output_input_aliasing` must declare a nonzero partial output-to-lhs
 offset before the template can pass Q1 schema validation.
 
+The static checker also validates the Q1 positive-template shape before any
+runner execution. `LINEAR_Q1_G128_FP` templates must bind an `lhs` range as
+`f64le`, bind a raw `q1_owner` range as `tensor.q1-g128`, declare register names
+for `dst`, `lhs`, `q1_owner`, `byte_offset`, `m`, `k`, and `n`, and declare
+integer values for `dst`, `lhs`, `byte_offset`, `m`, `k`, and `n`. Dimensions
+must be positive, `k` must be a multiple of 128, and `byte_offset` must be
+nonnegative. This keeps producer drift out of the validator-readiness gate
+without adding model-family knowledge to LiteNode.
+
 `LINEAR_Q1_G128_FP` also requires a counted `lower_effort_limit` case. That
 case must lower the VM effort limit below the opcode base charge and prove
 `reject_before_write`, so effort failure is part of validator-readiness rather
