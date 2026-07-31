@@ -31,6 +31,9 @@ let require_consensus_candidate = ref false
 let require_consensus_ready = ref false
 let require_validator_readiness = ref false
 
+let cross_platform_result_signature_schema =
+  "octra.inference.conformance.result-signature.v2"
+
 let fail message =
   prerr_endline message;
   exit 1
@@ -706,6 +709,12 @@ let cross_platform_evidence
        let observed_opcodes =
          string_list_field "result_opcodes" fields
        in
+       let result_signature_schema_accepted =
+         match opt_string_field "result_signature_schema" fields with
+         | Some schema ->
+           String.equal schema cross_platform_result_signature_schema
+         | None -> false
+       in
        let matrix_blockers =
          optional_string_list_field "blockers" fields
        in
@@ -812,6 +821,9 @@ let cross_platform_evidence
               (not opcode_scope_accepted)
               "matrix_opcode_scope_mismatch"
          |> add_blocker
+              (not result_signature_schema_accepted)
+              "matrix_result_signature_schema_mismatch"
+         |> add_blocker
               (not profile_catalog_accepted)
               "matrix_profile_catalog_mismatch"
          |> add_blocker
@@ -854,6 +866,15 @@ let cross_platform_evidence
          `List (List.map (fun opcode -> `String opcode) required_opcodes);
          "covered_opcodes",
          `List (List.map (fun opcode -> `String opcode) observed_opcodes);
+         "required_result_signature_schema",
+         `String cross_platform_result_signature_schema;
+         "matrix_result_signature_schema",
+         (match opt_string_field "result_signature_schema" fields with
+          | Some schema -> `String schema
+          | None -> `Null);
+         "result_signature_schema_status",
+         `String
+           (if result_signature_schema_accepted then "accepted" else "rejected");
          "schema_status",
          `String (if schema_accepted then "accepted" else "rejected");
          "required_profile_catalog_root",

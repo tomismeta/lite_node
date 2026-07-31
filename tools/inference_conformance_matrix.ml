@@ -19,6 +19,9 @@ let min_platforms = ref 2
 let require_validator_readiness = ref false
 let requested_opcodes = ref []
 
+let result_signature_schema =
+  "octra.inference.conformance.result-signature.v2"
+
 let fail message =
   prerr_endline message;
   exit 1
@@ -1020,6 +1023,7 @@ let matrix_report paths =
     `String (if opcode_coverage_ready then "accepted" else "rejected");
     "result_opcodes",
     `List (List.map (fun value -> `String value) result_opcodes);
+    "result_signature_schema", `String result_signature_schema;
     "result_signature_count", `Int (List.length signatures);
     "profile_catalog_root_count", `Int (List.length profile_catalog_roots);
     "profile_catalog_roots",

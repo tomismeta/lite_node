@@ -486,6 +486,11 @@ let check_matrix_accepts_bound_reports () =
         "matrix carries q1 opcode"
         (string_list_value "result_opcodes" fields = ["LINEAR_Q1_G128_FP"]);
       check
+        "matrix carries result signature schema"
+        (String.equal
+           (string_value "result_signature_schema" fields)
+           "octra.inference.conformance.result-signature.v2");
+      check
         "matrix carries runner hashes"
         (List.length (string_list_value "runner_executable_sha256s" fields) = 2)
     | _ -> failwith "matrix output must be object")
