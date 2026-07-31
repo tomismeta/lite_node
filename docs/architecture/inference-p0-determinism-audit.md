@@ -182,7 +182,10 @@ platform attestation. Matrix reports also lift `validator_readiness_status`
 and `validator_readiness_blockers` to the top level for compatibility, and
 emit the same nested `validator_readiness_gate` shape used by the checker and
 runner. New consumers should use the nested gate when distinguishing local
-execution evidence from validator-ready inference math.
+execution evidence from validator-ready inference math. Each matrix
+`reports[]` row also preserves the source runner's nested
+`validator_readiness_gate`, so aggregate matrix failures and per-platform
+runner failures can be inspected without reopening the original report files.
 
 The saved reports live beside the indexes as
 `litenode-failure-atomicity-report.cjson`.

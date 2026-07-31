@@ -311,6 +311,8 @@ let report_summary path =
         (List.map
            (fun blocker -> `String blocker)
            validator_readiness_blockers);
+      "validator_readiness_gate",
+      json_field_or_null "validator_readiness_gate" fields;
       "strict_effort", `Bool strict_effort;
       "output_status", `String (if output_matched then "matched" else "mismatch");
       "effort_status", `String (if effort_matched then "matched" else "mismatch");
