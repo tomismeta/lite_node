@@ -77,6 +77,10 @@ val root_binding_classification_counts_of_json :
   Yojson.Safe.t list -> root_binding_classification_counts
 val root_bindings_are_consensus_ready : root_binding_counts -> bool
 val root_binding_blockers : root_binding_counts -> string list
+val root_bindings_required_pass :
+  required:bool -> root_binding_counts -> bool
+val root_binding_gate_json :
+  required:bool -> root_binding_counts -> Yojson.Safe.t
 val root_binding_counts_json : root_binding_counts -> Yojson.Safe.t
 val root_binding_classification_counts_json :
   root_binding_classification_counts -> Yojson.Safe.t

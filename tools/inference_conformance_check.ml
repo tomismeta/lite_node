@@ -18,6 +18,7 @@ module Profile = Octra_vm.Inference_numerical_profile
 let template_path = ref None
 let template_dir = ref None
 let template_index = ref None
+let require_profile_roots_bound = ref false
 let require_consensus_ready = ref false
 
 let fail message =
@@ -34,15 +35,21 @@ let args = [
   "--template-index",
   Arg.String (fun value -> template_index := Some value),
   "producer template index json";
+  "--require-profile-roots-bound",
+  Arg.Set require_profile_roots_bound,
+  "reject reports whose numerical_profile_root values do not match LiteNode profile roots";
   "--require-consensus-ready",
   Arg.Set require_consensus_ready,
   "reject reports whose profile gates are not all consensus_ready";
 ]
 
 let usage =
-  "inference_conformance_check --template <path> [--require-consensus-ready]\n\
-   or inference_conformance_check --template-dir <dir> [--require-consensus-ready]\n\
-   or inference_conformance_check --template-index <path> [--require-consensus-ready]"
+  "inference_conformance_check --template <path> \
+   [--require-profile-roots-bound] [--require-consensus-ready]\n\
+   or inference_conformance_check --template-dir <dir> \
+   [--require-profile-roots-bound] [--require-consensus-ready]\n\
+   or inference_conformance_check --template-index <path> \
+   [--require-profile-roots-bound] [--require-consensus-ready]"
 
 let read_json path =
   try Yojson.Safe.from_file path with
@@ -252,6 +259,11 @@ let consensus_ready_required_passes
      ~unprofiled_count
      status_counts
    && Profile.root_bindings_are_consensus_ready root_binding_counts)
+
+let profile_roots_required_passes ~root_binding_counts =
+  Profile.root_bindings_required_pass
+    ~required:!require_profile_roots_bound
+    root_binding_counts
 
 let template_profile_gate_present (checked : checked_template) =
   profile_gate_present (Template.to_json checked.template)
@@ -723,6 +735,8 @@ let producer_index_report index_path =
     let status =
       if
         String.equal schema_status "accepted"
+        && profile_roots_required_passes
+             ~root_binding_counts:profile_root_binding_counts
         && consensus_ready_required_passes
              ~profile_gate_count
              ~unprofiled_count:unprofiled_template_count
@@ -758,6 +772,10 @@ let producer_index_report index_path =
       "profile_root_binding_classification_counts",
       Profile.root_binding_classification_counts_json
         profile_root_binding_classification_counts;
+      "profile_root_binding_gate",
+      Profile.root_binding_gate_json
+        ~required:!require_profile_roots_bound
+        profile_root_binding_counts;
       "consensus_ready_gate",
       consensus_ready_gate
         ~profile_gate_count
@@ -819,6 +837,9 @@ let () =
           let schema_status = "accepted" in
           let status =
             if
+              profile_roots_required_passes
+                ~root_binding_counts:profile_root_binding_counts
+              &&
               consensus_ready_required_passes
                 ~profile_gate_count
                 ~unprofiled_count:(1 - profile_gate_count)
@@ -852,6 +873,10 @@ let () =
               "profile_root_binding_classification_counts",
               Profile.root_binding_classification_counts_json
                 profile_root_binding_classification_counts;
+              "profile_root_binding_gate",
+              Profile.root_binding_gate_json
+                ~required:!require_profile_roots_bound
+                profile_root_binding_counts;
               "consensus_ready_gate",
               consensus_ready_gate
                 ~profile_gate_count
@@ -890,6 +915,9 @@ let () =
     let schema_status = "accepted" in
     let status =
       if
+        profile_roots_required_passes
+          ~root_binding_counts
+        &&
         consensus_ready_required_passes
           ~profile_gate_count
           ~unprofiled_count
@@ -922,6 +950,10 @@ let () =
         "profile_root_binding_classification_counts",
         Profile.root_binding_classification_counts_json
           root_binding_classification_counts;
+        "profile_root_binding_gate",
+        Profile.root_binding_gate_json
+          ~required:!require_profile_roots_bound
+          root_binding_counts;
         "consensus_ready_gate",
         consensus_ready_gate
           ~profile_gate_count

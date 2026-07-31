@@ -112,6 +112,9 @@ accepted VM run can be audited for profile coverage without walking every
 per-template result. They also include
 `profile_consensus_status_counts`, which separates deterministic candidate
 profiles from remaining local-only host-FP math.
+Passing `--require-profile-roots-bound` turns stale or missing
+`numerical_profile_root` bindings into a hard gate without requiring every
+profile to be consensus-ready.
 Passing `--require-consensus-ready` turns that diagnostic boundary into a hard
 gate; current non-ready artifacts are expected to reject under that flag with
 profile blockers in `consensus_ready_gate.blockers`.
@@ -294,7 +297,8 @@ root. `profile_root` is the root of that descriptor only. It deliberately
 excludes `consensus_status`, summaries, required-action prose, and blocker
 wording so documentation churn cannot rebind arithmetic. Current templates
 still validate `numerical_profile_root` syntactically; profile-root equality is
-diagnostic in default mode and enforced only by `--require-consensus-ready`.
+diagnostic in default mode, enforced by `--require-profile-roots-bound`, and
+also enforced by `--require-consensus-ready`.
 Template and P0 execution reports expose that diagnostic as
 `profile_root_binding.status`: `matched`, `unbound`, or `unavailable`.
 They also expose `profile_root_binding.classification`, where `none` means the

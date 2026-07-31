@@ -195,6 +195,25 @@ let root_binding_blockers counts =
   |> add_if (counts.unavailable > 0) "unavailable_profile_roots"
   |> add_if (counts.unbound > 0) "unbound_profile_roots"
 
+let root_bindings_required_pass ~required counts =
+  (not required) || root_bindings_are_consensus_ready counts
+
+let root_binding_gate_json ~required counts =
+  let ready = root_bindings_are_consensus_ready counts in
+  `Assoc [
+    "required", `Bool required;
+    "status",
+    `String
+      (if not required then "not_required"
+       else if ready then "accepted"
+       else "rejected");
+    "blockers",
+    `List
+      (List.map
+         (fun blocker -> `String blocker)
+         (root_binding_blockers counts));
+  ]
+
 let root_binding_counts_json counts =
   `Assoc [
     "matched", `Int counts.matched;

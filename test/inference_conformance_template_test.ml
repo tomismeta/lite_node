@@ -421,6 +421,44 @@ let check_profile_root_binding_counts () =
             (Profile.root_binding_blockers counts)
             ["unbound_profile_roots"; "unavailable_profile_roots"])
      | _ -> failwith "root binding counts json must be object");
+    check
+      "mixed root bindings pass when not required"
+      (Profile.root_bindings_required_pass ~required:false counts);
+    check
+      "mixed root bindings reject when required"
+      (not (Profile.root_bindings_required_pass ~required:true counts));
+    (match Profile.root_binding_gate_json ~required:false counts with
+     | `Assoc fields ->
+       check
+         "optional root binding gate"
+         (String.equal (string_value "status" fields) "not_required")
+     | _ -> failwith "optional root binding gate must be object");
+    (match Profile.root_binding_gate_json ~required:true counts with
+     | `Assoc fields ->
+       check
+         "required root binding gate rejects"
+         (String.equal (string_value "status" fields) "rejected");
+       check
+         "required root binding gate blockers"
+         (list_equal
+            (string_list_value "blockers" fields)
+            ["unbound_profile_roots"; "unavailable_profile_roots"])
+     | _ -> failwith "required root binding gate must be object");
+    let ready_counts =
+      Profile.root_binding_counts_of_json [matched]
+    in
+    check
+      "matched root bindings pass when required"
+      (Profile.root_bindings_required_pass ~required:true ready_counts);
+    (match Profile.root_binding_gate_json ~required:true ready_counts with
+     | `Assoc fields ->
+       check
+         "matched root binding gate accepts"
+         (String.equal (string_value "status" fields) "accepted");
+       check
+         "matched root binding gate blockers empty"
+         (string_list_value "blockers" fields = [])
+     | _ -> failwith "matched root binding gate must be object");
     (match Profile.root_binding_classification_counts_json classification_counts with
      | `Assoc fields ->
        check "none root binding count" (int_value "none" fields = 1);

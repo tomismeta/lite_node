@@ -20,6 +20,7 @@ let template_index = ref None
 let p0_plus_pack = ref None
 let strict_effort = ref false
 let include_failures = ref false
+let require_profile_roots_bound = ref false
 let require_consensus_ready = ref false
 
 let fail message =
@@ -39,6 +40,9 @@ let args = [
   "--include-failures",
   Arg.Set include_failures,
   "execute definitive failure/atomicity cases where the direct VM runner can";
+  "--require-profile-roots-bound",
+  Arg.Set require_profile_roots_bound,
+  "reject reports whose numerical_profile_root values do not match LiteNode profile roots";
   "--require-consensus-ready",
   Arg.Set require_consensus_ready,
   "reject reports whose profile gates are not all consensus_ready";
@@ -46,8 +50,10 @@ let args = [
 
 let usage =
   "inference_conformance_run --template-index <path> [--strict-effort] \
-   [--include-failures] [--require-consensus-ready]\n\
-   or inference_conformance_run --p0-plus-pack <path> [--require-consensus-ready]"
+   [--include-failures] [--require-profile-roots-bound] \
+   [--require-consensus-ready]\n\
+   or inference_conformance_run --p0-plus-pack <path> \
+   [--require-profile-roots-bound] [--require-consensus-ready]"
 
 let read_file path =
   let input = open_in_bin path in
@@ -237,6 +243,11 @@ let consensus_ready_required_passes
      ~unprofiled_count
      status_counts
    && Profile.root_bindings_are_consensus_ready root_binding_counts)
+
+let profile_roots_required_passes ~root_binding_counts =
+  Profile.root_bindings_required_pass
+    ~required:!require_profile_roots_bound
+    root_binding_counts
 
 let result_profile_gate_count result =
   if profile_gate_present result then 1 else 0
@@ -1303,6 +1314,7 @@ let run_p0_plus_pack path =
   in
   let accepted =
     execution_accepted
+    && profile_roots_required_passes ~root_binding_counts
     &&
     consensus_ready_required_passes
       ~profile_gate_count
@@ -1337,6 +1349,10 @@ let run_p0_plus_pack path =
     "profile_root_binding_classification_counts",
     Profile.root_binding_classification_counts_json
       root_binding_classification_counts;
+    "profile_root_binding_gate",
+    Profile.root_binding_gate_json
+      ~required:!require_profile_roots_bound
+      root_binding_counts;
     "consensus_ready_gate",
     consensus_ready_gate
       ~profile_gate_count
@@ -1388,6 +1404,7 @@ let run_index path =
   let unprofiled_count = List.length results - profile_gate_count in
   let accepted =
     execution_accepted
+    && profile_roots_required_passes ~root_binding_counts
     &&
     consensus_ready_required_passes
       ~profile_gate_count
@@ -1421,6 +1438,10 @@ let run_index path =
     "profile_root_binding_classification_counts",
     Profile.root_binding_classification_counts_json
       root_binding_classification_counts;
+    "profile_root_binding_gate",
+    Profile.root_binding_gate_json
+      ~required:!require_profile_roots_bound
+      root_binding_counts;
     "consensus_ready_gate",
     consensus_ready_gate
       ~profile_gate_count
