@@ -794,6 +794,13 @@ let check_inference_profile_surface_coverage () =
     ]
   in
   check "inference profile surface count" (List.length surface = 17);
+  check
+    "runtime opcode list matches surface"
+    (list_equal
+       Profile.current_runtime_opcodes
+       (List.map
+          (fun (opcode, _, _, _) -> opcode)
+          surface));
   let gates =
     List.map
       (fun (opcode, expected_profile, expected_status, expected_root) ->

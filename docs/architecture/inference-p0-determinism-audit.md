@@ -381,6 +381,19 @@ codes must be intentionally classified before the report shape is extended.
 Reports also expose `consensus_blocker_class_counts`, a class-level summary
 derived from the same catalog for planning and review. The detailed
 `blocker_code` entries remain the stable automation keys.
+LiteNode can also emit the current runtime profile catalog without requiring a
+producer fixture:
+
+```text
+tools/inference_profile_catalog.exe --p0
+tools/inference_profile_catalog.exe --all
+```
+
+That standalone catalog is the intended source for producer-side
+`numerical_profile_root` remediation. It reports each opcode's current profile
+root, consensus status, blocker catalog, and a diagnostic
+`profile_catalog_root`. The catalog root identifies the emitted catalog; it is
+not a substitute for binding each template's per-opcode numerical profile root.
 Each `profile_root_binding_catalog` row also carries
 `validator_readiness_status`, `validator_readiness_blockers`, and
 `consensus_blocker_codes`. That row is the compact per-primitive answer to:

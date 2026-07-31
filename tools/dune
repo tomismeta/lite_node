@@ -22,3 +22,8 @@
  (name inference_conformance_matrix)
  (modules inference_conformance_matrix)
  (libraries yojson digestif digestif.c))
+
+(executable
+ (name inference_profile_catalog)
+ (modules inference_profile_catalog)
+ (libraries octra_vm yojson digestif digestif.c))

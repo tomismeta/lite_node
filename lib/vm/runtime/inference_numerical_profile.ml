@@ -802,34 +802,31 @@ let of_name = function
     }
   | profile -> Error (Unknown_profile profile)
 
+let current_runtime_profile_entries = [
+  "LOAD_F32_LE_FP", "byte-ingress-exact";
+  "LOAD_F64_LE_FP", "byte-ingress-exact";
+  "LINEAR_Q1_G128_FP", "deterministic-q1-g128-fp64-linear";
+  "SIGMOID_FP", "host-fp-exp-local-candidate";
+  "SOFTPLUS_FP", "host-fp-exp-local-candidate";
+  "SILU_FP", "host-fp-exp-local-candidate";
+  "CAUSAL_DEPTHWISE_CONV1D_FP", "deterministic-fp64-accumulation";
+  "GATED_DELTA_RULE_FP", "host-fp-exp-local-candidate";
+  "RMSNORM_FP_EPS", "deterministic-fp64-normalization";
+  "L2NORM_FP", "deterministic-fp64-normalization";
+  "ELEMWISE_MUL_FP", "deterministic-fp64-elementwise";
+  "RESIDUAL_ADD_FP", "deterministic-fp64-elementwise";
+  "ROPE_APPLY_INDEXED_FP", "host-fp-trig-local-candidate";
+  "ATTENTION_SCORES_FP", "deterministic-fp64-accumulation";
+  "SOFTMAX_FP", "host-fp-exp-local-candidate";
+  "ATTENTION_WEIGHTED_SUM_FP", "deterministic-fp64-accumulation";
+  "ARGMAX_FP", "deterministic-fp64-comparison";
+]
+
+let current_runtime_opcodes =
+  List.map fst current_runtime_profile_entries
+
 let current_runtime_profile ~opcode =
-  match opcode with
-  | "LOAD_F32_LE_FP"
-  | "LOAD_F64_LE_FP" ->
-    Some "byte-ingress-exact"
-  | "LINEAR_Q1_G128_FP" ->
-    Some "deterministic-q1-g128-fp64-linear"
-  | "SOFTMAX_FP"
-  | "GATED_DELTA_RULE_FP"
-  | "SIGMOID_FP"
-  | "SOFTPLUS_FP"
-  | "SILU_FP" ->
-    Some "host-fp-exp-local-candidate"
-  | "CAUSAL_DEPTHWISE_CONV1D_FP"
-  | "ATTENTION_SCORES_FP"
-  | "ATTENTION_WEIGHTED_SUM_FP" ->
-    Some "deterministic-fp64-accumulation"
-  | "ROPE_APPLY_INDEXED_FP" ->
-    Some "host-fp-trig-local-candidate"
-  | "ARGMAX_FP" ->
-    Some "deterministic-fp64-comparison"
-  | "ELEMWISE_MUL_FP"
-  | "RESIDUAL_ADD_FP" ->
-    Some "deterministic-fp64-elementwise"
-  | "RMSNORM_FP_EPS"
-  | "L2NORM_FP" ->
-    Some "deterministic-fp64-normalization"
-  | _ -> None
+  List.assoc_opt opcode current_runtime_profile_entries
 
 let validate_for_opcode ~opcode ~profile =
   match of_name profile, current_runtime_profile ~opcode with

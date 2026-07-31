@@ -55,6 +55,7 @@ type error =
 val error_message : error -> string
 val of_name : string -> (t, error) result
 val status_string : consensus_status -> string
+val current_runtime_opcodes : string list
 val current_runtime_profile : opcode:string -> string option
 val validate_for_opcode : opcode:string -> profile:string -> (t, error) result
 val to_json : t -> Yojson.Safe.t
