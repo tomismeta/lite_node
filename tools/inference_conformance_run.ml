@@ -385,6 +385,85 @@ let abi_declaration_binding_gate_json counts =
          (abi_declaration_binding_blockers counts));
   ]
 
+type executable_abi_counts = {
+  executable_abi_matched : int;
+  executable_abi_mismatch : int;
+  executable_abi_not_run : int;
+}
+
+let empty_executable_abi_counts = {
+  executable_abi_matched = 0;
+  executable_abi_mismatch = 0;
+  executable_abi_not_run = 0;
+}
+
+let add_executable_abi_status counts = function
+  | "matched" ->
+    { counts with
+      executable_abi_matched = counts.executable_abi_matched + 1 }
+  | "mismatch" ->
+    { counts with
+      executable_abi_mismatch = counts.executable_abi_mismatch + 1 }
+  | _ ->
+    { counts with
+      executable_abi_not_run = counts.executable_abi_not_run + 1 }
+
+let executable_abi_binding_counts values =
+  List.fold_left
+    (fun counts value ->
+       match value with
+       | `Assoc fields ->
+         (match field "executable_abi_binding" fields with
+          | Some (`Assoc binding_fields) ->
+            add_executable_abi_status
+              counts
+              (match opt_string_field "status" binding_fields with
+               | Some status -> status
+               | None -> "not_run")
+          | _ -> add_executable_abi_status counts "not_run")
+       | _ -> add_executable_abi_status counts "not_run")
+    empty_executable_abi_counts
+    values
+
+let executable_abi_ready counts =
+  counts.executable_abi_matched > 0
+  && counts.executable_abi_mismatch = 0
+  && counts.executable_abi_not_run = 0
+
+let executable_abi_blockers counts =
+  let add_if condition value values =
+    if condition then value :: values else values
+  in
+  []
+  |> add_if
+       (counts.executable_abi_matched = 0)
+       "executable_abi_binding_not_proven"
+  |> add_if
+       (counts.executable_abi_mismatch > 0)
+       "executable_abi_binding_mismatch"
+  |> add_if
+       (counts.executable_abi_not_run > 0)
+       "executable_abi_binding_not_run"
+
+let executable_abi_counts_json counts =
+  `Assoc [
+    "matched", `Int counts.executable_abi_matched;
+    "mismatch", `Int counts.executable_abi_mismatch;
+    "not_run", `Int counts.executable_abi_not_run;
+  ]
+
+let executable_abi_gate_json counts =
+  `Assoc [
+    "status",
+    `String (if executable_abi_ready counts then "accepted" else "rejected");
+    "counts", executable_abi_counts_json counts;
+    "blockers",
+    `List
+      (List.map
+         (fun blocker -> `String blocker)
+         (executable_abi_blockers counts));
+  ]
+
 let consensus_candidate_gate
     ~profile_gate_count
     ~unprofiled_count
@@ -504,6 +583,9 @@ let next_readiness_blocker blockers =
       "unbound_abi_declaration_binding";
       "abi_declaration_binding_mismatch";
       "abi_declaration_binding_rejected";
+      "executable_abi_binding_not_proven";
+      "executable_abi_binding_mismatch";
+      "executable_abi_binding_not_run";
       "consensus_candidate_profile_gates";
       "unbound_profile_roots";
       "profile_root_binding_mismatch";
@@ -949,6 +1031,7 @@ let validator_readiness_gate
     ~root_binding_counts
     ~vm_semantics_binding_counts
     ~abi_declaration_binding_counts
+    ~executable_abi_counts
     ~cross_platform_evidence
     ~included_template_count
     ~declared_failure_case_count
@@ -980,6 +1063,7 @@ let validator_readiness_gate
   let abi_ready =
     Profile.root_bindings_are_consensus_ready abi_declaration_binding_counts
   in
+  let executable_abi_ready = executable_abi_ready executable_abi_counts in
   let cross_platform_ready = gate_status_accepted cross_platform_evidence in
   let ready =
     Profile.validator_readiness_accepted
@@ -991,6 +1075,7 @@ let validator_readiness_gate
       ~cross_platform_ready
     && vm_semantics_ready
     && abi_ready
+    && executable_abi_ready
   in
   let blockers =
     []
@@ -1008,6 +1093,9 @@ let validator_readiness_gate
          (not abi_ready)
          "abi_declaration_binding_not_proven"
     |> add_blocker
+         (not executable_abi_ready)
+         "executable_abi_binding_not_proven"
+    |> add_blocker
          (not cross_platform_ready)
          "cross_platform_conformance_missing"
   in
@@ -1023,6 +1111,7 @@ let validator_readiness_gate
     @ effort_blockers
     @ vm_semantics_root_blockers vm_semantics_binding_counts
     @ abi_declaration_binding_blockers abi_declaration_binding_counts
+    @ executable_abi_blockers executable_abi_counts
     @ Profile.consensus_ready_blockers
         ~profile_gate_count
         ~unprofiled_count
@@ -1052,6 +1141,10 @@ let validator_readiness_gate
     `String (if abi_ready then "accepted" else "rejected");
     "abi_declaration_binding_gate",
     abi_declaration_binding_gate_json abi_declaration_binding_counts;
+    "executable_abi_status",
+    `String (if executable_abi_ready then "accepted" else "rejected");
+    "executable_abi_binding_gate",
+    executable_abi_gate_json executable_abi_counts;
     "cross_platform_status",
     `String (if cross_platform_ready then "accepted" else "rejected");
     "cross_platform_evidence", cross_platform_evidence;
@@ -2508,6 +2601,7 @@ let run_p0_plus_pack path =
   let abi_declaration_binding_counts =
     Profile.root_binding_counts_of_json []
   in
+  let executable_abi_counts = executable_abi_binding_counts [] in
   let root_binding_classification_counts =
     Profile.root_binding_classification_counts_of_json profile_root_bindings
   in
@@ -2535,6 +2629,7 @@ let run_p0_plus_pack path =
       ~root_binding_counts
       ~vm_semantics_binding_counts
       ~abi_declaration_binding_counts
+      ~executable_abi_counts
       ~cross_platform_evidence:cross_platform_evidence_json
       ~included_template_count:0
       ~declared_failure_case_count:0
@@ -2604,6 +2699,10 @@ let run_p0_plus_pack path =
     "abi_declaration_binding_status_counts",
     Profile.root_binding_counts_json abi_declaration_binding_counts;
     "abi_declaration_binding_gate", abi_declaration_binding_gate_json abi_declaration_binding_counts;
+    "executable_abi_binding_status_counts",
+    executable_abi_counts_json executable_abi_counts;
+    "executable_abi_binding_gate",
+    executable_abi_gate_json executable_abi_counts;
     "validator_readiness_gate", validator_readiness_gate_json;
     "consensus_candidate_gate",
     consensus_candidate_gate
@@ -2751,6 +2850,9 @@ let run_index path =
   let abi_declaration_binding_counts =
     abi_declaration_binding_status_counts (List.map snd results)
   in
+  let executable_abi_counts =
+    executable_abi_binding_counts (List.map snd results)
+  in
   let root_binding_classification_counts =
     profile_root_binding_classification_counts (List.map snd results)
   in
@@ -2813,6 +2915,7 @@ let run_index path =
       ~root_binding_counts
       ~vm_semantics_binding_counts
       ~abi_declaration_binding_counts
+      ~executable_abi_counts
       ~cross_platform_evidence:cross_platform_evidence_json
       ~included_template_count:included_failure_template_count
       ~declared_failure_case_count
@@ -2883,6 +2986,10 @@ let run_index path =
     "abi_declaration_binding_status_counts",
     Profile.root_binding_counts_json abi_declaration_binding_counts;
     "abi_declaration_binding_gate", abi_declaration_binding_gate_json abi_declaration_binding_counts;
+    "executable_abi_binding_status_counts",
+    executable_abi_counts_json executable_abi_counts;
+    "executable_abi_binding_gate",
+    executable_abi_gate_json executable_abi_counts;
     "validator_readiness_gate", validator_readiness_gate_json;
     "consensus_candidate_gate",
     consensus_candidate_gate

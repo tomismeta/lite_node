@@ -402,6 +402,11 @@ row-aggregate failures such as `matrix_runner_executable_count_mismatch`,
 `profile_catalog_root` and `template_corpus_root` is not validator-readiness
 evidence, even if the matrix envelope carries those roots.
 
+Runner validator-readiness reports also surface executable ABI as a first-class
+gate. A bad final `r0/r1` pair or unreadable canonical output payload rejects
+as `executable_abi_binding_mismatch` or `executable_abi_binding_not_run`, not
+merely as a generic execution failure.
+
 Checker, runner, and matrix reports all expose top-level
 `validator_readiness_required` so consumers can tell whether a report was
 produced as a diagnostic artifact or as a hard readiness gate.

@@ -716,6 +716,19 @@ let check_good_template_reports_bound_abi () =
       (String.equal
          (string_value "output_payload_status" executable_abi)
          "accepted");
+    let readiness =
+      match report with
+      | `Assoc fields -> assoc_json "validator_readiness_gate" fields
+      | _ -> failwith "report must be object"
+    in
+    check
+      "good readiness executable ABI accepted"
+      (String.equal
+         (string_value "executable_abi_status" readiness)
+         "accepted");
+    check
+      "good executable ABI gate accepted"
+      (String.equal (gate_status "executable_abi_binding_gate" report) "accepted");
     check
       "good ABI gate accepted"
       (String.equal (gate_status "abi_declaration_binding_gate" report) "accepted"))
@@ -928,6 +941,39 @@ let check_readiness_gate_rejects_stale_abi () =
         "stale ABI readiness blocker"
         (List.mem "unbound_abi_declaration_binding" blockers)
     | _ -> failwith "report must be object")
+
+let check_readiness_gate_reports_executable_abi_mismatch () =
+  with_temp_dir (fun dir ->
+    let code, report =
+      run_conformance
+        dir
+        (q1_template ~r1:2 ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+          "--require-validator-readiness";
+        ]
+    in
+    check "bad executable ABI runner exits nonzero" (code = 1);
+    (match report with
+     | `Assoc fields ->
+       let readiness = assoc_json "validator_readiness_gate" fields in
+       check
+         "bad executable ABI readiness status"
+         (String.equal
+            (string_value "executable_abi_status" readiness)
+            "rejected");
+       let blockers = string_list "blockers" readiness in
+       check
+         "bad executable ABI readiness blocker"
+         (List.mem "executable_abi_binding_mismatch" blockers);
+       let gate = assoc_json "executable_abi_binding_gate" fields in
+       check
+         "bad executable ABI top-level gate"
+         (String.equal (string_value "status" gate) "rejected")
+     | _ -> failwith "report must be object"))
 
 let check_pinned_cross_platform_matrix_is_consumed () =
   with_temp_dir (fun dir ->
@@ -1249,6 +1295,7 @@ let () =
   check_accept_snapshot_requires_exact_output ();
   check_stale_abi_is_visible_in_executable_report ();
   check_readiness_gate_rejects_stale_abi ();
+  check_readiness_gate_reports_executable_abi_mismatch ();
   check_pinned_cross_platform_matrix_is_consumed ();
   check_cross_platform_matrix_without_pin_rejects ();
   check_cross_platform_matrix_sha_mismatch_rejects ();
