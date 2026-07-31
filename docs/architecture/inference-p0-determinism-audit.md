@@ -645,14 +645,17 @@ ordering manifests are preserved as `producer_only` evidence. The explicit
 P0-plus runner now reports per-fixture `profile_gates` plus an aggregate
 `profile_gate_count`, `classified_profile_gate_count`, and
 `profile_root_catalog`; both P0 and P0-plus reports also expose
-`consensus_blocker_catalog`. The composite logits-tail case reports the
-component profiles for `RMSNORM_FP_EPS`, `LINEAR_Q1_G128_FP`, and `ARGMAX_FP`.
-Its `profile_consensus_status_counts` now separate deterministic comparison,
-normalization, and Q1 candidates from remaining local-only host-FP math. Like
-P0 execution reports,
-`execution_status` is the VM
-output result and top-level `status` includes any strict consensus-readiness
-gate. The explicit top-k boundary is:
+`consensus_blocker_catalog` and a diagnostic `validator_readiness_gate`.
+The P0-plus readiness gate is expected to reject today because P0-plus does
+not yet run punitive failure/atomicity cases and still needs bound roots,
+consensus-ready profiles, and cross-platform evidence. The composite
+logits-tail case reports the component profiles for `RMSNORM_FP_EPS`,
+`LINEAR_Q1_G128_FP`, and `ARGMAX_FP`. Its
+`profile_consensus_status_counts` now separate deterministic comparison,
+normalization, and Q1 candidates from remaining local-only host-FP math.
+Like P0 execution reports, `execution_status` is the VM output result; use
+`validator_readiness_gate.status` for validator readiness. The explicit top-k
+boundary is:
 
 LiteNode now reports `ARGMAX_FP` under a `deterministic-fp64-comparison`
 consensus-candidate profile. Its semantics are finite binary64 input reads,

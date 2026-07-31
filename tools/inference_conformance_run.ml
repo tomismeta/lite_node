@@ -1486,6 +1486,7 @@ let run_p0_plus_pack path =
       | _ -> fail "P0-plus fixture entries must be objects")
   in
   let results = List.map (execute_p0_plus_fixture root_dir) entries in
+  let fixture_count = List.length results in
   let execution_accepted = List.for_all fst results in
   let execution_status =
     if execution_accepted then "accepted" else "rejected"
@@ -1560,7 +1561,7 @@ let run_p0_plus_pack path =
     "execution_mode", `String "p0_plus_fixture_pack_vm_execution";
     "platform", platform_json ();
     "fixture_pack", `String path;
-    "fixture_count", `Int (List.length results);
+    "fixture_count", `Int fixture_count;
     "accepted_count", `Int (List.length (List.filter fst results));
     "rejected_count",
     `Int (List.length (List.filter (fun (ok, _) -> not ok) results));
@@ -1587,6 +1588,17 @@ let run_p0_plus_pack path =
     Profile.root_binding_gate_json
       ~required:!require_profile_roots_bound
       root_binding_counts;
+    "validator_readiness_gate",
+    validator_readiness_gate
+      ~execution_accepted
+      ~template_count:fixture_count
+      ~profile_gate_count
+      ~unprofiled_count:0
+      ~root_binding_counts
+      ~included_template_count:0
+      ~counted_failure_case_count:0
+      ~accepted_counted_failure_case_count:0
+      status_counts;
     "consensus_candidate_gate",
     consensus_candidate_gate
       ~profile_gate_count
