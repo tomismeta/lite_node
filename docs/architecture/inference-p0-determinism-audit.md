@@ -132,6 +132,10 @@ failure_case_gate: accepted
 validator_readiness_gate: rejected
 ```
 
+When `--require-validator-readiness` is enabled, the top-level report status is
+also `rejected`; without that flag, the same execution can remain `accepted` as
+consensus-candidate evidence.
+
 That rejection is intentional. The next validator-readiness blockers are not
 packet shape, admission, output root derivation, or local failure atomicity. The
 remaining blockers are:

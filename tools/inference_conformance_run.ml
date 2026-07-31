@@ -345,6 +345,15 @@ let consensus_candidate_required_passes
 let add_blocker condition blocker blockers =
   if condition then blocker :: blockers else blockers
 
+let gate_status_accepted = function
+  | `Assoc fields ->
+    (try String.equal (string_field "status" fields) "accepted" with
+     | Failure _ -> false)
+  | _ -> false
+
+let required_gate_passes ~required gate =
+  (not required) || gate_status_accepted gate
+
 let failure_cases_accepted
     ~template_count
     ~included_template_count
@@ -1574,6 +1583,23 @@ let run_p0_plus_pack path =
   let classified_profile_gate_count =
     Profile.classified_gate_count status_counts
   in
+  let validator_readiness_gate_json =
+    validator_readiness_gate
+      ~required:!require_validator_readiness
+      ~execution_accepted
+      ~strict_effort_status:"not_supported"
+      ~effort_status:"not_supported"
+      ~effort_ready:false
+      ~effort_blockers:["p0_plus_effort_authority_missing"]
+      ~template_count:fixture_count
+      ~profile_gate_count
+      ~unprofiled_count:0
+      ~root_binding_counts
+      ~included_template_count:0
+      ~counted_failure_case_count:0
+      ~accepted_counted_failure_case_count:0
+      status_counts
+  in
   let accepted =
     execution_accepted
     && profile_roots_required_passes ~root_binding_counts
@@ -1589,6 +1615,9 @@ let run_p0_plus_pack path =
       ~unprofiled_count:0
       ~root_binding_counts
       status_counts
+    && required_gate_passes
+         ~required:!require_validator_readiness
+         validator_readiness_gate_json
   in
   `Assoc [
     "status", `String (if accepted then "accepted" else "rejected");
@@ -1625,22 +1654,7 @@ let run_p0_plus_pack path =
     Profile.root_binding_gate_json
       ~required:!require_profile_roots_bound
       root_binding_counts;
-    "validator_readiness_gate",
-    validator_readiness_gate
-      ~required:!require_validator_readiness
-      ~execution_accepted
-      ~strict_effort_status:"not_supported"
-      ~effort_status:"not_supported"
-      ~effort_ready:false
-      ~effort_blockers:["p0_plus_effort_authority_missing"]
-      ~template_count:fixture_count
-      ~profile_gate_count
-      ~unprofiled_count:0
-      ~root_binding_counts
-      ~included_template_count:0
-      ~counted_failure_case_count:0
-      ~accepted_counted_failure_case_count:0
-      status_counts;
+    "validator_readiness_gate", validator_readiness_gate_json;
     "consensus_candidate_gate",
     consensus_candidate_gate
       ~profile_gate_count
@@ -1786,6 +1800,31 @@ let run_index path =
       ~root_binding_counts
       status_counts
   in
+  let validator_readiness_gate_json =
+    validator_readiness_gate
+      ~required:!require_validator_readiness
+      ~execution_accepted
+      ~strict_effort_status:
+        (if strict_effort_ready then "accepted" else "rejected")
+      ~effort_status:
+        (if effort_match_ready then "accepted" else "rejected")
+      ~effort_ready:(strict_effort_ready && effort_match_ready)
+      ~effort_blockers
+      ~template_count
+      ~profile_gate_count
+      ~unprofiled_count
+      ~root_binding_counts
+      ~included_template_count:included_failure_template_count
+      ~counted_failure_case_count
+      ~accepted_counted_failure_case_count
+      status_counts
+  in
+  let accepted =
+    accepted
+    && required_gate_passes
+         ~required:!require_validator_readiness
+         validator_readiness_gate_json
+  in
   let status = if accepted then "accepted" else "rejected" in
   `Assoc [
     "status", `String status;
@@ -1829,24 +1868,7 @@ let run_index path =
     Profile.root_binding_gate_json
       ~required:!require_profile_roots_bound
       root_binding_counts;
-    "validator_readiness_gate",
-    validator_readiness_gate
-      ~required:!require_validator_readiness
-      ~execution_accepted
-      ~strict_effort_status:
-        (if strict_effort_ready then "accepted" else "rejected")
-      ~effort_status:
-        (if effort_match_ready then "accepted" else "rejected")
-      ~effort_ready:(strict_effort_ready && effort_match_ready)
-      ~effort_blockers
-      ~template_count
-      ~profile_gate_count
-      ~unprofiled_count
-      ~root_binding_counts
-      ~included_template_count:included_failure_template_count
-      ~counted_failure_case_count
-      ~accepted_counted_failure_case_count
-      status_counts;
+    "validator_readiness_gate", validator_readiness_gate_json;
     "consensus_candidate_gate",
     consensus_candidate_gate
       ~profile_gate_count

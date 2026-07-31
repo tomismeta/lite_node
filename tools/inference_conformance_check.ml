@@ -361,6 +361,16 @@ let profile_roots_required_passes ~root_binding_counts =
 let add_blocker condition blocker blockers =
   if condition then blocker :: blockers else blockers
 
+let gate_status_accepted = function
+  | `Assoc fields ->
+    (match string_field "status" fields with
+     | Some "accepted" -> true
+     | _ -> false)
+  | _ -> false
+
+let required_gate_passes ~required gate =
+  (not required) || gate_status_accepted gate
+
 let static_validator_readiness_gate
     ~required
     ~schema_status
@@ -920,6 +930,15 @@ let producer_index_report index_path =
       @ duplicates
     in
     let schema_status = if issues = [] then "accepted" else "rejected" in
+    let validator_readiness_gate_json =
+      static_validator_readiness_gate
+        ~required:!require_validator_readiness
+        ~schema_status
+        ~profile_gate_count
+        ~unprofiled_count:unprofiled_template_count
+        ~root_binding_counts:profile_root_binding_counts
+        profile_status_counts
+    in
     let status =
       if
         String.equal schema_status "accepted"
@@ -935,6 +954,9 @@ let producer_index_report index_path =
              ~unprofiled_count:unprofiled_template_count
              ~root_binding_counts:profile_root_binding_counts
              profile_status_counts
+        && required_gate_passes
+             ~required:!require_validator_readiness
+             validator_readiness_gate_json
       then "accepted"
       else "rejected"
     in
@@ -976,14 +998,7 @@ let producer_index_report index_path =
       Profile.root_binding_gate_json
         ~required:!require_profile_roots_bound
         profile_root_binding_counts;
-      "validator_readiness_gate",
-      static_validator_readiness_gate
-        ~required:!require_validator_readiness
-        ~schema_status
-        ~profile_gate_count
-        ~unprofiled_count:unprofiled_template_count
-        ~root_binding_counts:profile_root_binding_counts
-        profile_status_counts;
+      "validator_readiness_gate", validator_readiness_gate_json;
       "consensus_candidate_gate",
       consensus_candidate_gate
         ~profile_gate_count
@@ -1068,6 +1083,15 @@ let () =
             Profile.classified_gate_count profile_status_counts
           in
           let schema_status = "accepted" in
+          let validator_readiness_gate_json =
+            static_validator_readiness_gate
+              ~required:!require_validator_readiness
+              ~schema_status
+              ~profile_gate_count
+              ~unprofiled_count:(1 - profile_gate_count)
+              ~root_binding_counts:profile_root_binding_counts
+              profile_status_counts
+          in
           let status =
             if
               profile_roots_required_passes
@@ -1084,6 +1108,9 @@ let () =
                 ~unprofiled_count:(1 - profile_gate_count)
                 ~root_binding_counts:profile_root_binding_counts
                 profile_status_counts
+              && required_gate_passes
+                   ~required:!require_validator_readiness
+                   validator_readiness_gate_json
             then "accepted"
             else "rejected"
           in
@@ -1120,14 +1147,7 @@ let () =
               Profile.root_binding_gate_json
                 ~required:!require_profile_roots_bound
                 profile_root_binding_counts;
-              "validator_readiness_gate",
-              static_validator_readiness_gate
-                ~required:!require_validator_readiness
-                ~schema_status
-                ~profile_gate_count
-                ~unprofiled_count:(1 - profile_gate_count)
-                ~root_binding_counts:profile_root_binding_counts
-                profile_status_counts;
+              "validator_readiness_gate", validator_readiness_gate_json;
               "consensus_candidate_gate",
               consensus_candidate_gate
                 ~profile_gate_count
@@ -1172,6 +1192,15 @@ let () =
     in
     let unprofiled_count = List.length templates - profile_gate_count in
     let schema_status = "accepted" in
+    let validator_readiness_gate_json =
+      static_validator_readiness_gate
+        ~required:!require_validator_readiness
+        ~schema_status
+        ~profile_gate_count
+        ~unprofiled_count
+        ~root_binding_counts
+        status_counts
+    in
     let status =
       if
         profile_roots_required_passes
@@ -1188,6 +1217,9 @@ let () =
           ~unprofiled_count
           ~root_binding_counts
           status_counts
+        && required_gate_passes
+             ~required:!require_validator_readiness
+             validator_readiness_gate_json
       then "accepted"
       else "rejected"
     in
@@ -1223,14 +1255,7 @@ let () =
         Profile.root_binding_gate_json
           ~required:!require_profile_roots_bound
           root_binding_counts;
-        "validator_readiness_gate",
-        static_validator_readiness_gate
-          ~required:!require_validator_readiness
-          ~schema_status
-          ~profile_gate_count
-          ~unprofiled_count
-          ~root_binding_counts
-          status_counts;
+        "validator_readiness_gate", validator_readiness_gate_json;
         "consensus_candidate_gate",
         consensus_candidate_gate
           ~profile_gate_count
