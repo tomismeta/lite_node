@@ -320,15 +320,20 @@ let check_q1_profile_obligations () =
               ~opcode:"LINEAR_Q1_G128_FP"
           with
           | Some root ->
-            String.equal
-              root
-              "f35756d96e853e3c4f74b05f25cba9a8982fe64ef37ad2bb46b88bc7152b63a7"
+            let expected =
+              "dadbe73c450bdd3dc0165a979221fee9eab5cf1d088a1340359a0407b4fb73c0"
+            in
+            if String.equal root expected then true
+            else
+              failwith
+                ("q1 vm semantics root observed " ^ root
+                 ^ " expected " ^ expected)
           | None -> false);
        (match
           Template.vm_semantics_binding_json
             ~opcode:"LINEAR_Q1_G128_FP"
             ~vm_semantics_root:
-              "f35756d96e853e3c4f74b05f25cba9a8982fe64ef37ad2bb46b88bc7152b63a7"
+              "dadbe73c450bdd3dc0165a979221fee9eab5cf1d088a1340359a0407b4fb73c0"
         with
         | `Assoc binding ->
           check

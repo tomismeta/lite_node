@@ -637,16 +637,19 @@ let cross_platform_evidence
 let failure_cases_accepted
     ~template_count
     ~included_template_count
+    ~declared_failure_case_count
     ~counted_failure_case_count
     ~accepted_counted_failure_case_count =
   template_count > 0
   && included_template_count = template_count
+  && declared_failure_case_count = counted_failure_case_count
   && counted_failure_case_count > 0
   && accepted_counted_failure_case_count = counted_failure_case_count
 
 let failure_case_blockers
     ~template_count
     ~included_template_count
+    ~declared_failure_case_count
     ~counted_failure_case_count
     ~accepted_counted_failure_case_count =
   []
@@ -657,18 +660,23 @@ let failure_case_blockers
        (counted_failure_case_count = 0)
        "no_counted_failure_cases"
   |> add_blocker
+       (declared_failure_case_count <> counted_failure_case_count)
+       "uncounted_failure_cases"
+  |> add_blocker
        (accepted_counted_failure_case_count <> counted_failure_case_count)
        "failure_cases_rejected"
 
 let failure_case_gate
     ~template_count
     ~included_template_count
+    ~declared_failure_case_count
     ~counted_failure_case_count
     ~accepted_counted_failure_case_count =
   let passed =
     failure_cases_accepted
       ~template_count
       ~included_template_count
+      ~declared_failure_case_count
       ~counted_failure_case_count
       ~accepted_counted_failure_case_count
   in
@@ -676,6 +684,7 @@ let failure_case_gate
     failure_case_blockers
       ~template_count
       ~included_template_count
+      ~declared_failure_case_count
       ~counted_failure_case_count
       ~accepted_counted_failure_case_count
   in
@@ -688,6 +697,7 @@ let failure_case_gate
        else "rejected");
     "template_count", `Int template_count;
     "included_template_count", `Int included_template_count;
+    "declared_failure_case_count", `Int declared_failure_case_count;
     "counted_failure_case_count", `Int counted_failure_case_count;
     "accepted_counted_failure_case_count",
     `Int accepted_counted_failure_case_count;
@@ -698,6 +708,7 @@ let failure_case_gate
 let failure_cases_required_pass
     ~template_count
     ~included_template_count
+    ~declared_failure_case_count
     ~counted_failure_case_count
     ~accepted_counted_failure_case_count =
   (not !require_failure_cases)
@@ -705,6 +716,7 @@ let failure_cases_required_pass
   failure_cases_accepted
     ~template_count
     ~included_template_count
+    ~declared_failure_case_count
     ~counted_failure_case_count
     ~accepted_counted_failure_case_count
 
@@ -722,6 +734,7 @@ let validator_readiness_gate
     ~vm_semantics_binding_counts
     ~cross_platform_evidence
     ~included_template_count
+    ~declared_failure_case_count
     ~counted_failure_case_count
     ~accepted_counted_failure_case_count
     status_counts =
@@ -729,6 +742,7 @@ let validator_readiness_gate
     failure_cases_accepted
       ~template_count
       ~included_template_count
+      ~declared_failure_case_count
       ~counted_failure_case_count
       ~accepted_counted_failure_case_count
   in
@@ -773,6 +787,7 @@ let validator_readiness_gate
     @ failure_case_blockers
         ~template_count
         ~included_template_count
+        ~declared_failure_case_count
         ~counted_failure_case_count
         ~accepted_counted_failure_case_count
     @ effort_blockers
@@ -1123,6 +1138,24 @@ let apply_mutation state registers values inputs mutation =
         | Some param -> set_int_reg state (reg_for param registers) first.base
         | None -> ());
        `Executed
+     | "set_output_base_to_first_input_base_plus" ->
+       let first =
+         match inputs with
+         | input :: _ -> input
+         | [] -> fail "no inputs available for alias mutation"
+       in
+       let offset_cells = int_field "offset_cells" fields in
+       let output_param =
+         if List.mem_assoc "dst" registers then Some "dst"
+         else if List.mem_assoc "output" registers then Some "output"
+         else if List.mem_assoc "addr" registers then Some "addr"
+         else None
+       in
+       (match output_param with
+        | Some param ->
+          set_int_reg state (reg_for param registers) (first.base + offset_cells)
+        | None -> ());
+       `Executed
      | "replace_q1_scale_bits" ->
        let input = find_input "q1_owner" inputs in
        (match input.raw_register with
@@ -1310,8 +1343,10 @@ let failure_expectation expected =
             "implementation_must_use_stable_max_subtract"
             expected then
     `Must_accept_changed_finite
+  else if starts_with "accept_from_snapshot" expected then
+    `Must_accept_changed_finite
   else if starts_with "reject_or_documented_safe_copy" expected then
-    `Must_reject_or_accept_changed_finite
+    `Observation
   else `Observation
 
 let failure_case_result root_dir opcode template registers values op case =
@@ -1384,9 +1419,6 @@ let failure_case_result root_dir opcode template registers values op case =
       | `Must_reject -> true, ((not ran) && unchanged_ok)
       | `Must_accept_changed_finite ->
         true, (ran && changed_ok && finite_ok)
-      | `Must_reject_or_accept_changed_finite ->
-        true, ((not ran) && unchanged_ok
-               || ran && active_changed_ok && active_finite_ok)
       | `Observation -> false, true
     in
     passed,
@@ -1934,6 +1966,7 @@ let run_p0_plus_pack path =
       ~vm_semantics_binding_counts
       ~cross_platform_evidence:cross_platform_evidence_json
       ~included_template_count:0
+      ~declared_failure_case_count:0
       ~counted_failure_case_count:0
       ~accepted_counted_failure_case_count:0
       status_counts
@@ -2089,6 +2122,15 @@ let run_index path =
       0
       results
   in
+  let declared_failure_case_count =
+    List.fold_left
+      (fun count (_, result) ->
+         match result with
+         | `Assoc fields -> count + int_field "failure_case_count" fields
+         | _ -> count)
+      0
+      results
+  in
   let accepted_counted_failure_case_count =
     List.fold_left
       (fun count (_, result) ->
@@ -2145,6 +2187,7 @@ let run_index path =
     && failure_cases_required_pass
          ~template_count
          ~included_template_count:included_failure_template_count
+         ~declared_failure_case_count
          ~counted_failure_case_count
          ~accepted_counted_failure_case_count
     && profile_roots_required_passes ~root_binding_counts
@@ -2178,6 +2221,7 @@ let run_index path =
       ~vm_semantics_binding_counts
       ~cross_platform_evidence:cross_platform_evidence_json
       ~included_template_count:included_failure_template_count
+      ~declared_failure_case_count
       ~counted_failure_case_count
       ~accepted_counted_failure_case_count
       status_counts
@@ -2209,6 +2253,7 @@ let run_index path =
     failure_case_gate
       ~template_count
       ~included_template_count:included_failure_template_count
+      ~declared_failure_case_count
       ~counted_failure_case_count
       ~accepted_counted_failure_case_count;
     "profile_gate_count", `Int profile_gate_count;

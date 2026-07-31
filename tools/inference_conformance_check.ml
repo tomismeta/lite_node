@@ -104,6 +104,11 @@ let read_file path =
 let sha256 raw =
   Digestif.SHA256.(digest_string raw |> to_hex)
 
+let starts_with prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len
+  && String.equal (String.sub value 0 prefix_len) prefix
+
 let backend_type_string = function
   | Sys.Native -> "native"
   | Sys.Bytecode -> "bytecode"
@@ -690,9 +695,10 @@ let failure_issues path opcode fields =
                 | Some value -> value
                 | None -> "<unknown>"
               in
+              let expected = string_field "expected" failure_fields in
               `Case
                 (case,
-                 string_field "expected" failure_fields <> None,
+                 expected,
                  (match list_field "executable_mutations" failure_fields with
                   | Some (_ :: _) -> true
                   | _ -> false),
@@ -725,9 +731,33 @@ let failure_issues path opcode fields =
       let missing_expected =
         List.filter_map
           (function
-            | `Case (case, false, _, _) -> Some case
+            | `Case (case, None, _, _) -> Some case
             | _ -> None)
           parsed
+      in
+      let q1_alias_issues =
+        if not (String.equal opcode "LINEAR_Q1_G128_FP") then []
+        else
+          let expected_for case =
+            List.find_map
+              (function
+                | `Case (actual, expected, _, _) when String.equal actual case ->
+                  expected
+                | _ -> None)
+              parsed
+          in
+          ["output_input_aliasing"; "partial_output_input_aliasing"]
+          |> List.filter_map (fun case ->
+            match expected_for case with
+            | Some expected when starts_with "accept_from_snapshot" expected -> None
+            | Some _ ->
+              Some
+                (issue ~opcode path
+                   (case ^ " must declare accept_from_snapshot"))
+            | None ->
+              Some
+                (issue ~opcode path
+                   (case ^ " failure case is required for Q1 snapshot aliasing")))
       in
       let expected_issue =
         if missing_expected = [] then []
@@ -750,7 +780,7 @@ let failure_issues path opcode fields =
              ("failure cases lack unchanged_spans: "
               ^ String.concat "," missing_unchanged)]
       in
-      bad @ expected_issue @ mutation_issue @ unchanged_issue
+      bad @ expected_issue @ mutation_issue @ unchanged_issue @ q1_alias_issues
 
 let gated_delta_semantic_issues path opcode fields =
   if not (String.equal opcode "GATED_DELTA_RULE_FP") then []

@@ -421,10 +421,28 @@ let check_offset_and_overlap () =
     "nonzero offset output"
     (output_bytes state dst 6 = expected_output);
   let state, dst, _ = q1_state ~dst:20000 () in
-  check "overlap runs from snapshot" (VM.run state q1_code);
+  check "exact overlap runs from snapshot" (VM.run state q1_code);
   check
-    "overlap output"
-    (output_bytes state dst 6 = expected_output)
+    "exact overlap output"
+    (output_bytes state dst 6 = expected_output);
+  let state, dst, _ = q1_state ~dst:20003 () in
+  check "partial overlap runs from snapshot" (VM.run state q1_code);
+  check
+    "partial overlap output"
+    (output_bytes state dst 6 = expected_output);
+  let state, dst, lhs = q1_state ~dst:20003 () in
+  List.iteri
+    (fun index value -> set_output_cell state (dst + index) value)
+    [42.0; 43.0; 44.0; 45.0; 46.0; 47.0];
+  Hashtbl.replace
+    state.VM.memory.data
+    (lhs + 17)
+    (VM.VInt (Z.of_int64 (Int64.bits_of_float (0.0 /. 0.0))));
+  check "partial overlap reject preserves output" (not (VM.run state q1_code));
+  check
+    "partial overlap reject output unchanged"
+    (output_bytes state dst 6
+     = f64_bytes [42.0; 43.0; 44.0; 45.0; 46.0; 47.0])
 
 let check_effects () =
   let names = Program_effects.(scan q1_code |> names) in

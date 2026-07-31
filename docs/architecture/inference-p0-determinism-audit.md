@@ -160,25 +160,29 @@ selected_opcodes: [LINEAR_Q1_G128_FP]
 template_count: 1
 execution_status: accepted
 strict_effort: accepted, 201 == 201
-failure_case_gate: accepted, 7/7 counted cases accepted
+failure_case_gate: rejected, 6/7 declared cases counted
 profile_root_binding_gate: rejected
 vm_semantics_binding_gate: rejected
 template numerical_profile_root: 66be1b09b91d4e339ffaa16bda41bc87b18141b3506bbfe698448e2e401eb245
 current LiteNode profile_root: e56a53248e58276b480ece29a69b2cfa8609eaea90b9f462d8f5a1de6d7abe50
 template vm_semantics_root: d49cc837c452322bd6193645a02b89adef33eccad66cdab73a891140cabba950
-current LiteNode vm_semantics_root: f35756d96e853e3c4f74b05f25cba9a8982fe64ef37ad2bb46b88bc7152b63a7
+current LiteNode vm_semantics_root: dadbe73c450bdd3dc0165a979221fee9eab5cf1d088a1340359a0407b4fb73c0
 validator_readiness_gate: rejected
 blockers: unbound_profile_roots, unbound_vm_semantics_roots,
-  consensus_candidate_profile_gates, cross_platform_conformance_missing
+  uncounted_failure_cases, consensus_candidate_profile_gates,
+  cross_platform_conformance_missing
 ```
 
 That means the immediate producer action is narrow: re-emit the P0 template
 index with the current `deterministic-q1-g128-fp64-linear` profile root, which
 now includes the rooted Q1 effort formula, and the current
-`LINEAR_Q1_G128_FP` VM semantics root. Once the focused runner reports
-`profile_root_binding_gate: accepted` and `vm_semantics_binding_gate: accepted`,
-the same template corpus should be run on at least two independent platforms
-and consumed through `inference_conformance_matrix.exe`.
+`LINEAR_Q1_G128_FP` VM semantics root, and replace the ambiguous
+`output_input_aliasing` case with explicit `accept_from_snapshot` evidence for
+both exact and partial lhs/output overlap. Once the focused runner reports
+`failure_case_gate: accepted`, `profile_root_binding_gate: accepted`, and
+`vm_semantics_binding_gate: accepted`, the same template corpus should be run
+on at least two independent platforms and consumed through
+`inference_conformance_matrix.exe`.
 
 When a real accepted matrix report is supplied with `--cross-platform-matrix`,
 the runner consumes it as the cross-platform evidence slot for the selected
@@ -639,11 +643,13 @@ Failure/edge-case status:
 
 No current P0 failure/edge cases are left uncounted in the direct runner.
 
-`output_input_aliasing` is counted as a deterministic policy branch: the VM
-must either reject before writeback with the declared spans unchanged, or accept
-with the active output span changed and finite. Current P0 behavior covers both
-branches: Q1, normalization, and softmax use documented safe-copy/in-place
-paths, while Gated Delta rejects the alias before writing output/state.
+`LINEAR_Q1_G128_FP` aliasing is no longer accepted as an ambiguous
+`reject_or_documented_safe_copy` branch. Validator-readiness now requires
+explicit `accept_from_snapshot` evidence for exact and partial lhs/output
+overlap. The VM must snapshot all lhs cells before output writeback, accept
+valid overlap from that snapshot, and preserve the output span on validation or
+arithmetic rejection. Other P0 primitives keep their primitive-specific alias
+contracts until they are promoted in turn.
 
 `finite_square_overflow` is now counted for `RMSNORM_FP_EPS` and `L2NORM_FP`
 under the current deterministic normalization profile: finite square/reduction

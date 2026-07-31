@@ -154,7 +154,8 @@ let vm_semantics_contract_json ~opcode =
         ];
         "read_write_policy",
         `List [
-          `String "snapshot lhs before output writeback";
+          `String "snapshot all lhs cells before output writeback";
+          `String "accept exact or partial lhs/output overlap from the lhs snapshot";
           `String "decode all Q1 scale bits before output writeback";
           `String "write output only after full output buffer succeeds";
           `String "preserve output on validation or arithmetic rejection";
