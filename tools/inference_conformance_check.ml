@@ -267,6 +267,42 @@ let issue_json issue =
     "message", `String issue.message;
   ]
 
+let failure_span_issues path opcode case = function
+  | `Assoc fields ->
+    let name_issue =
+      match string_field "name" fields with
+      | Some _ -> []
+      | None ->
+        [issue ~opcode path
+           ("failure case unchanged span missing name: " ^ case)]
+    in
+    let base_issue =
+      match int_field "base_address" fields with
+      | Some value when value >= 0 -> []
+      | Some _ ->
+        [issue ~opcode path
+           ("failure case unchanged span base_address must be nonnegative: "
+            ^ case)]
+      | None ->
+        [issue ~opcode path
+           ("failure case unchanged span missing base_address: " ^ case)]
+    in
+    let length_issue =
+      match int_field "length_f64_cells" fields with
+      | Some value when value > 0 -> []
+      | Some _ ->
+        [issue ~opcode path
+           ("failure case unchanged span length_f64_cells must be positive: "
+            ^ case)]
+      | None ->
+        [issue ~opcode path
+           ("failure case unchanged span missing length_f64_cells: " ^ case)]
+    in
+    name_issue @ base_issue @ length_issue
+  | _ ->
+    [issue ~opcode path
+       ("failure case unchanged_spans entries must be objects: " ^ case)]
+
 type checked_template = {
   path : string;
   template : Template.t;
@@ -884,14 +920,18 @@ let failure_issues path opcode fields =
                 | Some mutations -> mutations
                 | None -> []
               in
+              let unchanged_spans =
+                match list_field "unchanged_spans" failure_fields with
+                | Some spans -> spans
+                | None -> []
+              in
               `Case
                 (case,
                  expected,
                  mutations,
                  (match mutations with _ :: _ -> true | [] -> false),
-                 (match list_field "unchanged_spans" failure_fields with
-                  | Some (_ :: _) -> true
-                  | _ -> false))
+                 unchanged_spans,
+                 (match unchanged_spans with _ :: _ -> true | [] -> false))
             | _ -> `Bad)
           failures
       in
@@ -904,28 +944,35 @@ let failure_issues path opcode fields =
       let missing_mutations =
         List.filter_map
           (function
-            | `Case (case, _, _, false, _) -> Some case
+            | `Case (case, _, _, false, _, _) -> Some case
             | _ -> None)
           parsed
       in
       let missing_unchanged =
         List.filter_map
           (function
-            | `Case (case, _, _, _, false) -> Some case
+            | `Case (case, _, _, _, _, false) -> Some case
             | _ -> None)
           parsed
       in
       let missing_expected =
         List.filter_map
           (function
-            | `Case (case, None, _, _, _) -> Some case
+            | `Case (case, None, _, _, _, _) -> Some case
             | _ -> None)
           parsed
+      in
+      let unchanged_span_issues =
+        parsed
+        |> List.concat_map (function
+          | `Case (case, _, _, _, spans, _) ->
+            List.concat_map (failure_span_issues path opcode case) spans
+          | _ -> [])
       in
       let executable_mutation_issues =
         parsed
         |> List.concat_map (function
-          | `Case (case, _, mutations, _, _) ->
+          | `Case (case, _, mutations, _, _, _) ->
             mutations
             |> List.concat_map (function
               | `Assoc mutation_fields ->
@@ -972,7 +1019,7 @@ let failure_issues path opcode fields =
           let expected_for case =
             List.find_map
               (function
-                | `Case (actual, expected, _, _, _)
+                | `Case (actual, expected, _, _, _, _)
                   when String.equal actual case ->
                   expected
                 | _ -> None)
@@ -998,7 +1045,7 @@ let failure_issues path opcode fields =
           let mutations_for case =
             List.find_map
               (function
-                | `Case (actual, _, mutations, _, _)
+                | `Case (actual, _, mutations, _, _, _)
                   when String.equal actual case ->
                   Some mutations
                 | _ -> None)
@@ -1046,8 +1093,8 @@ let failure_issues path opcode fields =
               ^ String.concat "," missing_unchanged)]
       in
       bad @ expected_issue @ mutation_issue @ unchanged_issue
-      @ executable_mutation_issues @ q1_required_case_issues
-      @ q1_alias_shape_issues
+      @ unchanged_span_issues @ executable_mutation_issues
+      @ q1_required_case_issues @ q1_alias_shape_issues
 
 let gated_delta_semantic_issues path opcode fields =
   if not (String.equal opcode "GATED_DELTA_RULE_FP") then []

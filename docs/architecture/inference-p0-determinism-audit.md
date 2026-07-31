@@ -391,7 +391,9 @@ a nonempty `executable_mutations` list, and a nonempty `unchanged_spans` list.
 `executable_mutations` entries must be runnable objects with a supported
 `mutation`, a `target`, and any required mutation parameters. Human-readable
 mutation prose may exist beside it, but it is not enough for LiteNode
-conformance.
+conformance. `unchanged_spans` must likewise be runnable span objects with
+`name`, `base_address`, and positive `length_f64_cells`; string labels are
+documentation only.
 
 The effort-authority artifact emits exact `Contract_vm` effort for this corpus,
 so `--strict-effort` passes there. Earlier template artifacts remain useful

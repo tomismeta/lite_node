@@ -86,12 +86,19 @@ let current_vm_semantics_root () =
 let mutation name target fields =
   `Assoc (["mutation", `String name; "target", `String target] @ fields)
 
+let span name base cells =
+  `Assoc [
+    "name", `String name;
+    "base_address", `Int base;
+    "length_f64_cells", `Int cells;
+  ]
+
 let failure_case case expected mutation unchanged =
   `Assoc [
     "case", `String case;
     "expected", `String expected;
     "executable_mutations", `List [mutation];
-    "unchanged_spans", `List [`String unchanged];
+    "unchanged_spans", `List [unchanged];
   ]
 
 let q1_failure_cases =
@@ -103,7 +110,7 @@ let q1_failure_cases =
          "replace_first_f64_input_cell"
          "lhs"
          ["value_bits", `Intlit "9221120237041090560"])
-      "output";
+      (span "output" 10000 2);
     failure_case
       "nonfinite_input_infinity"
       "reject_before_write"
@@ -111,7 +118,7 @@ let q1_failure_cases =
          "replace_first_f64_input_cell"
          "lhs"
          ["value_bits", `Intlit "9218868437227405312"])
-      "output";
+      (span "output" 10000 2);
     failure_case
       "output_input_aliasing"
       "accept_from_snapshot_exact"
@@ -119,7 +126,7 @@ let q1_failure_cases =
          "set_output_base_to_first_input_base"
          "output.base_address"
          [])
-      "lhs";
+      (span "lhs" 2000 2);
     failure_case
       "partial_output_input_aliasing"
       "accept_from_snapshot_partial"
@@ -127,7 +134,7 @@ let q1_failure_cases =
          "set_output_base_to_first_input_base_plus"
          "output.base_address"
          ["offset_cells", `Int 1])
-      "lhs_prefix";
+      (span "lhs_prefix" 2001 2);
     failure_case
       "k_not_multiple_of_128"
       "reject_before_write"
@@ -135,7 +142,7 @@ let q1_failure_cases =
          "set_scalar_param"
          "parameter_addresses_and_scalar_params.values.k"
          ["value", `Int 127])
-      "output";
+      (span "output" 10000 2);
     failure_case
       "bad_q1_owner_length"
       "reject_before_write"
@@ -143,7 +150,7 @@ let q1_failure_cases =
          "truncate_input_manifest"
          "q1_owner"
          ["truncate_bytes", `Int 1])
-      "output";
+      (span "output" 10000 2);
     failure_case
       "nonfinite_fp16_scale"
       "reject_before_write"
@@ -151,7 +158,7 @@ let q1_failure_cases =
          "replace_q1_scale_bits"
          "q1_owner[0..2]"
          ["value_hex_le", `String "007c"])
-      "output";
+      (span "output" 10000 2);
   ]
 
 let q1_template ?(session_abi_root = Abi.v1_root)
@@ -250,6 +257,19 @@ let replace_failure_mutations case mutations = function
             if String.equal key "executable_mutations"
                && String.equal (string_value "case" fields) case then
               key, `List mutations
+            else
+              key, value)
+         fields)
+  | value -> value
+
+let replace_failure_unchanged_spans case spans = function
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (key, value) ->
+            if String.equal key "unchanged_spans"
+               && String.equal (string_value "case" fields) case then
+              key, `List spans
             else
               key, value)
          fields)
@@ -523,6 +543,52 @@ let check_rejects_string_executable_mutation () =
          "failure case executable_mutations entries must be objects: nonfinite_input_nan"
          (report_issues report)))
 
+let check_rejects_string_unchanged_span () =
+  with_temp_dir (fun dir ->
+    let failures =
+      List.map
+        (replace_failure_unchanged_spans "nonfinite_input_nan" [`String "output"])
+        q1_failure_cases
+    in
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "expected_failure_atomicity_behavior"
+              (`List failures))
+    in
+    check "string unchanged span exits nonzero" (code = 1);
+    check
+      "string unchanged span issue"
+      (List.mem
+         "failure case unchanged_spans entries must be objects: nonfinite_input_nan"
+         (report_issues report)))
+
+let check_rejects_incomplete_unchanged_span () =
+  with_temp_dir (fun dir ->
+    let failures =
+      List.map
+        (replace_failure_unchanged_spans
+           "nonfinite_input_nan"
+           [`Assoc ["name", `String "output"; "base_address", `Int 10000]])
+        q1_failure_cases
+    in
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "expected_failure_atomicity_behavior"
+              (`List failures))
+    in
+    check "incomplete unchanged span exits nonzero" (code = 1);
+    check
+      "incomplete unchanged span issue"
+      (List.mem
+         "failure case unchanged span missing length_f64_cells: nonfinite_input_nan"
+         (report_issues report)))
+
 let () =
   check_accepts_bound_abi_declaration ();
   check_rejects_stale_session_abi_root ();
@@ -532,4 +598,6 @@ let () =
   check_rejects_wrong_q1_failure_expectation ();
   check_rejects_q1_exact_alias_without_alias_mutation ();
   check_rejects_q1_partial_alias_without_partial_mutation ();
-  check_rejects_string_executable_mutation ()
+  check_rejects_string_executable_mutation ();
+  check_rejects_string_unchanged_span ();
+  check_rejects_incomplete_unchanged_span ()
