@@ -1531,7 +1531,9 @@ let operation_sequence ~opcode =
       "decode_q1_g128_sign_bits_lsb0_one_is_positive";
       "iterate_row_col_block_item";
       "multiply_lhs_sign_scale";
+      "multiply_round_nearest_ties_to_even";
       "accumulate_left_to_right";
+      "add_round_nearest_ties_to_even";
       "finite_output_check";
       "atomic_output_writeback";
     ]
@@ -1669,6 +1671,9 @@ let edge_value_policy ~opcode =
       "reject_nonfinite_binary16_scale";
       "accept_finite_binary16_zero_signed_zero_subnormal_normal_max";
       "sign_bit_1_maps_to_positive_scale_and_0_maps_to_negative_scale";
+      "preserve_gradual_underflow";
+      "multiplication_signed_zero_uses_xor_sign";
+      "addition_exact_nonzero_cancellation_returns_positive_zero";
       "reject_missing_or_nonfinite_lhs";
       "reject_nonfinite_output";
       "snapshot_lhs_and_q1_before_output_writeback";

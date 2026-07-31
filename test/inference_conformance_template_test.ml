@@ -325,6 +325,31 @@ let check_q1_profile_obligations () =
             (list_contains_substring
                "snapshot_lhs_and_q1"
                (string_list_value "operation_sequence" contract));
+          check
+            "q1 contract pins product rounding"
+            (List.mem
+               "multiply_round_nearest_ties_to_even"
+               (string_list_value "operation_sequence" contract));
+          check
+            "q1 contract pins add rounding"
+            (List.mem
+               "add_round_nearest_ties_to_even"
+               (string_list_value "operation_sequence" contract));
+          check
+            "q1 contract pins gradual underflow"
+            (List.mem
+               "preserve_gradual_underflow"
+               (string_list_value "edge_value_policy" contract));
+          check
+            "q1 contract pins signed-zero product"
+            (List.mem
+               "multiplication_signed_zero_uses_xor_sign"
+               (string_list_value "edge_value_policy" contract));
+          check
+            "q1 contract pins exact cancellation zero"
+            (List.mem
+               "addition_exact_nonzero_cancellation_returns_positive_zero"
+               (string_list_value "edge_value_policy" contract));
           let effort_policy =
             match List.assoc_opt "effort_policy" contract with
             | Some (`Assoc effort_policy) -> effort_policy
@@ -352,7 +377,7 @@ let check_q1_profile_obligations () =
           with
           | Some root ->
             let expected =
-              "5eddadb896095cbb74b716994cd08743052fd27be0f235e93ea089df9a5a51d1"
+              "db31cbfb8754b8a4b53867f338497e57baee17a64d8fa957108fefe1e93e5da7"
             in
             if String.equal root expected then true
             else
@@ -360,11 +385,49 @@ let check_q1_profile_obligations () =
                 ("q1 vm semantics root observed " ^ root
                  ^ " expected " ^ expected)
           | None -> false);
+       (match Template.vm_semantics_contract_json ~opcode:"LINEAR_Q1_G128_FP" with
+        | Some (`Assoc semantics) ->
+          check
+            "q1 vm semantics pins block bytes"
+            (List.mem
+               "each block is exactly 18 bytes"
+               (string_list_value "q1_block_layout" semantics));
+          check
+            "q1 vm semantics pins bit order"
+            (list_contains_substring
+               "item mod 8"
+               (string_list_value "q1_block_layout" semantics));
+          check
+            "q1 vm semantics pins ties-to-even"
+            (list_contains_substring
+               "round-to-nearest-ties-to-even"
+               (string_list_value "arithmetic_policy" semantics));
+          check
+            "q1 vm semantics pins gradual underflow"
+            (list_contains_substring
+               "gradual underflow"
+               (string_list_value "arithmetic_policy" semantics));
+          check
+            "q1 vm semantics pins signed zero"
+            (list_contains_substring
+               "signed zero"
+               (string_list_value "arithmetic_policy" semantics));
+          check
+            "q1 vm semantics pins cancellation zero"
+            (list_contains_substring
+               "positive zero"
+               (string_list_value "arithmetic_policy" semantics));
+          check
+            "q1 vm semantics keeps opcode separate from ABI"
+            (list_contains_substring
+               "does not mutate session ABI registers"
+               (string_list_value "output_policy" semantics))
+        | _ -> failwith "missing q1 vm semantics contract");
        (match
           Template.vm_semantics_binding_json
             ~opcode:"LINEAR_Q1_G128_FP"
             ~vm_semantics_root:
-              "5eddadb896095cbb74b716994cd08743052fd27be0f235e93ea089df9a5a51d1"
+              "db31cbfb8754b8a4b53867f338497e57baee17a64d8fa957108fefe1e93e5da7"
         with
         | `Assoc binding ->
           check
@@ -972,7 +1035,7 @@ let check_inference_profile_surface_coverage () =
       "d9c2a61f7e058320bef47cd240c6193b2c3b00426ce50ee61556b41779da0c45";
       "LINEAR_Q1_G128_FP", "deterministic-q1-g128-fp64-linear",
       "consensus_candidate",
-      "e56a53248e58276b480ece29a69b2cfa8609eaea90b9f462d8f5a1de6d7abe50";
+      "1247c6e4e8364a774c2585a76a05fadfdf631e9e7562d4949ee5d1b358589367";
       "SIGMOID_FP", "host-fp-exp-local-candidate", "local_only",
       "7fdfb04d5c91a7f2b5e80e88c753eb4c16a5d302d52d25374bdccc8cada5bd24";
       "SOFTPLUS_FP", "host-fp-exp-local-candidate", "local_only",
@@ -1034,7 +1097,7 @@ let check_inference_profile_surface_coverage () =
        "p0 profile catalog root"
        (String.equal
           (string_value "profile_catalog_root" fields)
-          "30256c5b7e47a4158d1b697c181c1a883780d87fb64163736361c7fcdc2b253c");
+          "94cd8546bbcd8538f37f3ab077c9c119a900c51c0721f21cb2727fcd5bfc82f7");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "p0 readiness worklist count" (List.length rows = 5);
@@ -1094,7 +1157,7 @@ let check_inference_profile_surface_coverage () =
        "runtime profile catalog root"
        (String.equal
           (string_value "profile_catalog_root" fields)
-          "918ef22b6c94b9c81bf3b7153e5705fa609766e4ad29ced6ea226ea1167bcdba");
+          "11dc0d8efa2fa7b19889919f06fe6dfdd0c5e17fe65444ebeaf84f88e2065375");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "runtime readiness worklist count" (List.length rows = 17)
@@ -1172,7 +1235,7 @@ let check_inference_profile_surface_coverage () =
      | `String root ->
        String.equal
          root
-         "918ef22b6c94b9c81bf3b7153e5705fa609766e4ad29ced6ea226ea1167bcdba"
+         "11dc0d8efa2fa7b19889919f06fe6dfdd0c5e17fe65444ebeaf84f88e2065375"
      | _ -> false);
   check
     "empty profile catalog root"

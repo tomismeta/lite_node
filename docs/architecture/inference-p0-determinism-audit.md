@@ -171,15 +171,24 @@ profile_root_binding_gate: rejected
 vm_semantics_binding_gate: rejected
 abi_declaration_binding_gate: rejected
 template numerical_profile_root: 66be1b09b91d4e339ffaa16bda41bc87b18141b3506bbfe698448e2e401eb245
-current LiteNode profile_root: e56a53248e58276b480ece29a69b2cfa8609eaea90b9f462d8f5a1de6d7abe50
+current LiteNode profile_root: 1247c6e4e8364a774c2585a76a05fadfdf631e9e7562d4949ee5d1b358589367
 template vm_semantics_root: d49cc837c452322bd6193645a02b89adef33eccad66cdab73a891140cabba950
-current LiteNode vm_semantics_root: 5eddadb896095cbb74b716994cd08743052fd27be0f235e93ea089df9a5a51d1
+current LiteNode vm_semantics_root: db31cbfb8754b8a4b53867f338497e57baee17a64d8fa957108fefe1e93e5da7
 current LiteNode session_abi_root: be55d94fec70093495473690eb303aa617162e322b76426205ecaa4617d1bb90
 validator_readiness_gate: rejected
 blockers: unbound_profile_roots, unbound_vm_semantics_roots,
   unbound_abi_declaration_binding, uncounted_failure_cases,
   consensus_candidate_profile_gates, cross_platform_conformance_missing
 ```
+
+The current VM-semantics root supersedes the earlier
+`5eddadb896095cbb74b716994cd08743052fd27be0f235e93ea089df9a5a51d1`
+root. The current numerical profile root supersedes
+`e56a53248e58276b480ece29a69b2cfa8609eaea90b9f462d8f5a1de6d7abe50`.
+The opcode behavior did not change in this step; the rooted contracts now
+spell out the Q1 block layout, binary16 scale policy, LSB0 sign mapping,
+lhs snapshot rule, binary64 product/add order, signed-zero/cancellation
+behavior, gradual underflow, output encoding, and effort formula explicitly.
 
 That means the immediate producer action is narrow: re-emit the P0 template
 index with the current `deterministic-q1-g128-fp64-linear` profile root, which

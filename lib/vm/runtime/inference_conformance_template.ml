@@ -139,8 +139,8 @@ let vm_semantics_contract_json ~opcode =
         ];
         "memory_units",
         `List [
-          `String "lhs and output use f64 VM cells";
-          `String "q1_owner uses immutable octets";
+          `String "lhs and output use one binary64 bit pattern per VM cell";
+          `String "q1_owner uses immutable octets supplied as VM bytes/string";
           `String "session ABI uses r0 base and r1 VM cell count";
         ];
         "shape_policy",
@@ -152,13 +152,40 @@ let vm_semantics_contract_json ~opcode =
           `String "output span is m*n cells";
           `String "q1 span is n*(k/128)*18 bytes from byte_offset";
         ];
-        "read_write_policy",
+        "q1_block_layout",
         `List [
-          `String "snapshot all lhs cells before output writeback";
-          `String "accept exact or partial lhs/output overlap from the lhs snapshot";
-          `String "decode all Q1 scale bits before output writeback";
-          `String "write output only after full output buffer succeeds";
-          `String "preserve output on validation or arithmetic rejection";
+          `String "group size is exactly 128 input lanes";
+          `String "each block is exactly 18 bytes";
+          `String "bytes 0..1 are one IEEE-754 binary16 scale in little-endian order";
+          `String "bytes 2..17 are 128 one-bit signs";
+          `String "sign bit index item uses byte 2 + floor(item/8), bit item mod 8";
+          `String "sign bit 1 maps to +scale and sign bit 0 maps to -scale";
+          `String "block index is column-major: col*(k/128)+block";
+        ];
+        "scale_decode_policy",
+        `List [
+          `String "binary16 zero, signed zero, subnormal, normal, and max-finite scales are accepted";
+          `String "binary16 NaN and infinity scales are rejected before output writeback";
+          `String "accepted scale encodings are widened to exact finite binary64 bit patterns";
+          `String "negative weights are formed by sign-bit negation of the widened scale";
+        ];
+        "lhs_policy",
+        `List [
+          `String "lhs cells are read as binary64 bit patterns";
+          `String "every lhs cell in the m*k span must exist and be finite";
+          `String "lhs span is snapshotted before any output writeback";
+          `String "exact and partial lhs/output overlap use the lhs snapshot";
+        ];
+        "arithmetic_policy",
+        `List [
+          `String "accumulator starts as positive zero binary64";
+          `String "for each lane product = lhs[row,k_index] * signed_scale";
+          `String "product uses deterministic finite binary64 multiplication with round-to-nearest-ties-to-even";
+          `String "accumulator update uses deterministic finite binary64 addition with round-to-nearest-ties-to-even";
+          `String "subnormal results are preserved by gradual underflow";
+          `String "multiplication by signed zero preserves the XOR-derived result sign";
+          `String "addition of exact nonzero cancellation returns positive zero";
+          `String "any non-finite or unsupported product/add result rejects the whole opcode";
         ];
         "iteration_order",
         `List [
@@ -166,6 +193,26 @@ let vm_semantics_contract_json ~opcode =
           `String "column ascending";
           `String "block ascending";
           `String "lane ascending";
+        ];
+        "read_write_policy",
+        `List [
+          `String "decode all Q1 scale bits before output writeback";
+          `String "compute the complete m*n output buffer before writing any destination cell";
+          `String "write output only after full output buffer succeeds";
+          `String "preserve output on validation or arithmetic rejection";
+        ];
+        "output_policy",
+        `List [
+          `String "outputs are stored as binary64 bit patterns in row-major m*n order";
+          `String "the opcode writes output memory only; it does not mutate session ABI registers";
+          `String "enclosing session ABI r0 declares the output base cell";
+          `String "enclosing session ABI r1 declares the output VM cell count";
+        ];
+        "effort_policy",
+        `List [
+          `String "opcode base effort is 200";
+          `String "dynamic effort is floor(m*n*k/512)";
+          `String "program effort also includes surrounding VM instructions such as STOP";
         ];
       ])
   | _ -> None
