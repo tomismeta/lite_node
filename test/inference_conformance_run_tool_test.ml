@@ -437,6 +437,13 @@ let check_good_template_reports_bound_abi () =
     check
       "good failure gate accepted"
       (String.equal (gate_status "failure_case_gate" report) "accepted");
+    let semantics = assoc_json "vm_semantics_binding" result in
+    check
+      "good VM semantics matched"
+      (String.equal (string_value "status" semantics) "matched");
+    check
+      "good VM semantics gate accepted"
+      (String.equal (gate_status "vm_semantics_binding_gate" report) "accepted");
     let abi = assoc_json "abi_declaration_binding" result in
     check "good ABI declaration matched" (String.equal (string_value "status" abi) "matched");
     check

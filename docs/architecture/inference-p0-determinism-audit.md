@@ -308,7 +308,9 @@ accepted punitive failure cases, distinct platform observations, and identical
 per-opcode output/effort signatures. They also require a single shared
 `profile_catalog_root` and a single shared `template_corpus_root`, so matching
 output bytes cannot hide a profile-contract or qualification-corpus drift
-between reports. A single repeated VPS report is still rejected as
+between reports. Each result row must also bind a matched `vm_semantics_root`
+and session ABI declaration; top-level gates alone are not sufficient. A
+single repeated VPS report is still rejected as
 `insufficient_distinct_platforms`. Runner reports record the OCaml version,
 OS class, `uname` system name/release/machine, word size, endianness, backend
 type, runner executable path, and runner executable SHA-256. The matrix uses

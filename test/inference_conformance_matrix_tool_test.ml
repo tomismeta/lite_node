@@ -139,6 +139,7 @@ let failure_case ?(observed = "vm_rejected") ?(observed_effort = 200) () =
 let result
     ?(observed_opcode_effort = 200)
     ?(opcode_effort_match = true)
+    ?(vm_semantics_status = "matched")
     ?(abi_declaration_status = "matched")
     ?(failure = failure_case ())
     () =
@@ -146,10 +147,20 @@ let result
     "opcode", `String "LINEAR_Q1_G128_FP";
     "vm_semantics_binding",
     `Assoc [
-      "status", `String "matched";
-      "classification", `String "none";
+      "status", `String vm_semantics_status;
+      "classification",
+      `String
+        (if String.equal vm_semantics_status "matched" then
+           "none"
+         else
+           "vm_semantics_root_mismatch");
       "vm_semantics_root", `String (hex_root '5');
-      "litenode_vm_semantics_root", `String (hex_root '5');
+      "litenode_vm_semantics_root",
+      `String
+        (if String.equal vm_semantics_status "matched" then
+           hex_root '5'
+         else
+           hex_root '7');
     ];
     "abi_declaration_binding",
     `Assoc [
@@ -207,6 +218,8 @@ let report
     ?(corpus = hex_root 'd')
     ?observed_opcode_effort
     ?opcode_effort_match
+    ?(vm_semantics_status = "matched")
+    ?(vm_semantics_gate_status = "accepted")
     ?(abi_declaration_status = "matched")
     ?(abi_gate_status = "accepted")
     ?failure
@@ -222,7 +235,7 @@ let report
     "profile_catalog_root", `String (hex_root 'c');
     "failure_case_gate", `Assoc ["status", `String "accepted"];
     "profile_root_binding_gate", `Assoc ["status", `String "accepted"];
-    "vm_semantics_binding_gate", `Assoc ["status", `String "accepted"];
+    "vm_semantics_binding_gate", `Assoc ["status", `String vm_semantics_gate_status];
     "abi_declaration_binding_gate", `Assoc ["status", `String abi_gate_status];
     "validator_readiness_gate",
     `Assoc [
@@ -234,6 +247,7 @@ let report
       result
         ?observed_opcode_effort
         ?opcode_effort_match
+        ~vm_semantics_status
         ~abi_declaration_status
         ?failure
         ();
@@ -432,6 +446,49 @@ let check_matrix_rejects_abi_declaration_binding_mismatch () =
            (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_vm_semantics_binding_mismatch () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~vm_semantics_status:"unbound"
+           "Linux"
+           "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "vm semantics mismatch matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "vm semantics mismatch matrix blocker"
+        (List.mem "result_mismatch_across_platforms" (blockers fields));
+      check
+        "vm semantics mismatch validator blocker"
+        (List.mem
+           "vm_semantics_binding_mismatch"
+           (string_list_value "validator_readiness_blockers" fields));
+      (match assoc_value "reports" fields with
+       | `List reports ->
+         check
+           "vm semantics mismatch source row blocker"
+           (List.exists
+              (function
+                | `Assoc report_fields ->
+                  List.mem "vm_semantics_binding_mismatch" (blockers report_fields)
+                | _ -> false)
+              reports)
+       | _ -> failwith "missing report rows")
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_same_platform () =
   with_temp_dir (fun dir ->
     let a =
@@ -462,4 +519,5 @@ let () =
   check_matrix_rejects_failure_case_mismatch ();
   check_matrix_rejects_opcode_effort_mismatch ();
   check_matrix_rejects_abi_declaration_binding_mismatch ();
+  check_matrix_rejects_vm_semantics_binding_mismatch ();
   check_matrix_rejects_same_platform ()

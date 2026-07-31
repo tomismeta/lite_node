@@ -349,6 +349,17 @@ let report_summary path =
       | Some gate_fields -> opt_status_is_accepted "status" gate_fields
       | None -> false
     in
+    let vm_semantics_bindings_matched =
+      List.for_all
+        (fun fields ->
+           match opt_assoc_field "vm_semantics_binding" fields with
+           | Some binding_fields ->
+             (match opt_string_field "status" binding_fields with
+              | Some "matched" -> true
+              | _ -> false)
+           | None -> false)
+        result_fields
+    in
     let abi_declaration_binding_accepted =
       match opt_assoc_field "abi_declaration_binding_gate" fields with
       | Some gate_fields -> opt_status_is_accepted "status" gate_fields
@@ -381,6 +392,7 @@ let report_summary path =
       && opcode_effort_matched
       && profile_root_binding_accepted
       && vm_semantics_binding_accepted
+      && vm_semantics_bindings_matched
       && abi_declaration_binding_accepted
       && abi_declaration_bindings_matched
       && Option.is_some template_corpus_root
@@ -412,6 +424,9 @@ let report_summary path =
       |> add_if
            (not vm_semantics_binding_accepted)
            "vm_semantics_binding_rejected"
+      |> add_if
+           (not vm_semantics_bindings_matched)
+           "vm_semantics_binding_mismatch"
       |> add_if
            (not abi_declaration_binding_accepted)
            "abi_declaration_binding_rejected"
@@ -511,6 +526,8 @@ let report_summary path =
       "effort_status", `String (if effort_matched then "matched" else "mismatch");
       "opcode_effort_status",
       `String (if opcode_effort_matched then "matched" else "mismatch");
+      "vm_semantics_binding_status",
+      `String (if vm_semantics_bindings_matched then "matched" else "mismatch");
       "abi_declaration_binding_status",
       `String (if abi_declaration_bindings_matched then "matched" else "mismatch");
       "blockers", `List (List.map (fun blocker -> `String blocker) blockers);
