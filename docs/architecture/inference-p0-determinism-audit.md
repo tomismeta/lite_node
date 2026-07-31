@@ -132,6 +132,12 @@ failure_case_gate: accepted
 validator_readiness_gate: rejected
 ```
 
+The runner now reports effort in two units. `expected_effort` and
+`observed_effort` remain total one-opcode program effort. For Q1, the report
+also emits `expected_opcode_effort`, `observed_opcode_effort`, and
+`opcode_profile`; the current canonical split is `LINEAR_Q1_G128_FP = 200`
+opcode effort plus `STOP = 1`, for total program effort `201`.
+
 When `--require-validator-readiness` is enabled, the top-level report status is
 also `rejected`; without that flag, the same execution can remain `accepted` as
 consensus-candidate evidence.
@@ -624,6 +630,9 @@ Status on 2026-07-30, using the effort-authority artifact:
 | `L2NORM_FP` | accepted | matched | `53` | `53` | matched |
 | `SOFTMAX_FP` | accepted | matched | `133` | `133` | matched |
 | `GATED_DELTA_RULE_FP` | accepted | matched | `222` | `222` | matched |
+
+For `LINEAR_Q1_G128_FP`, `201` is total positive-template program effort. The
+opcode-level effort is reported separately as `200` in `opcode_profile`.
 
 This is a positive arithmetic ingestion gate, not a validator-grade
 determinism claim. It proves the producer fixtures now agree with the current

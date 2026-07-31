@@ -136,7 +136,11 @@ let failure_case ?(observed = "vm_rejected") ?(observed_effort = 200) () =
     "active_finite_spans", `List [];
   ]
 
-let result ?(failure = failure_case ()) () =
+let result
+    ?(observed_opcode_effort = 200)
+    ?(opcode_effort_match = true)
+    ?(failure = failure_case ())
+    () =
   `Assoc [
     "opcode", `String "LINEAR_Q1_G128_FP";
     "vm_semantics_binding",
@@ -151,6 +155,9 @@ let result ?(failure = failure_case ()) () =
     "output_status", `String "matched";
     "expected_effort", `Int 201;
     "observed_effort", `Int 201;
+    "expected_opcode_effort", `Int 200;
+    "observed_opcode_effort", `Int observed_opcode_effort;
+    "opcode_effort_match", `Bool opcode_effort_match;
     "effort_match", `Bool true;
     "strict_effort", `Bool true;
     "subspans",
@@ -167,7 +174,14 @@ let result ?(failure = failure_case ()) () =
     "failure_cases", `List [failure];
   ]
 
-let report ?runner_sha ?(corpus = hex_root 'd') ?failure system machine =
+let report
+    ?runner_sha
+    ?(corpus = hex_root 'd')
+    ?observed_opcode_effort
+    ?opcode_effort_match
+    ?failure
+    system
+    machine =
   `Assoc [
     "status", `String "accepted";
     "execution_status", `String "accepted";
@@ -184,7 +198,8 @@ let report ?runner_sha ?(corpus = hex_root 'd') ?failure system machine =
       "status", `String "rejected";
       "blockers", `List [`String "cross_platform_conformance_missing"];
     ];
-    "results", `List [result ?failure ()];
+    "results",
+    `List [result ?observed_opcode_effort ?opcode_effort_match ?failure ()];
   ]
 
 let write_report dir name json =
@@ -313,6 +328,39 @@ let check_matrix_rejects_failure_case_mismatch () =
         (List.mem "result_mismatch_across_platforms" (blockers fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_opcode_effort_mismatch () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~observed_opcode_effort:201
+           ~opcode_effort_match:false
+           "Linux"
+           "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "opcode effort mismatch matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "opcode effort mismatch top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      check
+        "opcode effort mismatch validator blocker"
+        (List.mem
+           "opcode_effort_mismatch"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_same_platform () =
   with_temp_dir (fun dir ->
     let a =
@@ -341,4 +389,5 @@ let () =
   check_matrix_rejects_missing_runner_hash ();
   check_matrix_rejects_corpus_mismatch ();
   check_matrix_rejects_failure_case_mismatch ();
+  check_matrix_rejects_opcode_effort_mismatch ();
   check_matrix_rejects_same_platform ()

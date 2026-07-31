@@ -223,6 +223,14 @@ let result_signature = function
       "output_status", `String (string_field "output_status" fields);
       "expected_effort", `Int (int_field "expected_effort" fields);
       "observed_effort", `Int (int_field "observed_effort" fields);
+      "expected_opcode_effort",
+      (match field "expected_opcode_effort" fields with
+       | Some value -> value
+       | None -> fail "missing expected_opcode_effort");
+      "observed_opcode_effort",
+      `Int (int_field "observed_opcode_effort" fields);
+      "opcode_effort_match",
+      `Bool (bool_field "opcode_effort_match" fields);
       "effort_match", `Bool (bool_field "effort_match" fields);
       "strict_effort", `Bool (bool_field "strict_effort" fields);
       "subspans", `List (List.map subspan_signature (list_field "subspans" fields));
@@ -316,6 +324,11 @@ let report_summary path =
         (fun fields -> bool_field "effort_match" fields)
         result_fields
     in
+    let opcode_effort_matched =
+      List.for_all
+        (fun fields -> bool_field "opcode_effort_match" fields)
+        result_fields
+    in
     let profile_catalog_root =
       opt_string_field "profile_catalog_root" fields
     in
@@ -345,6 +358,7 @@ let report_summary path =
       && strict_effort
       && output_matched
       && effort_matched
+      && opcode_effort_matched
       && profile_root_binding_accepted
       && vm_semantics_binding_accepted
       && Option.is_some template_corpus_root
@@ -369,6 +383,7 @@ let report_summary path =
       |> add_if (not strict_effort) "strict_effort_not_enabled"
       |> add_if (not output_matched) "output_mismatch"
       |> add_if (not effort_matched) "effort_mismatch"
+      |> add_if (not opcode_effort_matched) "opcode_effort_mismatch"
       |> add_if
            (not profile_root_binding_accepted)
            "profile_root_binding_rejected"
@@ -466,6 +481,8 @@ let report_summary path =
       "strict_effort", `Bool strict_effort;
       "output_status", `String (if output_matched then "matched" else "mismatch");
       "effort_status", `String (if effort_matched then "matched" else "mismatch");
+      "opcode_effort_status",
+      `String (if opcode_effort_matched then "matched" else "mismatch");
       "blockers", `List (List.map (fun blocker -> `String blocker) blockers);
     ];
     }

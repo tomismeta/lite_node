@@ -1224,6 +1224,40 @@ let op_for opcode registers =
   | "GATED_DELTA_RULE_FP" -> op_gated_delta registers
   | value -> fail ("unsupported opcode: " ^ value)
 
+let opcode_name = function
+  | VM.LINEAR_Q1_G128_FP _ -> "LINEAR_Q1_G128_FP"
+  | VM.RMSNORM_FP_EPS _ -> "RMSNORM_FP_EPS"
+  | VM.L2NORM_FP _ -> "L2NORM_FP"
+  | VM.SOFTMAX_FP _ -> "SOFTMAX_FP"
+  | VM.GATED_DELTA_RULE_FP _ -> "GATED_DELTA_RULE_FP"
+  | VM.STOP -> "STOP"
+  | _ -> "other"
+
+let opcode_profile_json (row : VM.opcode_profile) =
+  `Assoc [
+    "opcode", `String row.opcode;
+    "count", `Int row.count;
+    "effort_used", `Int row.effort_used;
+    "microseconds", `Int row.microseconds;
+  ]
+
+let observed_opcode_effort opcode profile =
+  List.fold_left
+    (fun total (row : VM.opcode_profile) ->
+       if String.equal row.opcode opcode then total + row.effort_used
+       else total)
+    0
+    profile
+
+let expected_opcode_effort opcode values =
+  match opcode with
+  | "LINEAR_Q1_G128_FP" ->
+    let m = int_field "m" values in
+    let k = int_field "k" values in
+    let n = int_field "n" values in
+    Some (200 + ((m * n * k) / 512))
+  | _ -> None
+
 let subspan_result state value =
   match value with
   | `Assoc fields ->
@@ -1488,7 +1522,13 @@ let execute_template root_dir entry =
   ignore (load_inputs root_dir state template registers);
   set_registers state registers values;
   let op = op_for opcode registers in
-  let ran = VM.run state [|op; VM.STOP|] in
+  let ran, opcode_profile =
+    VM.run_profiled
+      ~clock:(fun () -> 0.0)
+      ~opcode_name
+      state
+      [|op; VM.STOP|]
+  in
   let output = assoc_field "output" template in
   let subspans = list_field "subspans" output in
   let span_results =
@@ -1507,7 +1547,16 @@ let execute_template root_dir entry =
         subspans
   in
   let spans_matched = List.for_all fst span_results in
-  let effort_match = state.VM.effort_used = expected_effort in
+  let observed_effort = state.VM.effort_used in
+  let program_effort_match = observed_effort = expected_effort in
+  let expected_opcode_effort = expected_opcode_effort opcode values in
+  let observed_opcode_effort = observed_opcode_effort opcode opcode_profile in
+  let opcode_effort_match =
+    match expected_opcode_effort with
+    | None -> true
+    | Some expected -> observed_opcode_effort = expected
+  in
+  let effort_match = program_effort_match && opcode_effort_match in
   let accepted =
     ran
     && spans_matched
@@ -1535,7 +1584,17 @@ let execute_template root_dir entry =
     "output_status",
     `String (if spans_matched then "matched" else "mismatch");
     "expected_effort", `Int expected_effort;
-    "observed_effort", `Int state.VM.effort_used;
+    "observed_effort", `Int observed_effort;
+    "expected_program_effort", `Int expected_effort;
+    "observed_program_effort", `Int observed_effort;
+    "program_effort_match", `Bool program_effort_match;
+    "expected_opcode_effort",
+    (match expected_opcode_effort with
+     | None -> `Null
+     | Some value -> `Int value);
+    "observed_opcode_effort", `Int observed_opcode_effort;
+    "opcode_effort_match", `Bool opcode_effort_match;
+    "opcode_profile", `List (List.map opcode_profile_json opcode_profile);
     "effort_match", `Bool effort_match;
     "strict_effort", `Bool !strict_effort;
     "subspans", `List (List.map snd span_results);

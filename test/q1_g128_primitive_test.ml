@@ -341,7 +341,7 @@ let check_profiled_run_equivalence () =
        (fun (row : VM.opcode_profile) ->
          String.equal row.opcode "LINEAR_Q1_G128_FP"
          && row.count = 1
-         && row.effort_used > 0)
+         && row.effort_used = 200 + ((2 * 3 * 256) / 512))
        profile)
 
 let check_invalid_input_reverts () =
