@@ -210,10 +210,12 @@ let root_binding_classification_counts_of_json bindings =
     bindings
 
 let root_bindings_are_consensus_ready counts =
-  counts.unbound = 0 && counts.unavailable = 0
+  counts.matched > 0 && counts.unbound = 0 && counts.unavailable = 0
 
 let root_binding_blockers counts =
+  let total = counts.matched + counts.unbound + counts.unavailable in
   []
+  |> add_if (total = 0) "no_profile_roots"
   |> add_if (counts.unavailable > 0) "unavailable_profile_roots"
   |> add_if (counts.unbound > 0) "unbound_profile_roots"
 

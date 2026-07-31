@@ -369,6 +369,8 @@ Template and P0 execution reports expose that diagnostic as
 They also expose `profile_root_binding.classification`, where `none` means the
 root is bound, `profile_root_mismatch` means the producer supplied a different
 numerical root, and `profile_root_unavailable` means the gate root was missing.
+If no profile-root observations are present at all, root readiness rejects with
+`no_profile_roots`; empty evidence is never treated as bound evidence.
 Checker and runner conformance reports summarize those values in
 `profile_root_binding_classification_counts` so consumers can detect stale
 profile roots without walking every template row. They also expose

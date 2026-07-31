@@ -427,6 +427,16 @@ let check_profile_root_binding_counts () =
     check
       "mixed root bindings reject when required"
       (not (Profile.root_bindings_required_pass ~required:true counts));
+    let empty_counts = Profile.root_binding_counts_of_json [] in
+    check
+      "empty root bindings are not consensus-ready"
+      (not (Profile.root_bindings_are_consensus_ready empty_counts));
+    check
+      "empty root bindings reject when required"
+      (not (Profile.root_bindings_required_pass ~required:true empty_counts));
+    check
+      "empty root binding blockers"
+      (Profile.root_binding_blockers empty_counts = ["no_profile_roots"]);
     (match Profile.root_binding_gate_json ~required:false counts with
      | `Assoc fields ->
        check
@@ -459,6 +469,15 @@ let check_profile_root_binding_counts () =
          "matched root binding gate blockers empty"
          (string_list_value "blockers" fields = [])
      | _ -> failwith "matched root binding gate must be object");
+    (match Profile.root_binding_gate_json ~required:true empty_counts with
+     | `Assoc fields ->
+       check
+         "empty root binding gate rejects"
+         (String.equal (string_value "status" fields) "rejected");
+       check
+         "empty root binding gate blocker"
+         (string_list_value "blockers" fields = ["no_profile_roots"])
+     | _ -> failwith "empty root binding gate must be object");
     (match Profile.root_binding_classification_counts_json classification_counts with
      | `Assoc fields ->
        check "none root binding count" (int_value "none" fields = 1);
