@@ -35,6 +35,12 @@ let string_value name fields =
   | `String value -> value
   | _ -> failwith ("json field must be a string: " ^ name)
 
+let int_value name fields =
+  match assoc_value name fields with
+  | `Int value -> value
+  | `Intlit value -> int_of_string value
+  | _ -> failwith ("json field must be an int: " ^ name)
+
 let bool_value name fields =
   match assoc_value name fields with
   | `Bool value -> value
@@ -135,11 +141,95 @@ let manifest name path raw =
     "sha256", `String (sha256 raw);
   ]
 
+let span name base cells =
+  `Assoc [
+    "name", `String name;
+    "base_address", `Int base;
+    "length_f64_cells", `Int cells;
+  ]
+
 let source path raw =
   `Assoc [
     "path", `String path;
     "bytes", `Int (String.length raw);
     "sha256", `String (sha256 raw);
+  ]
+
+let mutation name target fields =
+  `Assoc (["mutation", `String name; "target", `String target] @ fields)
+
+let reject_case name mutations =
+  `Assoc [
+    "case", `String name;
+    "expected", `String "reject_before_write";
+    "executable_mutations", `List mutations;
+    "unchanged_spans", `List [span "expected" 10000 1];
+  ]
+
+let accept_snapshot_case name expected offset =
+  `Assoc [
+    "case", `String name;
+    "expected", `String expected;
+    "executable_mutations",
+    `List [
+      mutation
+        "set_output_base_to_first_input_base_plus"
+        "output.base_address"
+        ["offset_cells", `Int offset];
+    ];
+    "unchanged_spans", `List [span name (2000 + offset) 1];
+  ]
+
+let q1_failure_cases =
+  [
+    reject_case
+      "nonfinite_input_nan"
+      [
+        mutation
+          "replace_first_f64_input_cell"
+          "lhs"
+          ["value_bits", `Intlit "9221120237041090560"];
+      ];
+    reject_case
+      "nonfinite_input_infinity"
+      [
+        mutation
+          "replace_first_f64_input_cell"
+          "lhs"
+          ["value_bits", `Intlit "9218868437227405312"];
+      ];
+    accept_snapshot_case
+      "output_input_aliasing"
+      "accept_from_snapshot_exact"
+      0;
+    accept_snapshot_case
+      "partial_output_input_aliasing"
+      "accept_from_snapshot_partial"
+      1;
+    reject_case
+      "k_not_multiple_of_128"
+      [
+        mutation
+          "set_scalar_param"
+          "parameter_addresses_and_scalar_params.values.k"
+          ["value", `Int 127];
+      ];
+    reject_case
+      "bad_q1_owner_length"
+      [
+        mutation
+          "truncate_input_manifest"
+          "q1_owner"
+          ["truncate_bytes", `Int 1];
+      ];
+    reject_case
+      "nonfinite_fp16_scale"
+      [
+        mutation
+          "replace_q1_scale_bits"
+          "q1_owner[0..2]"
+          ["value_hex_le", `String "007c"];
+      ];
   ]
 
 let q1_template ?(session_abi_root = Abi.v1_root)
@@ -235,6 +325,7 @@ let q1_template ?(session_abi_root = Abi.v1_root)
         ];
       ];
     ];
+    "expected_failure_atomicity_behavior", `List q1_failure_cases;
   ]
 
 let index_json =
@@ -322,7 +413,12 @@ let check_good_template_reports_bound_abi () =
       run_conformance
         dir
         (q1_template ())
-        ["--strict-effort"; "--require-profile-roots-bound"]
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
     in
     check "good runner exits zero" (code = 0);
     let result = first_result report in
@@ -330,6 +426,17 @@ let check_good_template_reports_bound_abi () =
     check "good runner output" (String.equal (string_value "output_status" result) "matched");
     check "good program effort" (bool_value "program_effort_match" result);
     check "good opcode effort" (bool_value "opcode_effort_match" result);
+    check "good failure cases included" (bool_value "failure_cases_included" result);
+    check "good failure case count" (int_value "failure_case_count" result = 7);
+    check
+      "good counted failure case count"
+      (int_value "counted_failure_case_count" result = 7);
+    check
+      "good accepted counted failure case count"
+      (int_value "accepted_counted_failure_case_count" result = 7);
+    check
+      "good failure gate accepted"
+      (String.equal (gate_status "failure_case_gate" report) "accepted");
     let abi = assoc_json "abi_declaration_binding" result in
     check "good ABI declaration matched" (String.equal (string_value "status" abi) "matched");
     check
