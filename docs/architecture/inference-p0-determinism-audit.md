@@ -159,8 +159,10 @@ tools/inference_conformance_matrix.exe \
 The matrix verifier consumes executed `inference_conformance_run` reports, not
 schema-checker reports. It requires accepted local execution, strict effort,
 accepted punitive failure cases, distinct platform observations, and identical
-per-opcode output/effort signatures. A single repeated VPS report is still
-rejected as `insufficient_distinct_platforms`. Matrix reports include
+per-opcode output/effort signatures. They also require a single shared
+`profile_catalog_root`, so matching output bytes cannot hide a profile-contract
+drift between reports. A single repeated VPS report is still rejected as
+`insufficient_distinct_platforms`. Matrix reports include
 `runner_report_sha256`, `result_signature_sha256`, and
 `matrix_signature_sha256` as diagnostic evidence roots; those hashes identify
 the compared report bytes and normalized result signatures, but they are not

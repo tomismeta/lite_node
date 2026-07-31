@@ -101,6 +101,11 @@ let opt_string_field name fields =
   | None -> None
   | _ -> fail ("invalid string field: " ^ name)
 
+let json_field_or_null name fields =
+  match field name fields with
+  | Some value -> value
+  | None -> `Null
+
 let add_if condition value values =
   if condition then value :: values else values
 
@@ -245,9 +250,13 @@ let report_summary path =
     let validator_readiness_status, validator_readiness_blockers =
       validator_readiness_summary fields
     in
+    let profile_catalog_root =
+      opt_string_field "profile_catalog_root" fields
+    in
     accepted,
     platform_key platform,
     signature,
+    profile_catalog_root,
     validator_readiness_blockers,
     `Assoc [
       "path", `String path;
@@ -275,6 +284,14 @@ let report_summary path =
             | Some value -> value
             | None -> "missing")
          | None -> "missing");
+      "profile_catalog_root",
+      (match profile_catalog_root with
+       | Some root -> `String root
+       | None -> `Null);
+      "profile_consensus_status_counts",
+      json_field_or_null "profile_consensus_status_counts" fields;
+      "profile_root_binding_status_counts",
+      json_field_or_null "profile_root_binding_status_counts" fields;
       "validator_readiness_status", `String validator_readiness_status;
       "validator_readiness_blockers",
       `List
@@ -300,17 +317,28 @@ let matrix_report paths =
   let summaries = List.map report_summary paths in
   let report_count = List.length summaries in
   let accepted_reports =
-    List.length (List.filter (fun (accepted, _, _, _, _) -> accepted) summaries)
+    List.length (List.filter (fun (accepted, _, _, _, _, _) -> accepted) summaries)
   in
   let platforms =
-    unique (List.map (fun (_, platform, _, _, _) -> platform) summaries)
+    unique (List.map (fun (_, platform, _, _, _, _) -> platform) summaries)
   in
   let signatures =
-    unique (List.map (fun (_, _, signature, _, _) -> signature) summaries)
+    unique (List.map (fun (_, _, signature, _, _, _) -> signature) summaries)
+  in
+  let profile_catalog_roots =
+    summaries
+    |> List.filter_map (fun (_, _, _, root, _, _) -> root)
+    |> unique
+  in
+  let missing_profile_catalog_root_count =
+    List.length
+      (List.filter
+         (fun (accepted, _, _, root, _, _) -> accepted && root = None)
+         summaries)
   in
   let per_report_validator_blockers =
     summaries
-    |> List.map (fun (_, _, _, blockers, _) -> blockers)
+    |> List.map (fun (_, _, _, _, blockers, _) -> blockers)
     |> List.concat
     |> without_cross_platform_blocker
     |> unique
@@ -328,6 +356,8 @@ let matrix_report paths =
     && accepted_reports = report_count
     && List.length platforms >= !min_platforms
     && List.length signatures = 1
+    && missing_profile_catalog_root_count = 0
+    && List.length profile_catalog_roots = 1
   in
   let blockers =
     []
@@ -341,6 +371,12 @@ let matrix_report paths =
     |> add_if
          (List.length signatures <> 1)
          "result_mismatch_across_platforms"
+    |> add_if
+         (missing_profile_catalog_root_count > 0)
+         "missing_profile_catalog_root"
+    |> add_if
+         (List.length profile_catalog_roots > 1)
+         "profile_catalog_mismatch"
   in
   let validator_readiness_blockers =
     unique (blockers @ per_report_validator_blockers)
@@ -368,11 +404,14 @@ let matrix_report paths =
          validator_readiness_blockers);
     "platform_keys", `List (List.map (fun value -> `String value) platforms);
     "result_signature_count", `Int (List.length signatures);
+    "profile_catalog_root_count", `Int (List.length profile_catalog_roots);
+    "profile_catalog_roots",
+    `List (List.map (fun value -> `String value) profile_catalog_roots);
     "matrix_signature_sha256",
     (match matrix_signature_sha256 with
      | None -> `Null
      | Some value -> `String value);
-    "reports", `List (List.map (fun (_, _, _, _, json) -> json) summaries);
+    "reports", `List (List.map (fun (_, _, _, _, _, json) -> json) summaries);
   ]
 
 let () =
