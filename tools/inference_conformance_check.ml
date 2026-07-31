@@ -1367,6 +1367,41 @@ let q1_parameter_issues path opcode fields =
                 (issue ~opcode path
                    ("missing LINEAR_Q1_G128_FP register: " ^ name)))
       in
+      let abi_register_issues =
+        match assoc_field "abi" fields, assoc_field "registers" params with
+        | Some abi, Some registers ->
+          let output_base = string_field "output_base_register" abi in
+          let output_count = string_field "output_count_register" abi in
+          let dst_issue =
+            match output_base, string_field "dst" registers with
+            | Some expected, Some actual when String.equal expected actual -> []
+            | Some _, Some _ ->
+              [issue ~opcode path
+                 "LINEAR_Q1_G128_FP dst register must match ABI output_base_register"]
+            | _ -> []
+          in
+          let count_collisions =
+            match output_count with
+            | Some count_register ->
+              ["lhs"; "q1_owner"; "byte_offset"; "m"; "k"; "n"]
+              |> List.filter_map (fun name ->
+                match string_field name registers with
+                | Some actual when String.equal actual count_register ->
+                  Some name
+                | _ -> None)
+            | None -> []
+          in
+          let count_issue =
+            match count_collisions with
+            | [] -> []
+            | names ->
+              [issue ~opcode path
+                 ("LINEAR_Q1_G128_FP input/scalar registers must not use ABI output_count_register: "
+                  ^ String.concat "," names)]
+          in
+          dst_issue @ count_issue
+        | _ -> []
+      in
       let value_issues =
         match assoc_field "values" params with
         | None ->
@@ -1403,7 +1438,7 @@ let q1_parameter_issues path opcode fields =
           in
           required @ shape @ offset
       in
-      register_issues @ value_issues
+      register_issues @ abi_register_issues @ value_issues
 
 let sum_manifest_bytes manifests =
   let rec loop acc = function

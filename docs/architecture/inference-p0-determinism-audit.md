@@ -366,8 +366,10 @@ also requires a single shared
 `profile_catalog_root` and a single shared `template_corpus_root`, so matching
 output bytes cannot hide a profile-contract or qualification-corpus drift
 between reports. Each result row must also bind a matched `vm_semantics_root`
-and session ABI declaration; top-level gates alone are not sufficient. A
-single repeated VPS report is still rejected as
+and session ABI declaration, plus a matched executable ABI binding for final
+`r0/r1` and canonical output-payload readability; top-level gates alone are not
+sufficient. Output subspan roots are recomputed by the runner and signed by the
+matrix alongside output bytes. A single repeated VPS report is still rejected as
 `insufficient_distinct_platforms` or
 `insufficient_distinct_runner_executables`. Runner reports record the OCaml
 version, OS class, `uname` system name/release/machine, word size, endianness,
@@ -755,8 +757,10 @@ runner execution. `LINEAR_Q1_G128_FP` templates must bind an `lhs` range as
 for `dst`, `lhs`, `q1_owner`, `byte_offset`, `m`, `k`, and `n`, and declare
 integer values for `dst`, `lhs`, `byte_offset`, `m`, `k`, and `n`. Dimensions
 must be positive, `k` must be a multiple of 128, and `byte_offset` must be
-nonnegative. The declared `lhs` source must be exactly `m * k * 8` bytes with
-`m * k` f64 cells, the declared `q1_owner` byte source must cover
+nonnegative. The `dst` register must match the ABI output-base register, and
+`lhs`, `q1_owner`, `byte_offset`, `m`, `k`, and `n` must not reuse the ABI
+output-count register. The declared `lhs` source must be exactly `m * k * 8`
+bytes with `m * k` f64 cells, the declared `q1_owner` byte source must cover
 `byte_offset + n * (k / 128) * 18` bytes, and the declared output must be
 `m * n` f64 cells with exactly `m * n * 8` expected-output manifest bytes. This
 keeps producer drift out of the validator-readiness gate without adding

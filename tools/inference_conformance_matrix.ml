@@ -150,6 +150,7 @@ let next_readiness_blocker blockers =
       "unbound_abi_declaration_binding";
       "abi_declaration_binding_mismatch";
       "abi_declaration_binding_rejected";
+      "executable_abi_binding_mismatch";
       "consensus_candidate_profile_gates";
       "unbound_profile_roots";
       "profile_root_binding_mismatch";
@@ -234,6 +235,8 @@ let subspan_signature = function
       (match opt_string_field "expected_root" fields with
        | None -> `Null
        | Some root -> `String root);
+      "observed_root", `String (string_field "observed_root" fields);
+      "root_matched", `Bool (bool_field "root_matched" fields);
       "matched", `Bool (bool_field "matched" fields);
     ]
   | _ -> fail "subspan must be an object"
@@ -318,6 +321,10 @@ let result_signature = function
       (match field "abi_declaration_binding" fields with
        | Some (`Assoc _ as binding) -> binding
        | _ -> fail "missing abi_declaration_binding");
+      "executable_abi_binding",
+      (match field "executable_abi_binding" fields with
+       | Some (`Assoc _ as binding) -> binding
+       | _ -> fail "missing executable_abi_binding");
       "status", `String (string_field "status" fields);
       "vm_run", `String (string_field "vm_run" fields);
       "output_status", `String (string_field "output_status" fields);
@@ -505,6 +512,17 @@ let report_summary path =
            | None -> false)
         result_fields
     in
+    let executable_abi_bindings_matched =
+      List.for_all
+        (fun fields ->
+           match opt_assoc_field "executable_abi_binding" fields with
+           | Some binding_fields ->
+             (match opt_string_field "status" binding_fields with
+              | Some "matched" -> true
+              | _ -> false)
+           | None -> false)
+        result_fields
+    in
     let required_failure_case_contracts_accepted =
       List.for_all required_failure_case_contract_accepted result_fields
     in
@@ -530,6 +548,7 @@ let report_summary path =
       && vm_semantics_bindings_matched
       && abi_declaration_binding_accepted
       && abi_declaration_bindings_matched
+      && executable_abi_bindings_matched
       && Option.is_some template_corpus_root
       && Option.is_some runner_executable_sha256
     in
@@ -573,6 +592,9 @@ let report_summary path =
            (not abi_declaration_binding_accepted)
            "abi_declaration_binding_rejected"
       |> add_if (not abi_declaration_bindings_matched) "abi_declaration_binding_mismatch"
+      |> add_if
+           (not executable_abi_bindings_matched)
+           "executable_abi_binding_mismatch"
       |> add_if
            (Option.is_none template_corpus_root)
            "missing_template_corpus_root"
@@ -680,6 +702,8 @@ let report_summary path =
       `String (if vm_semantics_bindings_matched then "matched" else "mismatch");
       "abi_declaration_binding_status",
       `String (if abi_declaration_bindings_matched then "matched" else "mismatch");
+      "executable_abi_binding_status",
+      `String (if executable_abi_bindings_matched then "matched" else "mismatch");
       "blockers", `List (List.map (fun blocker -> `String blocker) blockers);
     ];
     }

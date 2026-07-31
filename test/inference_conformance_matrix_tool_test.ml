@@ -169,6 +169,7 @@ let result
     ?(profile_root_status = "matched")
     ?(vm_semantics_status = "matched")
     ?(abi_declaration_status = "matched")
+    ?(executable_abi_status = "matched")
     ?(required_failure_contract_status = "accepted")
     ?required_failure_contract_blockers
     ?(failure = failure_case ())
@@ -245,8 +246,20 @@ let result
       `List
         (if String.equal abi_declaration_status "matched" then
            []
-         else
+        else
            [`String "r1_output_count_mismatch"]);
+    ];
+    "executable_abi_binding",
+    `Assoc [
+      "status", `String executable_abi_status;
+      "expected_r0", `Int 10000;
+      "expected_r1", `Int 6;
+      "observed_r0", `Int 10000;
+      "observed_r1", `Int 6;
+      "registers_match", `Bool true;
+      "output_payload_status", `String "accepted";
+      "output_payload_error", `Null;
+      "output_payload_sha256", `String (hex_root '9');
     ];
     "status", `String "accepted";
     "vm_run", `String "accepted";
@@ -275,6 +288,8 @@ let result
         "expected_sha256", `String (hex_root 'a');
         "observed_sha256", `String (hex_root 'a');
         "expected_root", `String (hex_root 'b');
+        "observed_root", `String (hex_root 'b');
+        "root_matched", `Bool true;
         "matched", `Bool true;
       ];
     ];
@@ -293,6 +308,7 @@ let report
     ?(vm_semantics_gate_status = "accepted")
     ?(abi_declaration_status = "matched")
     ?(abi_gate_status = "accepted")
+    ?(executable_abi_status = "matched")
     ?(required_failure_contract_status = "accepted")
     ?required_failure_contract_blockers
     ?failure
@@ -324,6 +340,7 @@ let report
         ~profile_root_status
         ~vm_semantics_status
         ~abi_declaration_status
+        ~executable_abi_status
         ~required_failure_contract_status
         ?required_failure_contract_blockers
         ?failure
@@ -701,6 +718,38 @@ let check_matrix_rejects_abi_declaration_binding_mismatch () =
            (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_executable_abi_binding_mismatch () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~executable_abi_status:"mismatch"
+           "Linux"
+           "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "executable ABI mismatch matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "executable ABI mismatch top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      check
+        "executable ABI mismatch validator blocker"
+        (List.mem
+           "executable_abi_binding_mismatch"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_profile_root_binding_mismatch () =
   with_temp_dir (fun dir ->
     let a =
@@ -1044,5 +1093,6 @@ let () =
   check_matrix_accepts_non_q1_failure_contract_not_applicable ();
   check_matrix_rejects_empty_results ();
   check_matrix_rejects_abi_declaration_binding_mismatch ();
+  check_matrix_rejects_executable_abi_binding_mismatch ();
   check_matrix_rejects_vm_semantics_binding_mismatch ();
   check_matrix_rejects_same_platform ()

@@ -13,6 +13,7 @@ Include at startup:
 *)
 
 module VM = Octra_vm.Contract_vm
+module Abi = Octra_vm.Inference_session_abi
 module Fp64 = Octra_vm.Inference_fp64
 module Profile = Octra_vm.Inference_numerical_profile
 module Template = Octra_vm.Inference_conformance_template
@@ -1137,6 +1138,26 @@ let set_registers state registers values =
        | _ -> fail ("register value must be an int: " ^ name))
     registers
 
+let set_output_abi_registers state template =
+  match field "output" template with
+  | Some (`Assoc output_fields) ->
+    (match field "abi_registers" output_fields with
+     | Some (`Assoc abi_registers) ->
+       List.iter
+         (fun (name, value) ->
+            match name, value with
+            | "r0", (`Int _ | `Intlit _)
+            | "r1", (`Int _ | `Intlit _) ->
+              let reg = register_index name in
+              set_z_reg state reg (z_field name abi_registers)
+            | "r0", _
+            | "r1", _ ->
+              fail ("output ABI register value must be an int: " ^ name)
+            | _, _ -> ())
+         abi_registers
+     | _ -> ())
+  | _ -> ()
+
 let find_input name inputs =
   match List.find_opt (fun input -> String.equal input.input_name name) inputs with
   | Some input -> input
@@ -1383,6 +1404,109 @@ let expected_opcode_effort opcode values =
     Some (200 + ((m * n * k) / 512))
   | _ -> None
 
+let length_prefix value =
+  string_of_int (String.length value) ^ ":" ^ value
+
+let value_payload = function
+  | VM.VInt value -> Ok ("int:" ^ Z.to_string value)
+  | VM.VBool value -> Ok ("bool:" ^ if value then "1" else "0")
+  | VM.VString value -> Ok ("string:" ^ length_prefix value)
+  | VM.VBytes value -> Ok ("bytes:" ^ length_prefix value)
+  | VM.VBytes32 value -> Ok ("bytes32:" ^ length_prefix value)
+  | VM.VU64 value -> Ok ("u64:" ^ Z.to_string value)
+  | VM.VU128 value -> Ok ("u128:" ^ Z.to_string value)
+  | VM.VU256 value -> Ok ("u256:" ^ Z.to_string value)
+  | VM.VAddr value -> Ok ("address:" ^ length_prefix value)
+  | VM.VCipher _
+  | VM.VPubKey _ -> Error "opaque_value"
+
+let output_integer state reg =
+  match state.VM.regs.(reg) with
+  | VM.VInt value
+  | VM.VU64 value
+  | VM.VU128 value
+  | VM.VU256 value
+    when Z.fits_int value -> Some (Z.to_int value)
+  | _ -> None
+
+let output_payload state =
+  match
+    output_integer state Abi.output_base_register,
+    output_integer state Abi.output_count_register
+  with
+  | Some base, Some length when base >= 0 && length >= 0
+                              && base <= max_int - length ->
+    let rec read_values index acc =
+      if index = length then Ok (List.rev acc)
+      else
+        let cell = base + index in
+        match Hashtbl.find_opt state.VM.memory.data cell with
+        | None -> Error ("missing_output_cell:" ^ string_of_int cell)
+        | Some value ->
+          (match value_payload value with
+           | Ok value -> read_values (index + 1) (value :: acc)
+           | Error error -> Error error)
+    in
+    (match read_values 0 [] with
+     | Ok values ->
+       Ok
+         (String.concat
+            "|"
+            [
+              "base=" ^ string_of_int base;
+              "length=" ^ string_of_int length;
+              "values=" ^ String.concat "," values;
+            ])
+     | Error error -> Error error)
+  | Some _, Some _ -> Error "invalid_output_bounds"
+  | _ -> Error "missing_output_bounds"
+
+let executable_abi_result state template =
+  let output = assoc_field "output" template in
+  let abi_registers = assoc_field "abi_registers" output in
+  let expected_r0 = int_field "r0" abi_registers in
+  let expected_r1 = int_field "r1" abi_registers in
+  let observed_r0 = output_integer state Abi.output_base_register in
+  let observed_r1 = output_integer state Abi.output_count_register in
+  let registers_match =
+    observed_r0 = Some expected_r0 && observed_r1 = Some expected_r1
+  in
+  let payload_result = output_payload state in
+  let payload_sha256 =
+    match payload_result with
+    | Ok payload -> `String (sha256 payload)
+    | Error _ -> `Null
+  in
+  let payload_status =
+    match payload_result with
+    | Ok _ -> "accepted"
+    | Error _ -> "rejected"
+  in
+  let payload_error =
+    match payload_result with
+    | Ok _ -> `Null
+    | Error error -> `String error
+  in
+  registers_match && String.equal payload_status "accepted",
+  `Assoc [
+    "status",
+    `String
+      (if registers_match && String.equal payload_status "accepted" then
+         "matched"
+       else
+         "mismatch");
+    "expected_r0", `Int expected_r0;
+    "expected_r1", `Int expected_r1;
+    "observed_r0",
+    (match observed_r0 with Some value -> `Int value | None -> `Null);
+    "observed_r1",
+    (match observed_r1 with Some value -> `Int value | None -> `Null);
+    "registers_match", `Bool registers_match;
+    "output_payload_status", `String payload_status;
+    "output_payload_error", payload_error;
+    "output_payload_sha256", payload_sha256;
+  ]
+
 let subspan_result state value =
   match value with
   | `Assoc fields ->
@@ -1393,7 +1517,12 @@ let subspan_result state value =
     let expected_root = opt_string_field "root" fields in
     let raw = output_bytes state base cells in
     let actual_sha = sha256 raw in
-    let matched = String.equal actual_sha expected_sha in
+    let root_matched =
+      match expected_root with
+      | None -> true
+      | Some root -> String.equal root actual_sha
+    in
+    let matched = String.equal actual_sha expected_sha && root_matched in
     matched,
     `Assoc [
       "name", `String name;
@@ -1403,6 +1532,8 @@ let subspan_result state value =
       "observed_sha256", `String actual_sha;
       "expected_root",
       (match expected_root with None -> `Null | Some root -> `String root);
+      "observed_root", `String actual_sha;
+      "root_matched", `Bool root_matched;
       "matched", `Bool matched;
     ]
   | _ -> fail "output subspan must be an object"
@@ -1568,6 +1699,7 @@ let failure_case_result root_dir opcode template registers values op case =
     let state = state ~limit:effort_limit () in
     let inputs = load_inputs root_dir state template registers in
     set_registers state registers values;
+    set_output_abi_registers state template;
     let mutation_results =
       List.map (apply_mutation state registers values inputs) mutations
     in
@@ -1742,6 +1874,7 @@ let execute_template root_dir entry =
   let state = state () in
   ignore (load_inputs root_dir state template registers);
   set_registers state registers values;
+  set_output_abi_registers state template;
   let op = op_for opcode registers in
   let abi_declaration_binding =
     Template.abi_declaration_binding_json (`Assoc template)
@@ -1771,6 +1904,10 @@ let execute_template root_dir entry =
         subspans
   in
   let spans_matched = List.for_all fst span_results in
+  let executable_abi_matched, executable_abi_binding =
+    if ran then executable_abi_result state template
+    else false, `Assoc ["status", `String "not_run"]
+  in
   let observed_effort = state.VM.effort_used in
   let program_effort_match = observed_effort = expected_effort in
   let expected_opcode_effort = expected_opcode_effort opcode values in
@@ -1784,6 +1921,7 @@ let execute_template root_dir entry =
   let accepted =
     ran
     && spans_matched
+    && executable_abi_matched
     && ((not !strict_effort) || effort_match)
   in
   let failure_results =
@@ -1808,6 +1946,7 @@ let execute_template root_dir entry =
     "profile_root_binding", profile_root_binding;
     "vm_semantics_binding", vm_semantics_binding;
     "abi_declaration_binding", abi_declaration_binding;
+    "executable_abi_binding", executable_abi_binding;
     "status", `String (if accepted then "accepted" else "rejected");
     "vm_run", `String (if ran then "accepted" else "rejected");
     "output_status",

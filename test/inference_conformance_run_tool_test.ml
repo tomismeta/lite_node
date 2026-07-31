@@ -280,7 +280,7 @@ let q1_template ?(session_abi_root = Abi.v1_root)
         "vm_memory",
         `Assoc [
           "base_address", `Int 0;
-          "raw_register", `String "r2";
+          "raw_register", `String "r3";
         ];
       ];
     ];
@@ -291,12 +291,12 @@ let q1_template ?(session_abi_root = Abi.v1_root)
       "registers",
       `Assoc [
         "dst", `String "r0";
-        "lhs", `String "r1";
-        "q1_owner", `String "r2";
-        "byte_offset", `String "r3";
-        "m", `String "r4";
-        "k", `String "r5";
-        "n", `String "r6";
+        "lhs", `String "r2";
+        "q1_owner", `String "r3";
+        "byte_offset", `String "r4";
+        "m", `String "r5";
+        "k", `String "r6";
+        "n", `String "r7";
       ];
       "values",
       `Assoc [
@@ -596,6 +596,21 @@ let check_good_template_reports_bound_abi () =
       (String.equal (gate_status "vm_semantics_binding_gate" report) "accepted");
     let abi = assoc_json "abi_declaration_binding" result in
     check "good ABI declaration matched" (String.equal (string_value "status" abi) "matched");
+    let executable_abi = assoc_json "executable_abi_binding" result in
+    check
+      "good executable ABI matched"
+      (String.equal (string_value "status" executable_abi) "matched");
+    check
+      "good executable ABI r0"
+      (int_value "observed_r0" executable_abi = 10000);
+    check
+      "good executable ABI r1"
+      (int_value "observed_r1" executable_abi = 1);
+    check
+      "good executable ABI payload"
+      (String.equal
+         (string_value "output_payload_status" executable_abi)
+         "accepted");
     check
       "good ABI gate accepted"
       (String.equal (gate_status "abi_declaration_binding_gate" report) "accepted"))

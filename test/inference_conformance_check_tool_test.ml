@@ -213,20 +213,21 @@ let q1_input_ranges ?(q1_owner_encoding = "tensor.q1-g128") () =
     q1_owner_input_range ~encoding:q1_owner_encoding ();
   ]
 
-let q1_parameter_block ?(include_registers = true) ?(k = 128) ?(n = 2)
-    ?(byte_offset = 0) () =
+let q1_parameter_block ?(include_registers = true) ?(lhs_register = "r2")
+    ?(q1_owner_register = "r3") ?(dst_register = "r0") ?(k = 128)
+    ?(n = 2) ?(byte_offset = 0) () =
   let registers =
     if include_registers then
       [
         "registers",
         `Assoc [
-          "dst", `String "r0";
-          "lhs", `String "r1";
-          "q1_owner", `String "r2";
-          "byte_offset", `String "r3";
-          "m", `String "r4";
-          "k", `String "r5";
-          "n", `String "r6";
+          "dst", `String dst_register;
+          "lhs", `String lhs_register;
+          "q1_owner", `String q1_owner_register;
+          "byte_offset", `String "r4";
+          "m", `String "r5";
+          "k", `String "r6";
+          "n", `String "r7";
         ];
       ]
     else
@@ -635,6 +636,40 @@ let check_rejects_q1_missing_register_metadata () =
          "missing LINEAR_Q1_G128_FP register metadata"
          (report_issues report)))
 
+let check_rejects_q1_lhs_output_count_register_collision () =
+  with_temp_dir (fun dir ->
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "parameter_addresses_and_scalar_params"
+              (q1_parameter_block ~lhs_register:"r1" ()))
+    in
+    check "q1 lhs output count collision exits nonzero" (code = 1);
+    check
+      "q1 lhs output count collision issue"
+      (List.mem
+         "LINEAR_Q1_G128_FP input/scalar registers must not use ABI output_count_register: lhs"
+         (report_issues report)))
+
+let check_rejects_q1_dst_not_output_base_register () =
+  with_temp_dir (fun dir ->
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "parameter_addresses_and_scalar_params"
+              (q1_parameter_block ~dst_register:"r8" ()))
+    in
+    check "q1 dst output base mismatch exits nonzero" (code = 1);
+    check
+      "q1 dst output base mismatch issue"
+      (List.mem
+         "LINEAR_Q1_G128_FP dst register must match ABI output_base_register"
+         (report_issues report)))
+
 let check_rejects_q1_bad_k_shape () =
   with_temp_dir (fun dir ->
     let code, report =
@@ -867,6 +902,8 @@ let () =
   check_rejects_q1_owner_byte_span_too_short ();
   check_rejects_q1_expected_output_manifest_size ();
   check_rejects_q1_missing_register_metadata ();
+  check_rejects_q1_lhs_output_count_register_collision ();
+  check_rejects_q1_dst_not_output_base_register ();
   check_rejects_q1_bad_k_shape ();
   check_rejects_missing_q1_failure_case ();
   check_rejects_wrong_q1_failure_expectation ();
