@@ -169,7 +169,7 @@ let q1_failure_cases =
       (span "output" 10000 2);
   ]
 
-let q1_template ?(session_abi_root = Abi.v1_root)
+let q1_template ?(session_abi_root = Abi.v1_root) ?(expected_effort = 201)
     ?(output_count_unit = "cells") ?(r1 = 2) () =
   `Assoc [
     "type", `String "p0_litenode_vm_execution_template";
@@ -179,7 +179,7 @@ let q1_template ?(session_abi_root = Abi.v1_root)
     "profile", `String (current_profile ());
     "vm_semantics_root", `String (current_vm_semantics_root ());
     "numerical_profile_root", `String (current_profile_root ());
-    "expected_effort", `Int 201;
+    "expected_effort", `Int expected_effort;
     "program_effect_requirements",
     `Assoc [
       "program_effects",
@@ -205,6 +205,15 @@ let q1_template ?(session_abi_root = Abi.v1_root)
           "base_address", `Int 2000;
           "length_f64_cells", `Int 512;
         ];
+      ];
+    ];
+    "parameter_addresses_and_scalar_params",
+    `Assoc [
+      "values",
+      `Assoc [
+        "m", `Int 1;
+        "k", `Int 128;
+        "n", `Int 1;
       ];
     ];
     "expected_output_byte_manifests",
@@ -419,6 +428,16 @@ let check_rejects_r1_output_count_drift () =
          "ABI declaration binding rejected: r1_output_count_mismatch"
          (report_issues report)))
 
+let check_rejects_q1_expected_effort_drift () =
+  with_temp_dir (fun dir ->
+    let code, report = run_check dir (q1_template ~expected_effort:204 ()) in
+    check "q1 expected effort drift exits nonzero" (code = 1);
+    check
+      "q1 expected effort drift issue"
+      (List.mem
+         "expected_effort mismatch for LINEAR_Q1_G128_FP: expected 201 actual 204"
+         (report_issues report)))
+
 let check_rejects_missing_q1_failure_case () =
   with_temp_dir (fun dir ->
     let failures =
@@ -602,6 +621,7 @@ let () =
   check_rejects_stale_session_abi_root ();
   check_rejects_narrow_output_unit ();
   check_rejects_r1_output_count_drift ();
+  check_rejects_q1_expected_effort_drift ();
   check_rejects_missing_q1_failure_case ();
   check_rejects_wrong_q1_failure_expectation ();
   check_rejects_q1_exact_alias_without_alias_mutation ();

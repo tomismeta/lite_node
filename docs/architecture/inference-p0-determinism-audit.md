@@ -137,6 +137,8 @@ The runner now reports effort in two units. `expected_effort` and
 also emits `expected_opcode_effort`, `observed_opcode_effort`, and
 `opcode_profile`; the current canonical split is `LINEAR_Q1_G128_FP = 200`
 opcode effort plus `STOP = 1`, for total program effort `201`.
+The static checker also validates the Q1 positive-template formula:
+`expected_effort = 200 + ((m * n * k) / 512) + 1`.
 
 When `--require-validator-readiness` is enabled, the top-level report status is
 also `rejected`; without that flag, the same execution can remain `accepted` as

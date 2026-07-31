@@ -1209,6 +1209,42 @@ let template_identity_issues path opcode primitive fields =
   in
   opcode_issues @ primitive_issues
 
+let checked_mul left right =
+  if left < 0 || right < 0 then None
+  else if left <> 0 && right > max_int / left then None
+  else Some (left * right)
+
+let q1_expected_effort_issues path opcode fields =
+  if not (String.equal opcode "LINEAR_Q1_G128_FP") then []
+  else
+    match int_field "expected_effort" fields with
+    | None -> []
+    | Some expected_effort ->
+      (match assoc_field "parameter_addresses_and_scalar_params" fields with
+       | None -> [issue ~opcode path "missing Q1 effort parameter metadata"]
+       | Some params ->
+         match assoc_field "values" params with
+         | None -> [issue ~opcode path "missing Q1 effort parameter values"]
+         | Some values ->
+           match int_field "m" values, int_field "k" values, int_field "n" values with
+           | Some m, Some k, Some n when m >= 0 && k >= 0 && n >= 0 ->
+             (match Option.bind (checked_mul m n) (fun mn -> checked_mul mn k) with
+              | Some product ->
+                let expected = 200 + (product / 512) + 1 in
+                if expected_effort = expected then []
+                else
+                  [issue ~opcode path
+                     (Printf.sprintf
+                        "expected_effort mismatch for LINEAR_Q1_G128_FP: expected %d actual %d"
+                        expected
+                        expected_effort)]
+              | None ->
+                [issue ~opcode path
+                   "LINEAR_Q1_G128_FP effort factors overflow"])
+           | _ ->
+             [issue ~opcode path
+                "missing LINEAR_Q1_G128_FP effort parameters m/k/n"])
+
 let producer_template_issues path opcode primitive json =
   match json with
   | `Assoc fields ->
@@ -1243,6 +1279,7 @@ let producer_template_issues path opcode primitive json =
     type_issue
     @ template_identity_issues path opcode primitive fields
     @ root_issues
+    @ q1_expected_effort_issues path opcode fields
     @ profile_issues path opcode fields
     @ issues_for_program_effects path opcode fields
     @ source_path_issues path opcode fields
