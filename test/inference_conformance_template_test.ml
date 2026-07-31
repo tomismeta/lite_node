@@ -894,6 +894,19 @@ let check_inference_profile_surface_coverage () =
                catalog))
        surface
    | _ -> failwith "surface profile root catalog must be list");
+  check
+    "surface profile catalog root"
+    (match Profile.profile_catalog_root_json gates with
+     | `String root ->
+       String.equal
+         root
+         "82fc51bc9191f2a050b7be5f47d8ef873502838bc86938c6ca890ec7aa7b6a2f"
+     | _ -> false);
+  check
+    "empty profile catalog root"
+    (match Profile.profile_catalog_root_json [] with
+     | `Null -> true
+     | _ -> false);
   (match Profile.consensus_blocker_catalog_json gates with
    | `List catalog ->
      List.iter

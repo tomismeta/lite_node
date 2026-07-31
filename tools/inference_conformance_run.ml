@@ -1568,6 +1568,8 @@ let run_p0_plus_pack path =
     Profile.status_counts_json status_counts;
     "profile_root_catalog",
     Profile.profile_root_catalog_json profile_gates;
+    "profile_catalog_root",
+    Profile.profile_catalog_root_json profile_gates;
     "profile_root_binding_catalog",
     Profile.profile_root_binding_catalog_json (List.map snd results);
     "consensus_blocker_catalog",
@@ -1710,6 +1712,8 @@ let run_index path =
     Profile.status_counts_json status_counts;
     "profile_root_catalog",
     Profile.profile_root_catalog_json profile_gates;
+    "profile_catalog_root",
+    Profile.profile_catalog_root_json profile_gates;
     "profile_root_binding_catalog",
     Profile.profile_root_binding_catalog_json (List.map snd results);
     "consensus_blocker_catalog",

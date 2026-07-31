@@ -363,7 +363,9 @@ numerical root, and `profile_root_unavailable` means the gate root was missing.
 Checker and runner conformance reports summarize those values in
 `profile_root_binding_classification_counts` so consumers can detect stale
 profile roots without walking every template row. They also expose
-`profile_root_binding_catalog`, which records each opcode's declared
+`profile_catalog_root`, the root of the current LiteNode profile catalog for
+the report's profiled opcodes, and `profile_root_binding_catalog`, which
+records each opcode's declared
 `numerical_profile_root`, LiteNode `profile_root`, status, and classification
 as the exact root-binding worklist. Reports also expose a
 deduplicated `profile_root_catalog` with the current LiteNode opcode, profile

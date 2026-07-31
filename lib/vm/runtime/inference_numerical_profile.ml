@@ -1978,3 +1978,25 @@ let current_runtime_profile_catalog_json ~opcodes =
   | `Assoc fields ->
     `Assoc (fields @ ["profile_catalog_root", `String (profile_catalog_root report)])
   | _ -> report
+
+let profile_catalog_opcodes values =
+  values
+  |> List.fold_left
+       (fun opcodes value ->
+          List.map
+            (fun (opcode, _, _, _, _) -> opcode)
+            (profile_root_catalog_entries value)
+          @ opcodes)
+       []
+  |> List.sort_uniq String.compare
+
+let profile_catalog_root_json values =
+  match profile_catalog_opcodes values with
+  | [] -> `Null
+  | opcodes ->
+    (match current_runtime_profile_catalog_json ~opcodes with
+     | `Assoc fields ->
+       (match List.assoc_opt "profile_catalog_root" fields with
+        | Some (`String _ as root) -> root
+        | _ -> `Null)
+     | _ -> `Null)
