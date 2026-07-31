@@ -718,6 +718,34 @@ let check_profile_status_counts () =
              (Profile.status_counts_of_json_gates [])))
    | _ -> failwith "status counts json must be object")
 
+let check_validator_readiness_predicate () =
+  check
+    "validator readiness accepts full evidence"
+    (Profile.validator_readiness_accepted
+       ~execution_ready:true
+       ~failure_cases_ready:true
+       ~profile_ready:true
+       ~roots_ready:true
+       ~cross_platform_ready:true);
+  check
+    "validator readiness rejects missing cross-platform"
+    (not
+       (Profile.validator_readiness_accepted
+          ~execution_ready:true
+          ~failure_cases_ready:true
+          ~profile_ready:true
+          ~roots_ready:true
+          ~cross_platform_ready:false));
+  check
+    "validator readiness rejects local-only execution evidence"
+    (not
+       (Profile.validator_readiness_accepted
+          ~execution_ready:true
+          ~failure_cases_ready:true
+          ~profile_ready:false
+          ~roots_ready:true
+          ~cross_platform_ready:true))
+
 let check_p0_profile_gate_coverage () =
   List.iter
     (fun opcode ->
@@ -2040,6 +2068,7 @@ let () =
   check_profile_root_binding_counts ();
   check_profile_root_binding_catalog ();
   check_profile_status_counts ();
+  check_validator_readiness_predicate ();
   check_p0_profile_gate_coverage ();
   check_inference_profile_surface_coverage ();
   check_remaining_p0_profile_obligations ();

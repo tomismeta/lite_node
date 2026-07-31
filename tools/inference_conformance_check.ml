@@ -349,6 +349,14 @@ let static_validator_readiness_gate
     Profile.root_bindings_are_consensus_ready root_binding_counts
   in
   let cross_platform_ready = false in
+  let ready =
+    Profile.validator_readiness_accepted
+      ~execution_ready:false
+      ~failure_cases_ready:false
+      ~profile_ready
+      ~roots_ready
+      ~cross_platform_ready
+  in
   let blockers =
     []
     |> add_blocker (not schema_accepted) "schema_rejected"
@@ -368,7 +376,7 @@ let static_validator_readiness_gate
   in
   `Assoc [
     "diagnostic_only", `Bool true;
-    "status", `String "rejected";
+    "status", `String (if ready then "accepted" else "rejected");
     "schema_status", `String schema_status;
     "execution_status", `String "not_run";
     "failure_case_status", `String "not_run";

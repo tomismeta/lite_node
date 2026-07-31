@@ -220,6 +220,18 @@ let root_binding_blockers counts =
 let root_bindings_required_pass ~required counts =
   (not required) || root_bindings_are_consensus_ready counts
 
+let validator_readiness_accepted
+    ~execution_ready
+    ~failure_cases_ready
+    ~profile_ready
+    ~roots_ready
+    ~cross_platform_ready =
+  execution_ready
+  && failure_cases_ready
+  && profile_ready
+  && roots_ready
+  && cross_platform_ready
+
 let root_binding_gate_json ~required counts =
   let ready = root_bindings_are_consensus_ready counts in
   `Assoc [

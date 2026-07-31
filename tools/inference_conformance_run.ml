@@ -420,6 +420,14 @@ let validator_readiness_gate
     Profile.root_bindings_are_consensus_ready root_binding_counts
   in
   let cross_platform_ready = false in
+  let ready =
+    Profile.validator_readiness_accepted
+      ~execution_ready:execution_accepted
+      ~failure_cases_ready
+      ~profile_ready
+      ~roots_ready
+      ~cross_platform_ready
+  in
   let blockers =
     []
     |> add_blocker (not execution_accepted) "execution_rejected"
@@ -446,13 +454,7 @@ let validator_readiness_gate
   `Assoc [
     "diagnostic_only", `Bool true;
     "status",
-    `String
-      (if execution_accepted
-          && failure_cases_ready
-          && profile_ready
-          && roots_ready
-       then "accepted"
-       else "rejected");
+    `String (if ready then "accepted" else "rejected");
     "execution_status",
     `String (if execution_accepted then "accepted" else "rejected");
     "failure_case_status",
