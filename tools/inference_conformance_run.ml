@@ -1565,6 +1565,192 @@ let ingress_rejection_authority mutation_results =
   else
     "not_applicable"
 
+let mutation_fields = function
+  | `Assoc fields -> Some fields
+  | _ -> None
+
+let mutation_is name mutation =
+  match mutation_fields mutation with
+  | Some fields ->
+    (match opt_string_field "mutation" fields with
+     | Some actual -> String.equal actual name
+     | None -> false)
+  | None -> false
+
+let mutation_targets target mutation =
+  match mutation_fields mutation with
+  | Some fields ->
+    (match opt_string_field "target" fields with
+     | Some actual -> String.equal actual target
+     | None -> false)
+  | None -> false
+
+let mutation_int_value name mutation =
+  match mutation_fields mutation with
+  | Some fields -> opt_int_field name fields
+  | None -> None
+
+let mutation_z_value name mutation =
+  match mutation_fields mutation with
+  | Some fields ->
+    (match field name fields with
+     | Some (`Int value) -> Some (Z.of_int value)
+     | Some (`Intlit value) -> Some (z_of_unsigned_i64_string value)
+     | _ -> None)
+  | None -> None
+
+let mutation_string_value name mutation =
+  match mutation_fields mutation with
+  | Some fields -> opt_string_field name fields
+  | None -> None
+
+let q1_owner_source_bytes template =
+  match field "input_memory_ranges" template with
+  | Some (`List ranges) ->
+    List.find_map
+      (function
+        | `Assoc fields when opt_string_field "name" fields = Some "q1_owner" ->
+          (match field "source" fields with
+           | Some (`Assoc source) -> opt_int_field "bytes" source
+           | _ -> None)
+        | _ -> None)
+      ranges
+  | _ -> None
+
+let q1_required_owner_bytes values =
+  match opt_int_field "k" values, opt_int_field "n" values with
+  | Some k, Some n when k > 0 && n > 0 && k mod 128 = 0 ->
+    Some (n * (k / 128) * 18)
+  | _ -> None
+
+let q1_mutates_scalar param predicate mutations =
+  List.exists
+    (fun mutation ->
+       mutation_is "set_scalar_param" mutation
+       && mutation_targets
+            ("parameter_addresses_and_scalar_params.values." ^ param)
+            mutation
+       &&
+       match mutation_int_value "value" mutation with
+       | Some value -> predicate value
+       | None -> false)
+    mutations
+
+let q1_truncates_raw target mutations =
+  List.exists
+    (fun mutation ->
+       mutation_is "truncate_input_manifest" mutation
+       && mutation_targets target mutation
+       &&
+       match mutation_int_value "truncate_bytes" mutation with
+       | Some value -> value > 0
+       | None -> false)
+    mutations
+
+let q1_fp16_bits_from_hex_le value =
+  let raw = bytes_of_hex value in
+  if String.length raw <> 2 then None
+  else
+    Some
+      (Char.code raw.[0]
+       lor (Char.code raw.[1] lsl 8))
+
+let q1_nonfinite_fp16_scale_mutation mutations =
+  List.exists
+    (fun mutation ->
+       mutation_is "replace_q1_scale_bits" mutation
+       && mutation_targets "q1_owner[0..2]" mutation
+       &&
+       match mutation_string_value "value_hex_le" mutation with
+       | Some value ->
+         (match q1_fp16_bits_from_hex_le value with
+          | Some bits -> Fp64.of_binary16 bits = None
+          | None -> false)
+       | None -> false)
+    mutations
+
+let q1_required_mutation_shape_blockers template values case mutations =
+  let matched =
+    match case with
+    | "nonfinite_input_nan" ->
+      List.exists
+        (fun mutation ->
+           mutation_is "replace_first_f64_input_cell" mutation
+           && mutation_targets "lhs" mutation
+           && mutation_z_value "value_bits" mutation
+              = Some (z_of_unsigned_i64_string "9221120237041090560"))
+        mutations
+    | "nonfinite_input_infinity" ->
+      List.exists
+        (fun mutation ->
+           mutation_is "replace_first_f64_input_cell" mutation
+           && mutation_targets "lhs" mutation
+           && mutation_z_value "value_bits" mutation
+              = Some (z_of_unsigned_i64_string "9218868437227405312"))
+        mutations
+    | "output_input_aliasing" ->
+      List.exists
+        (fun mutation ->
+           mutation_targets "output.base_address" mutation
+           &&
+           (mutation_is "set_output_base_to_first_input_base" mutation
+            ||
+            (mutation_is "set_output_base_to_first_input_base_plus" mutation
+             &&
+             match mutation_int_value "offset_cells" mutation with
+             | Some value -> value = 0
+             | None -> false)))
+        mutations
+    | "partial_output_input_aliasing" ->
+      List.exists
+        (fun mutation ->
+           mutation_is "set_output_base_to_first_input_base_plus" mutation
+           && mutation_targets "output.base_address" mutation
+           &&
+           match mutation_int_value "offset_cells" mutation with
+           | Some value -> value > 0
+           | None -> false)
+        mutations
+    | "k_not_multiple_of_128" ->
+      q1_mutates_scalar "k" (fun value -> value <= 0 || value mod 128 <> 0) mutations
+    | "bad_q1_owner_length" -> q1_truncates_raw "q1_owner" mutations
+    | "negative_byte_offset" ->
+      q1_mutates_scalar "byte_offset" (fun value -> value < 0) mutations
+    | "byte_offset_out_of_bounds" ->
+      (match q1_owner_source_bytes template with
+       | Some source_bytes ->
+         q1_mutates_scalar
+           "byte_offset"
+           (fun value -> value > source_bytes)
+           mutations
+       | None -> false)
+    | "byte_offset_truncated_span" ->
+      (match q1_owner_source_bytes template, q1_required_owner_bytes values with
+       | Some source_bytes, Some required_bytes ->
+         q1_mutates_scalar
+           "byte_offset"
+           (fun value ->
+              value >= 0
+              && value <= source_bytes
+              && required_bytes > source_bytes - value)
+           mutations
+       | _ -> false)
+    | "nonfinite_fp16_scale" -> q1_nonfinite_fp16_scale_mutation mutations
+    | "lower_effort_limit" ->
+      List.exists
+        (fun mutation ->
+           mutation_is "lower_effort_limit" mutation
+           &&
+           match mutation_int_value "value" mutation,
+                 opt_int_field "expected_effort" template with
+           | Some value, Some expected -> value < expected
+           | _ -> false)
+        mutations
+    | _ -> true
+  in
+  if matched then []
+  else ["q1_failure_case_mutation_mismatch_" ^ case]
+
 let op_linear registers =
   VM.LINEAR_Q1_G128_FP
     (reg_for "dst" registers,
@@ -1933,6 +2119,12 @@ let failure_case_result root_dir opcode template registers values op case =
     let case_name = string_field "case" fields in
     let expected = string_field "expected" fields in
     let mutations = list_field "executable_mutations" fields in
+    let mutation_shape_blockers =
+      if String.equal opcode "LINEAR_Q1_G128_FP" then
+        q1_required_mutation_shape_blockers template values case_name mutations
+      else
+        []
+    in
     let effort_limit =
       List.fold_left
         (fun limit mutation ->
@@ -2021,6 +2213,13 @@ let failure_case_result root_dir opcode template registers values op case =
       "ingress_rejection_authority",
       `String (ingress_rejection_authority mutation_results);
       "mutation_results", `List (List.map mutation_result_json mutation_results);
+      "mutation_shape_status",
+      `String (if mutation_shape_blockers = [] then "accepted" else "rejected");
+      "mutation_shape_blockers",
+      `List
+        (List.map
+           (fun blocker -> `String blocker)
+           mutation_shape_blockers);
       "observed_effort", `Int state.VM.effort_used;
       "unchanged_status",
       `String (if unchanged_ok then "matched" else "changed");
@@ -2084,6 +2283,17 @@ let required_failure_case_contract opcode failure_results =
                     blockers
                   else
                     ("q1_failure_case_expected_mismatch_" ^ case) :: blockers
+                in
+                let blockers =
+                  (match field "mutation_shape_blockers" fields with
+                   | Some (`List shape_blockers) ->
+                     List.fold_left
+                       (fun blockers -> function
+                          | `String blocker -> blocker :: blockers
+                          | _ -> blockers)
+                       blockers
+                       shape_blockers
+                   | _ -> blockers)
                 in
                 let blockers =
                   if bool_field "counted" fields then blockers

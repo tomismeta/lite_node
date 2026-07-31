@@ -404,6 +404,19 @@ let replace_failure_expected case expected = function
          fields)
   | value -> value
 
+let replace_failure_mutations case mutations = function
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (key, value) ->
+            if String.equal key "executable_mutations"
+               && String.equal (string_value "case" fields) case then
+              key, `List mutations
+            else
+              key, value)
+         fields)
+  | value -> value
+
 let index_json =
   `Assoc [
     "type", `String "p0_litenode_vm_execution_template_index";
@@ -950,6 +963,57 @@ let check_require_failure_cases_rejects_wrong_q1_expectation () =
             (string_list "blockers" gate))
      | _ -> failwith "report must be object"))
 
+let check_require_failure_cases_rejects_wrong_q1_mutation_shape () =
+  with_temp_dir (fun dir ->
+    let failure_cases =
+      List.map
+        (replace_failure_mutations
+           "negative_byte_offset"
+           [
+             mutation
+               "set_scalar_param"
+               "parameter_addresses_and_scalar_params.values.k"
+               ["value", `Int 127];
+           ])
+        (q1_failure_cases ())
+    in
+    let code, report =
+      run_conformance
+        dir
+        (q1_template ~failure_cases ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "wrong Q1 mutation shape runner exits nonzero" (code = 1);
+    let result = first_result report in
+    let negative_offset = failure_case_fields result "negative_byte_offset" in
+    check
+      "wrong Q1 mutation shape row rejected"
+      (String.equal
+         (string_value "mutation_shape_status" negative_offset)
+         "rejected");
+    check
+      "wrong Q1 mutation shape row blocker"
+      (List.mem
+         "q1_failure_case_mutation_mismatch_negative_byte_offset"
+         (string_list "mutation_shape_blockers" negative_offset));
+    (match report with
+     | `Assoc fields ->
+       let gate = assoc_json "failure_case_gate" fields in
+       check
+         "wrong Q1 mutation shape gate rejected"
+         (String.equal (string_value "status" gate) "rejected");
+       check
+         "wrong Q1 mutation shape gate blocker"
+         (List.mem
+            "q1_failure_case_mutation_mismatch_negative_byte_offset"
+            (string_list "blockers" gate))
+     | _ -> failwith "report must be object"))
+
 let check_accept_snapshot_requires_exact_output () =
   with_temp_dir (fun dir ->
     let bad_sha = different_sha (sha256 expected_output) in
@@ -1396,6 +1460,7 @@ let () =
   check_zero_decoded_input_truncation_is_not_ingress_rejected ();
   check_require_failure_cases_rejects_missing_q1_case ();
   check_require_failure_cases_rejects_wrong_q1_expectation ();
+  check_require_failure_cases_rejects_wrong_q1_mutation_shape ();
   check_accept_snapshot_requires_exact_output ();
   check_stale_abi_is_visible_in_executable_report ();
   check_readiness_gate_rejects_stale_abi ();
