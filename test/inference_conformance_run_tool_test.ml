@@ -448,6 +448,13 @@ let write_matrix dir matrix =
   write_file path raw;
   path, sha256 raw
 
+let different_sha sha =
+  match String.length sha with
+  | 64 ->
+    let replacement = if Char.equal sha.[0] '0' then '1' else '0' in
+    String.make 1 replacement ^ String.sub sha 1 63
+  | _ -> failwith "expected sha256 hex"
+
 let check_good_template_reports_bound_abi () =
   with_temp_dir (fun dir ->
     let code, report =
@@ -606,8 +613,120 @@ let check_pinned_cross_platform_matrix_is_consumed () =
        | _ -> failwith "report must be object")
     | _ -> failwith "seed report must be object")
 
+let check_cross_platform_matrix_without_pin_rejects () =
+  with_temp_dir (fun dir ->
+    let code, seed_report =
+      run_conformance
+        dir
+        (q1_template ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "matrix unpinned seed run exits zero" (code = 0);
+    match seed_report with
+    | `Assoc seed_fields ->
+      let matrix =
+        accepted_matrix
+          ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
+      in
+      let matrix_path, _ = write_matrix dir matrix in
+      let code, report =
+        run_conformance
+          dir
+          (q1_template ())
+          [
+            "--strict-effort";
+            "--include-failures";
+            "--require-failure-cases";
+            "--require-profile-roots-bound";
+            "--cross-platform-matrix";
+            Filename.quote matrix_path;
+            "--require-validator-readiness";
+          ]
+      in
+      check "matrix unpinned exits nonzero" (code = 1);
+      (match report with
+       | `Assoc fields ->
+         let readiness = assoc_json "validator_readiness_gate" fields in
+         let cross_platform = assoc_json "cross_platform_evidence" readiness in
+         check
+           "matrix unpinned rejected"
+           (String.equal (string_value "status" cross_platform) "rejected");
+         check
+           "matrix unpinned status"
+           (String.equal (string_value "matrix_sha256_status" cross_platform) "rejected");
+         let blockers = string_list "blockers" cross_platform in
+         check
+           "matrix unpinned blocker"
+           (List.mem "matrix_sha256_unpinned_or_mismatch" blockers)
+       | _ -> failwith "report must be object")
+    | _ -> failwith "seed report must be object")
+
+let check_cross_platform_matrix_sha_mismatch_rejects () =
+  with_temp_dir (fun dir ->
+    let code, seed_report =
+      run_conformance
+        dir
+        (q1_template ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "matrix mismatch seed run exits zero" (code = 0);
+    match seed_report with
+    | `Assoc seed_fields ->
+      let matrix =
+        accepted_matrix
+          ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
+      in
+      let matrix_path, matrix_sha = write_matrix dir matrix in
+      let code, report =
+        run_conformance
+          dir
+          (q1_template ())
+          [
+            "--strict-effort";
+            "--include-failures";
+            "--require-failure-cases";
+            "--require-profile-roots-bound";
+            "--cross-platform-matrix";
+            Filename.quote matrix_path;
+            "--expected-cross-platform-matrix-sha256";
+            different_sha matrix_sha;
+            "--require-validator-readiness";
+          ]
+      in
+      check "matrix sha mismatch exits nonzero" (code = 1);
+      (match report with
+       | `Assoc fields ->
+         let readiness = assoc_json "validator_readiness_gate" fields in
+         let cross_platform = assoc_json "cross_platform_evidence" readiness in
+         check
+           "matrix sha mismatch rejected"
+           (String.equal (string_value "status" cross_platform) "rejected");
+         check
+           "matrix sha mismatch status"
+           (String.equal (string_value "matrix_sha256_status" cross_platform) "rejected");
+         let blockers = string_list "blockers" cross_platform in
+         check
+           "matrix sha mismatch blocker"
+           (List.mem "matrix_sha256_unpinned_or_mismatch" blockers)
+       | _ -> failwith "report must be object")
+    | _ -> failwith "seed report must be object")
+
 let () =
   check_good_template_reports_bound_abi ();
   check_stale_abi_is_visible_in_executable_report ();
   check_readiness_gate_rejects_stale_abi ();
-  check_pinned_cross_platform_matrix_is_consumed ()
+  check_pinned_cross_platform_matrix_is_consumed ();
+  check_cross_platform_matrix_without_pin_rejects ();
+  check_cross_platform_matrix_sha_mismatch_rejects ()
