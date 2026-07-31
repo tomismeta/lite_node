@@ -319,6 +319,28 @@ let check_output_overflow_reverts () =
     "q1 output overflow keeps output"
     (output_bytes state 10000 1 = f64_bytes [42.0])
 
+let check_multi_output_overflow_is_atomic () =
+  let scale_one = "\000\060" in
+  let scale_max_finite = "\255\123" in
+  let q1 =
+    q1_block scale_one (String.make 16 '\255')
+    ^ q1_block scale_max_finite (String.make 16 '\255')
+  in
+  let state =
+    one_block_state
+      ~input:(List.init 128 (fun _ -> max_float /. 256.0))
+      q1
+  in
+  set_int_reg state 6 2;
+  set_output_cell state 10000 42.0;
+  set_output_cell state 10001 43.0;
+  check
+    "q1 multi-output overflow rejects"
+    (not (VM.run state q1_code));
+  check
+    "q1 multi-output overflow leaves all output unchanged"
+    (output_bytes state 10000 2 = f64_bytes [42.0; 43.0])
+
 let check_profiled_run_equivalence () =
   let state, dst, _ = q1_state () in
   let profiled, profile =
@@ -698,6 +720,7 @@ let () =
   check_sign_and_scale_edges ();
   check_accumulation_order_stress ();
   check_output_overflow_reverts ();
+  check_multi_output_overflow_is_atomic ();
   check_profiled_run_equivalence ();
   check_invalid_input_reverts ();
   check_bad_q1_reverts ();
