@@ -389,6 +389,39 @@ let matrix_report paths =
   let validator_readiness_accepted =
     matrix_accepted && validator_readiness_blockers = []
   in
+  let validator_readiness_gate =
+    `Assoc [
+      "diagnostic_only", `Bool true;
+      "required", `Bool !require_validator_readiness;
+      "status",
+      `String (if validator_readiness_accepted then "accepted" else "rejected");
+      "runner_report_status",
+      `String
+        (if report_count > 0 && accepted_reports = report_count then
+           "accepted"
+         else
+           "rejected");
+      "distinct_platform_status",
+      `String
+        (if List.length platforms >= !min_platforms then "accepted" else "rejected");
+      "result_signature_status",
+      `String (if List.length signatures = 1 then "accepted" else "rejected");
+      "profile_catalog_status",
+      `String
+        (if missing_profile_catalog_root_count = 0
+            && List.length profile_catalog_roots = 1 then
+           "accepted"
+         else
+           "rejected");
+      "cross_platform_status",
+      `String (if matrix_accepted then "accepted" else "rejected");
+      "blockers",
+      `List
+        (List.map
+           (fun blocker -> `String blocker)
+           validator_readiness_blockers);
+    ]
+  in
   `Assoc [
     "status", `String (if matrix_accepted then "accepted" else "rejected");
     "diagnostic_only", `Bool true;
@@ -408,6 +441,7 @@ let matrix_report paths =
       (List.map
          (fun blocker -> `String blocker)
          validator_readiness_blockers);
+    "validator_readiness_gate", validator_readiness_gate;
     "platform_keys", `List (List.map (fun value -> `String value) platforms);
     "result_signature_count", `Int (List.length signatures);
     "profile_catalog_root_count", `Int (List.length profile_catalog_roots);

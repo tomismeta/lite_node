@@ -173,9 +173,10 @@ drift between reports. A single repeated VPS report is still rejected as
 `matrix_signature_sha256` as diagnostic evidence roots; those hashes identify
 the compared report bytes and normalized result signatures, but they are not
 platform attestation. Matrix reports also lift `validator_readiness_status`
-and `validator_readiness_blockers` to the top level; this is the readiness
-answer to use when distinguishing local execution evidence from
-validator-ready inference math.
+and `validator_readiness_blockers` to the top level for compatibility, and
+emit the same nested `validator_readiness_gate` shape used by the checker and
+runner. New consumers should use the nested gate when distinguishing local
+execution evidence from validator-ready inference math.
 
 The saved reports live beside the indexes as
 `litenode-failure-atomicity-report.cjson`.
