@@ -487,13 +487,16 @@ let check_q1_contract_visible gate =
       (List.length (list_value "expectations" contract) = 8)
   | _ -> failwith "expected one runner required failure-case contract"
 
-let bound_matrix_report_row platform_key runner_sha =
+let bound_matrix_report_row ~profile_catalog_root ~template_corpus_root
+    platform_key runner_sha =
   `Assoc [
     "accepted", `Bool true;
     "runner_report_sha256", `String (sha256 platform_key);
-    "result_signature_sha256", `String (sha256 (platform_key ^ ":result"));
+    "result_signature_sha256", `String (sha256 "shared-result");
     "platform_key", `String platform_key;
     "runner_executable_sha256", `String runner_sha;
+    "profile_catalog_root", `String profile_catalog_root;
+    "template_corpus_root", `String template_corpus_root;
   ]
 
 let accepted_matrix ~profile_catalog_root ~template_corpus_root =
@@ -503,14 +506,21 @@ let accepted_matrix ~profile_catalog_root ~template_corpus_root =
     "cross_platform_status", `String "accepted";
     "blockers", `List [];
     "result_opcodes", `List [`String opcode];
+    "distinct_platform_count", `Int 2;
+    "distinct_runner_executable_count", `Int 2;
+    "result_signature_count", `Int 1;
     "profile_catalog_roots", `List [`String profile_catalog_root];
     "template_corpus_roots", `List [`String template_corpus_root];
     "reports",
     `List [
       bound_matrix_report_row
+        ~profile_catalog_root
+        ~template_corpus_root
         "4.14.2|Unix|Darwin|1.0|arm64|64|false|native"
         (hex_root '1');
       bound_matrix_report_row
+        ~profile_catalog_root
+        ~template_corpus_root
         "4.14.2|Unix|Linux|1.0|x86_64|64|false|native"
         (hex_root '2');
     ];
@@ -521,6 +531,23 @@ let write_matrix dir matrix =
   let raw = Yojson.Safe.to_string matrix in
   write_file path raw;
   path, sha256 raw
+
+let replace_assoc_field name value = function
+  | `Assoc fields ->
+    `Assoc
+      ((name, value)
+       :: List.filter (fun (key, _) -> not (String.equal key name)) fields)
+  | _ -> failwith "json value must be an object"
+
+let replace_first_report_field name value = function
+  | `Assoc fields as matrix ->
+    let reports =
+      match list_value "reports" fields with
+      | [] -> []
+      | first :: rest -> replace_assoc_field name value first :: rest
+    in
+    replace_assoc_field "reports" (`List reports) matrix
+  | _ -> failwith "matrix must be an object"
 
 let different_sha sha =
   match String.length sha with
@@ -1033,6 +1060,120 @@ let check_cross_platform_matrix_sha_mismatch_rejects () =
        | _ -> failwith "report must be object")
     | _ -> failwith "seed report must be object")
 
+let check_cross_platform_matrix_forged_runner_count_rejects () =
+  with_temp_dir (fun dir ->
+    let code, seed_report =
+      run_conformance
+        dir
+        (q1_template ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "matrix forged count seed run exits zero" (code = 0);
+    match seed_report with
+    | `Assoc seed_fields ->
+      let matrix =
+        accepted_matrix
+          ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
+        |> replace_assoc_field "distinct_runner_executable_count" (`Int 3)
+      in
+      let matrix_path, matrix_sha = write_matrix dir matrix in
+      let code, report =
+        run_conformance
+          dir
+          (q1_template ())
+          [
+            "--strict-effort";
+            "--include-failures";
+            "--require-failure-cases";
+            "--require-profile-roots-bound";
+            "--cross-platform-matrix";
+            Filename.quote matrix_path;
+            "--expected-cross-platform-matrix-sha256";
+            matrix_sha;
+            "--require-validator-readiness";
+          ]
+      in
+      check "matrix forged count exits nonzero" (code = 1);
+      (match report with
+       | `Assoc fields ->
+         let readiness = assoc_json "validator_readiness_gate" fields in
+         let cross_platform = assoc_json "cross_platform_evidence" readiness in
+         check
+           "matrix forged count rejected"
+           (String.equal (string_value "status" cross_platform) "rejected");
+         check
+           "matrix forged count row aggregate rejected"
+           (String.equal (string_value "row_aggregate_status" cross_platform) "rejected");
+         let blockers = string_list "blockers" cross_platform in
+         check
+           "matrix forged count blocker"
+           (List.mem "matrix_runner_executable_count_mismatch" blockers)
+       | _ -> failwith "report must be object")
+    | _ -> failwith "seed report must be object")
+
+let check_cross_platform_matrix_forged_row_root_rejects () =
+  with_temp_dir (fun dir ->
+    let code, seed_report =
+      run_conformance
+        dir
+        (q1_template ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "matrix forged row root seed run exits zero" (code = 0);
+    match seed_report with
+    | `Assoc seed_fields ->
+      let matrix =
+        accepted_matrix
+          ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
+        |> replace_first_report_field "profile_catalog_root" (`String (hex_root '9'))
+      in
+      let matrix_path, matrix_sha = write_matrix dir matrix in
+      let code, report =
+        run_conformance
+          dir
+          (q1_template ())
+          [
+            "--strict-effort";
+            "--include-failures";
+            "--require-failure-cases";
+            "--require-profile-roots-bound";
+            "--cross-platform-matrix";
+            Filename.quote matrix_path;
+            "--expected-cross-platform-matrix-sha256";
+            matrix_sha;
+            "--require-validator-readiness";
+          ]
+      in
+      check "matrix forged row root exits nonzero" (code = 1);
+      (match report with
+       | `Assoc fields ->
+         let readiness = assoc_json "validator_readiness_gate" fields in
+         let cross_platform = assoc_json "cross_platform_evidence" readiness in
+         check
+           "matrix forged row root rejected"
+           (String.equal (string_value "status" cross_platform) "rejected");
+         check
+           "matrix forged row root aggregate rejected"
+           (String.equal (string_value "row_aggregate_status" cross_platform) "rejected");
+         let blockers = string_list "blockers" cross_platform in
+         check
+           "matrix forged row root blocker"
+           (List.mem "matrix_row_profile_catalog_mismatch" blockers)
+       | _ -> failwith "report must be object")
+    | _ -> failwith "seed report must be object")
+
 let () =
   check_good_template_reports_bound_abi ();
   check_dynamic_q1_effort_vector ();
@@ -1043,4 +1184,6 @@ let () =
   check_readiness_gate_rejects_stale_abi ();
   check_pinned_cross_platform_matrix_is_consumed ();
   check_cross_platform_matrix_without_pin_rejects ();
-  check_cross_platform_matrix_sha_mismatch_rejects ()
+  check_cross_platform_matrix_sha_mismatch_rejects ();
+  check_cross_platform_matrix_forged_runner_count_rejects ();
+  check_cross_platform_matrix_forged_row_root_rejects ()

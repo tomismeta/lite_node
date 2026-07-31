@@ -542,6 +542,9 @@ let opcodes_covered ~required_opcodes ~observed_opcodes =
     (fun opcode -> List.exists (String.equal opcode) observed_opcodes)
     required_opcodes
 
+let unique values =
+  List.sort_uniq String.compare values
+
 let profile_catalog_root_option = function
   | `String value -> Some value
   | _ -> None
@@ -561,7 +564,17 @@ let report_row_is_bound = function
     && (match opt_string_field "runner_executable_sha256" fields with
         | Some value -> not (String.equal value "")
         | None -> false)
+    && (match opt_string_field "profile_catalog_root" fields with
+        | Some value -> not (String.equal value "")
+        | None -> false)
+    && (match opt_string_field "template_corpus_root" fields with
+        | Some value -> not (String.equal value "")
+        | None -> false)
   | _ -> false
+
+let report_row_string_field name = function
+  | `Assoc fields -> opt_string_field name fields
+  | _ -> None
 
 let cross_platform_evidence
     ~required_opcodes
@@ -620,6 +633,46 @@ let cross_platform_evidence
        let matrix_template_corpus_roots =
          optional_string_list_field "template_corpus_roots" fields
        in
+       let matrix_result_signature_count =
+         match opt_int_field "result_signature_count" fields with
+         | Some value -> value
+         | None -> -1
+       in
+       let matrix_distinct_platform_count =
+         match opt_int_field "distinct_platform_count" fields with
+         | Some value -> value
+         | None -> -1
+       in
+       let matrix_distinct_runner_count =
+         match opt_int_field "distinct_runner_executable_count" fields with
+         | Some value -> value
+         | None -> -1
+       in
+       let row_platforms =
+         report_rows
+         |> List.filter_map (report_row_string_field "platform_key")
+         |> unique
+       in
+       let row_runner_executables =
+         report_rows
+         |> List.filter_map (report_row_string_field "runner_executable_sha256")
+         |> unique
+       in
+       let row_result_signatures =
+         report_rows
+         |> List.filter_map (report_row_string_field "result_signature_sha256")
+         |> unique
+       in
+       let row_profile_catalog_roots =
+         report_rows
+         |> List.filter_map (report_row_string_field "profile_catalog_root")
+         |> unique
+       in
+       let row_template_corpus_roots =
+         report_rows
+         |> List.filter_map (report_row_string_field "template_corpus_root")
+         |> unique
+       in
        let opcode_scope_accepted =
          opcodes_covered ~required_opcodes ~observed_opcodes
        in
@@ -640,6 +693,24 @@ let cross_platform_evidence
        in
        let report_rows_accepted =
          List.length report_rows >= 2 && List.for_all report_row_is_bound report_rows
+       in
+       let row_platform_count_accepted =
+         matrix_distinct_platform_count = List.length row_platforms
+       in
+       let row_runner_count_accepted =
+         matrix_distinct_runner_count = List.length row_runner_executables
+       in
+       let row_signature_count_accepted =
+         matrix_result_signature_count = List.length row_result_signatures
+       in
+       let row_signature_accepted =
+         List.length row_result_signatures = 1
+       in
+       let row_profile_catalog_accepted =
+         row_profile_catalog_roots = matrix_profile_catalog_roots
+       in
+       let row_template_corpus_accepted =
+         row_template_corpus_roots = matrix_template_corpus_roots
        in
        let blockers =
          []
@@ -666,6 +737,24 @@ let cross_platform_evidence
          |> add_blocker
               (not report_rows_accepted)
               "matrix_source_reports_unbound"
+         |> add_blocker
+              (not row_platform_count_accepted)
+              "matrix_platform_count_mismatch"
+         |> add_blocker
+              (not row_runner_count_accepted)
+              "matrix_runner_executable_count_mismatch"
+         |> add_blocker
+              (not row_signature_count_accepted)
+              "matrix_result_signature_count_mismatch"
+         |> add_blocker
+              (not row_signature_accepted)
+              "matrix_result_signature_row_mismatch"
+         |> add_blocker
+              (not row_profile_catalog_accepted)
+              "matrix_row_profile_catalog_mismatch"
+         |> add_blocker
+              (not row_template_corpus_accepted)
+              "matrix_row_template_corpus_mismatch"
        in
        `Assoc [
          "status",
@@ -708,6 +797,33 @@ let cross_platform_evidence
          `String (if template_corpus_accepted then "accepted" else "rejected");
          "source_report_status",
          `String (if report_rows_accepted then "accepted" else "rejected");
+         "row_distinct_platform_count",
+         `Int (List.length row_platforms);
+         "row_distinct_runner_executable_count",
+         `Int (List.length row_runner_executables);
+         "row_result_signature_count",
+         `Int (List.length row_result_signatures);
+         "row_profile_catalog_roots",
+         `List
+           (List.map
+              (fun root -> `String root)
+              row_profile_catalog_roots);
+         "row_template_corpus_roots",
+         `List
+           (List.map
+              (fun root -> `String root)
+              row_template_corpus_roots);
+         "row_aggregate_status",
+         `String
+           (if row_platform_count_accepted
+               && row_runner_count_accepted
+               && row_signature_count_accepted
+               && row_signature_accepted
+               && row_profile_catalog_accepted
+               && row_template_corpus_accepted then
+              "accepted"
+            else
+              "rejected");
          "matrix_status",
          `String
            (match opt_string_field "status" fields with
