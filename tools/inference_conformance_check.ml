@@ -315,6 +315,53 @@ let profile_roots_required_passes ~root_binding_counts =
     ~required:!require_profile_roots_bound
     root_binding_counts
 
+let add_blocker condition blocker blockers =
+  if condition then blocker :: blockers else blockers
+
+let static_validator_readiness_gate
+    ~schema_status
+    ~profile_gate_count
+    ~unprofiled_count
+    ~root_binding_counts
+    status_counts =
+  let schema_accepted = String.equal schema_status "accepted" in
+  let profile_ready =
+    Profile.consensus_ready
+      ~profile_gate_count
+      ~unprofiled_count
+      status_counts
+  in
+  let roots_ready =
+    Profile.root_bindings_are_consensus_ready root_binding_counts
+  in
+  let blockers =
+    []
+    |> add_blocker (not schema_accepted) "schema_rejected"
+    |> add_blocker true "execution_not_run"
+    |> add_blocker true "punitive_failure_cases_not_run"
+  in
+  let blockers =
+    blockers
+    @ Profile.consensus_ready_blockers
+        ~profile_gate_count
+        ~unprofiled_count
+        status_counts
+    @ Profile.root_binding_blockers root_binding_counts
+  in
+  `Assoc [
+    "diagnostic_only", `Bool true;
+    "status", `String "rejected";
+    "schema_status", `String schema_status;
+    "execution_status", `String "not_run";
+    "failure_case_status", `String "not_run";
+    "profile_status",
+    `String (if profile_ready then "accepted" else "rejected");
+    "profile_root_status",
+    `String (if roots_ready then "accepted" else "rejected");
+    "blockers",
+    `List (List.map (fun blocker -> `String blocker) blockers);
+  ]
+
 let template_profile_gate_present (checked : checked_template) =
   profile_gate_present (Template.to_json checked.template)
 
@@ -850,6 +897,13 @@ let producer_index_report index_path =
       Profile.root_binding_gate_json
         ~required:!require_profile_roots_bound
         profile_root_binding_counts;
+      "validator_readiness_gate",
+      static_validator_readiness_gate
+        ~schema_status
+        ~profile_gate_count
+        ~unprofiled_count:unprofiled_template_count
+        ~root_binding_counts:profile_root_binding_counts
+        profile_status_counts;
       "consensus_candidate_gate",
       consensus_candidate_gate
         ~profile_gate_count
@@ -963,6 +1017,13 @@ let () =
               Profile.root_binding_gate_json
                 ~required:!require_profile_roots_bound
                 profile_root_binding_counts;
+              "validator_readiness_gate",
+              static_validator_readiness_gate
+                ~schema_status
+                ~profile_gate_count
+                ~unprofiled_count:(1 - profile_gate_count)
+                ~root_binding_counts:profile_root_binding_counts
+                profile_status_counts;
               "consensus_candidate_gate",
               consensus_candidate_gate
                 ~profile_gate_count
@@ -1052,6 +1113,13 @@ let () =
         Profile.root_binding_gate_json
           ~required:!require_profile_roots_bound
           root_binding_counts;
+        "validator_readiness_gate",
+        static_validator_readiness_gate
+          ~schema_status
+          ~profile_gate_count
+          ~unprofiled_count
+          ~root_binding_counts
+          status_counts;
         "consensus_candidate_gate",
         consensus_candidate_gate
           ~profile_gate_count

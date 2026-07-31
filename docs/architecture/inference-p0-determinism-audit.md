@@ -245,6 +245,12 @@ Acceptance means only:
 - required effects match the opcode class; and
 - failure cases are present.
 
+Static checker reports include a diagnostic `validator_readiness_gate` too. It
+always rejects with `execution_not_run` and
+`punitive_failure_cases_not_run`, because the checker never executes VM math.
+That makes schema acceptance visibly different from validator readiness before
+any runner report is attached.
+
 Producer-index reports include diagnostic `profile_gates`, using a declared
 template profile when present and the opcode's current runtime profile when the
 template is profile-less.
