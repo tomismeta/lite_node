@@ -201,6 +201,10 @@ let opt_string_from_assoc name fields =
 let unique values =
   List.sort_uniq String.compare values
 
+let starts_with prefix value =
+  String.length value >= String.length prefix
+  && String.sub value 0 (String.length prefix) = prefix
+
 let required_opcodes () =
   List.rev !requested_opcodes |> unique
 
@@ -306,6 +310,47 @@ let q1_failure_mutation_shapes_accepted fields =
              | _ -> false)
           | _ -> false)
         cases
+    | _ -> false
+
+let q1_required_failure_rows_accepted fields =
+  let opcode = string_field "opcode" fields in
+  if not (String.equal opcode "LINEAR_Q1_G128_FP") then
+    true
+  else
+    match field "failure_cases" fields with
+    | Some (`List cases) ->
+      let row_for case =
+        List.filter
+          (function
+            | `Assoc case_fields ->
+              (match opt_string_field "case" case_fields with
+               | Some actual -> String.equal actual case
+               | None -> false)
+            | _ -> false)
+          cases
+      in
+      List.for_all
+        (fun (case, expected_prefix) ->
+           match row_for case with
+           | [`Assoc case_fields] ->
+             string_field "opcode" case_fields = "LINEAR_Q1_G128_FP"
+             && starts_with expected_prefix (string_field "expected" case_fields)
+             && opt_status_is_accepted "status" case_fields
+             &&
+             (match field "counted" case_fields with
+              | Some (`Bool true) -> true
+              | _ -> false)
+             &&
+             (match opt_string_field "mutation_shape_status" case_fields,
+                    field "mutation_shape_blockers" case_fields with
+              | Some "accepted", Some (`List []) -> true
+              | _ -> false)
+             &&
+             (match field "executable_mutations" case_fields with
+              | Some (`List (_ :: _)) -> true
+              | _ -> false)
+           | _ -> false)
+        Template.q1_required_failure_expectations
     | _ -> false
 
 let q1_failure_mutation_payloads_present fields =
@@ -476,6 +521,9 @@ let report_summary path =
     let q1_failure_mutation_shapes_accepted =
       List.for_all q1_failure_mutation_shapes_accepted result_fields
     in
+    let q1_required_failure_rows_accepted =
+      List.for_all q1_required_failure_rows_accepted result_fields
+    in
     let q1_failure_mutation_payloads_present =
       List.for_all q1_failure_mutation_payloads_present result_fields
     in
@@ -491,6 +539,7 @@ let report_summary path =
           | Some fields -> opt_status_is_accepted "status" fields
           | None -> false)
       && required_failure_case_contracts_accepted
+      && q1_required_failure_rows_accepted
       && q1_failure_mutation_shapes_accepted
       && q1_failure_mutation_payloads_present
       && strict_effort
@@ -527,6 +576,9 @@ let report_summary path =
       |> add_if
            (not required_failure_case_contracts_accepted)
            "required_failure_case_contract_rejected"
+      |> add_if
+           (not q1_required_failure_rows_accepted)
+           "required_q1_failure_cases_rejected"
       |> add_if
            (not q1_failure_mutation_shapes_accepted)
            "q1_failure_case_mutation_shape_rejected"

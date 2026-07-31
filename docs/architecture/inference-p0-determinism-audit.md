@@ -282,7 +282,13 @@ scope, the row-derived platform and runner sets must each contain at least two
 distinct values, and the single row result signature must equal the current
 local runner result signature. A pinned matrix therefore proves this exact
 local Q1 result against independent rows rather than merely proving that some
-compatible-looking matrix exists for the same corpus roots. For a
+compatible-looking matrix exists for the same corpus roots. For
+`LINEAR_Q1_G128_FP`, matrix acceptance also independently requires each of the
+11 required punitive failure rows to be present, counted, accepted, bound to
+the expected outcome prefix, and backed by a nonempty executable mutation
+payload. This keeps a forged or truncated runner report from satisfying
+validator-readiness with only a top-level `failure_case_gate: accepted` claim.
+For a
 focused Q1 runner report with positive execution, counted failure cases, strict
 effort, bound profile roots, bound VM-semantics roots, and bound ABI
 declaration, an accepted and pinned matrix removes

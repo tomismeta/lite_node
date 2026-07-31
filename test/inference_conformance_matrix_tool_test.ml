@@ -219,6 +219,87 @@ let q1_failure_contract_json expectations =
          expectations);
   ]
 
+let executable_mutation_for_case = function
+  | "nonfinite_input_nan" ->
+    executable_mutation
+      "replace_first_f64_input_cell"
+      "lhs"
+      ["value_bits", `Intlit "9221120237041090560"]
+  | "nonfinite_input_infinity" ->
+    executable_mutation
+      "replace_first_f64_input_cell"
+      "lhs"
+      ["value_bits", `Intlit "9218868437227405312"]
+  | "output_input_aliasing" ->
+    executable_mutation
+      "set_output_base_to_first_input_base"
+      "output.base_address"
+      []
+  | "partial_output_input_aliasing" ->
+    executable_mutation
+      "set_output_base_to_first_input_base_plus"
+      "output.base_address"
+      ["offset_cells", `Int 1]
+  | "k_not_multiple_of_128" ->
+    executable_mutation
+      "set_scalar_param"
+      "parameter_addresses_and_scalar_params.values.k"
+      ["value", `Int 127]
+  | "bad_q1_owner_length" ->
+    executable_mutation
+      "truncate_input_manifest"
+      "q1_owner"
+      ["truncate_bytes", `Int 1]
+  | "negative_byte_offset" ->
+    executable_mutation
+      "set_scalar_param"
+      "parameter_addresses_and_scalar_params.values.byte_offset"
+      ["value", `Int (-1)]
+  | "byte_offset_out_of_bounds" ->
+    executable_mutation
+      "set_scalar_param"
+      "parameter_addresses_and_scalar_params.values.byte_offset"
+      ["value", `Int 1_000_000]
+  | "byte_offset_truncated_span" ->
+    executable_mutation
+      "set_scalar_param"
+      "parameter_addresses_and_scalar_params.values.byte_offset"
+      ["value", `Int 1]
+  | "nonfinite_fp16_scale" ->
+    executable_mutation
+      "replace_q1_scale_bits"
+      "q1_owner[0..2]"
+      ["value_hex_le", `String "007c"]
+  | "lower_effort_limit" ->
+    executable_mutation
+      "lower_effort_limit"
+      "effort"
+      ["value", `Int 199]
+  | case -> failwith ("missing executable mutation for case: " ^ case)
+
+let q1_required_failure_cases () =
+  List.map
+    (fun (case, expected) ->
+       failure_case
+         ~case
+         ~expected
+         ~executable_mutations:[executable_mutation_for_case case]
+         ())
+    q1_required_failure_expectations
+
+let replace_failure_case replacement cases =
+  match replacement with
+  | `Assoc replacement_fields ->
+    let replacement_case = string_value "case" replacement_fields in
+    List.map
+      (function
+        | `Assoc fields
+          when String.equal (string_value "case" fields) replacement_case ->
+          replacement
+        | value -> value)
+      cases
+  | _ -> failwith "replacement failure case must be an object"
+
 let result
     ?(opcode = "LINEAR_Q1_G128_FP")
     ?(observed_opcode_effort = 200)
@@ -231,8 +312,16 @@ let result
     ?required_failure_contract_blockers
     ?(include_required_contract_payload = true)
     ?required_failure_contract_payload
-    ?(failure = failure_case ())
+    ?failure
     () =
+  let failure_cases =
+    match failure, String.equal opcode "LINEAR_Q1_G128_FP" with
+    | Some failure, true ->
+      replace_failure_case failure (q1_required_failure_cases ())
+    | Some failure, false -> [failure]
+    | None, true -> q1_required_failure_cases ()
+    | None, false -> [failure_case ()]
+  in
   let required_failure_contract_blockers =
     match required_failure_contract_blockers with
     | Some blockers -> blockers
@@ -368,7 +457,7 @@ let result
         "matched", `Bool true;
       ];
     ];
-    "failure_cases", `List [failure];
+    "failure_cases", `List failure_cases;
   ]
 
 let report
@@ -481,6 +570,42 @@ let remove_failure_field name = function
                                    (fun (key, _) -> not (String.equal key name))
                                    failure_fields)
                             | value -> value)
+                          failures)
+                   | _ -> failwith "failure_cases must be a list"
+                 in
+                 `Assoc
+                   (("failure_cases", failure_cases)
+                    :: List.filter
+                         (fun (key, _) -> not (String.equal key "failure_cases"))
+                         result_fields)
+               | value -> value)
+             results)
+      | _ -> failwith "results must be a list"
+    in
+    replace_assoc_field "results" results (`Assoc fields)
+  | _ -> failwith "report must be object"
+
+let remove_failure_case case = function
+  | `Assoc fields ->
+    let results =
+      match assoc_value "results" fields with
+      | `List results ->
+        `List
+          (List.map
+             (function
+               | `Assoc result_fields ->
+                 let failure_cases =
+                   match assoc_value "failure_cases" result_fields with
+                   | `List failures ->
+                     `List
+                       (List.filter
+                          (function
+                            | `Assoc failure_fields ->
+                              not
+                                (String.equal
+                                   (string_value "case" failure_fields)
+                                   case)
+                            | _ -> true)
                           failures)
                    | _ -> failwith "failure_cases must be a list"
                  in
@@ -792,6 +917,35 @@ let check_matrix_rejects_missing_failure_mutation_payload () =
         "missing mutation payload validator blocker"
         (List.mem
            "missing_failure_case_executable_mutations"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_missing_required_q1_failure_row () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Linux" "x86_64"
+         |> remove_failure_case "lower_effort_limit")
+    in
+    let code, json = run_matrix [a; b] in
+    check "missing required q1 row matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "missing required q1 row top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      check
+        "missing required q1 row validator blocker"
+        (List.mem
+           "required_q1_failure_cases_rejected"
            (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
@@ -1448,6 +1602,7 @@ let () =
   check_matrix_rejects_failure_case_mismatch ();
   check_matrix_rejects_failure_mutation_payload_mismatch ();
   check_matrix_rejects_missing_failure_mutation_payload ();
+  check_matrix_rejects_missing_required_q1_failure_row ();
   check_matrix_rejects_failure_snapshot_mismatch ();
   check_matrix_rejects_failure_finite_span_mismatch ();
   check_matrix_rejects_opcode_effort_mismatch ();
