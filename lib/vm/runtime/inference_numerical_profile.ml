@@ -1939,3 +1939,42 @@ let to_json_for_opcode ~opcode profile =
          "profile_root", `String (root_for_opcode ~opcode profile);
        ])
   | value -> value
+
+let current_runtime_profile_gate ~opcode =
+  match current_runtime_profile ~opcode with
+  | None -> None
+  | Some name ->
+    (match of_name name with
+     | Ok profile -> Some (to_json_for_opcode ~opcode profile)
+     | Error _ -> None)
+
+let profile_catalog_root json =
+  let payload = Yojson.Safe.to_string json in
+  Digestif.SHA256.(
+    digest_string ("octra:inference:profile-catalog\000" ^ payload) |> to_hex)
+
+let current_runtime_profile_catalog_json ~opcodes =
+  let opcodes = List.sort_uniq String.compare opcodes in
+  let gates =
+    opcodes
+    |> List.filter_map (fun opcode -> current_runtime_profile_gate ~opcode)
+  in
+  let status_counts = status_counts_of_json_gates gates in
+  let root_catalog = profile_root_catalog_json gates in
+  let blocker_catalog = consensus_blocker_catalog_json gates in
+  let report =
+    `Assoc [
+      "schema", `String "octra.inference.profile-catalog.v1";
+      "diagnostic_only", `Bool true;
+      "profile_source", `String "current_runtime_profile";
+      "opcode_count", `Int (List.length opcodes);
+      "opcodes", `List (List.map (fun opcode -> `String opcode) opcodes);
+      "profile_consensus_status_counts", status_counts_json status_counts;
+      "profile_root_catalog", root_catalog;
+      "consensus_blocker_catalog", blocker_catalog;
+    ]
+  in
+  match report with
+  | `Assoc fields ->
+    `Assoc (fields @ ["profile_catalog_root", `String (profile_catalog_root report)])
+  | _ -> report

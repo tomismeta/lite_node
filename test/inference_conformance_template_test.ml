@@ -794,13 +794,40 @@ let check_inference_profile_surface_coverage () =
     ]
   in
   check "inference profile surface count" (List.length surface = 17);
+  let surface_opcodes =
+    List.map (fun (opcode, _, _, _) -> opcode) surface
+  in
   check
     "runtime opcode list matches surface"
     (list_equal
        Profile.current_runtime_opcodes
-       (List.map
-          (fun (opcode, _, _, _) -> opcode)
-          surface));
+       surface_opcodes);
+  (match
+     Profile.current_runtime_profile_catalog_json
+       ~opcodes:Template.p0_opcodes
+   with
+   | `Assoc fields ->
+     check
+       "p0 profile catalog schema"
+       (String.equal
+          (string_value "schema" fields)
+          "octra.inference.profile-catalog.v1");
+     check "p0 profile catalog count" (int_value "opcode_count" fields = 5);
+     check
+       "p0 profile catalog root"
+       (String.equal
+          (string_value "profile_catalog_root" fields)
+          "fc66b78119a7057e99a50c84c41861c094efa3a479199a3cfb773a9e029c4e2e")
+   | _ -> failwith "p0 profile catalog must be object");
+  (match Profile.current_runtime_profile_catalog_json ~opcodes:surface_opcodes with
+   | `Assoc fields ->
+     check "runtime profile catalog count" (int_value "opcode_count" fields = 17);
+     check
+       "runtime profile catalog root"
+       (String.equal
+          (string_value "profile_catalog_root" fields)
+          "82fc51bc9191f2a050b7be5f47d8ef873502838bc86938c6ca890ec7aa7b6a2f")
+   | _ -> failwith "runtime profile catalog must be object");
   let gates =
     List.map
       (fun (opcode, expected_profile, expected_status, expected_root) ->

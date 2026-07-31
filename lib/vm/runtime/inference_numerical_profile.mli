@@ -57,6 +57,9 @@ val of_name : string -> (t, error) result
 val status_string : consensus_status -> string
 val current_runtime_opcodes : string list
 val current_runtime_profile : opcode:string -> string option
+val current_runtime_profile_gate : opcode:string -> Yojson.Safe.t option
+val current_runtime_profile_catalog_json :
+  opcodes:string list -> Yojson.Safe.t
 val validate_for_opcode : opcode:string -> profile:string -> (t, error) result
 val to_json : t -> Yojson.Safe.t
 val contract_json_for_opcode : opcode:string -> t -> Yojson.Safe.t

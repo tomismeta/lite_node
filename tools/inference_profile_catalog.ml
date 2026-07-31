@@ -41,19 +41,6 @@ let usage =
 let unique values =
   List.sort_uniq String.compare values
 
-let gate_for_opcode opcode =
-  match Profile.current_runtime_profile ~opcode with
-  | None -> fail ("opcode has no current inference runtime profile: " ^ opcode)
-  | Some name ->
-    (match Profile.of_name name with
-     | Error error -> fail (Profile.error_message error)
-     | Ok profile -> Profile.to_json_for_opcode ~opcode profile)
-
-let catalog_root json =
-  let payload = Yojson.Safe.to_string json in
-  Digestif.SHA256.(
-    digest_string ("octra:inference:profile-catalog\000" ^ payload) |> to_hex)
-
 let opcodes () =
   let values =
     match List.rev !requested_opcodes, !use_p0, !use_all with
@@ -63,29 +50,18 @@ let opcodes () =
   in
   unique values
 
-let report opcodes =
-  let gates = List.map gate_for_opcode opcodes in
-  let status_counts = Profile.status_counts_of_json_gates gates in
-  let root_catalog = Profile.profile_root_catalog_json gates in
-  let blocker_catalog = Profile.consensus_blocker_catalog_json gates in
-  let report =
-    `Assoc [
-      "schema", `String "octra.inference.profile-catalog.v1";
-      "diagnostic_only", `Bool true;
-      "profile_source", `String "current_runtime_profile";
-      "opcode_count", `Int (List.length opcodes);
-      "opcodes", `List (List.map (fun opcode -> `String opcode) opcodes);
-      "profile_consensus_status_counts",
-      Profile.status_counts_json status_counts;
-      "profile_root_catalog", root_catalog;
-      "consensus_blocker_catalog", blocker_catalog;
-    ]
-  in
-  match report with
-  | `Assoc fields ->
-    `Assoc (fields @ ["profile_catalog_root", `String (catalog_root report)])
-  | _ -> report
+let validate_opcodes opcodes =
+  List.iter
+    (fun opcode ->
+       match Profile.current_runtime_profile ~opcode with
+       | Some _ -> ()
+       | None -> fail ("opcode has no current inference runtime profile: " ^ opcode))
+    opcodes
 
 let () =
   Arg.parse args (fun value -> fail ("unexpected argument: " ^ value)) usage;
-  print_endline (Yojson.Safe.pretty_to_string (report (opcodes ())))
+  let opcodes = opcodes () in
+  validate_opcodes opcodes;
+  print_endline
+    (Yojson.Safe.pretty_to_string
+       (Profile.current_runtime_profile_catalog_json ~opcodes))

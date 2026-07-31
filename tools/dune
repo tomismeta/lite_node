@@ -26,4 +26,4 @@
 (executable
  (name inference_profile_catalog)
  (modules inference_profile_catalog)
- (libraries octra_vm yojson digestif digestif.c))
+ (libraries octra_vm yojson))
