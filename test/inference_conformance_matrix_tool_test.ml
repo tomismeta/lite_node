@@ -137,15 +137,30 @@ let failure_case ?(observed = "vm_rejected") ?(observed_effort = 200) () =
   ]
 
 let result
+    ?(opcode = "LINEAR_Q1_G128_FP")
     ?(observed_opcode_effort = 200)
     ?(opcode_effort_match = true)
     ?(profile_root_status = "matched")
     ?(vm_semantics_status = "matched")
     ?(abi_declaration_status = "matched")
+    ?(required_failure_contract_status = "accepted")
+    ?required_failure_contract_blockers
     ?(failure = failure_case ())
     () =
+  let required_failure_contract_blockers =
+    match required_failure_contract_blockers with
+    | Some blockers -> blockers
+    | None ->
+      if
+        String.equal required_failure_contract_status "accepted"
+        || String.equal required_failure_contract_status "not_applicable"
+      then
+        []
+      else
+        ["q1_failure_case_missing_nonfinite_fp16_scale"]
+  in
   `Assoc [
-    "opcode", `String "LINEAR_Q1_G128_FP";
+    "opcode", `String opcode;
     "profile_root_binding",
     `Assoc [
       "status", `String profile_root_status;
@@ -217,6 +232,15 @@ let result
     "opcode_effort_match", `Bool opcode_effort_match;
     "effort_match", `Bool true;
     "strict_effort", `Bool true;
+    "required_failure_case_contract",
+    `Assoc [
+      "status", `String required_failure_contract_status;
+      "blockers",
+      `List
+        (List.map
+           (fun blocker -> `String blocker)
+           required_failure_contract_blockers);
+    ];
     "subspans",
     `List [
       `Assoc [
@@ -233,6 +257,7 @@ let result
 
 let report
     ?runner_sha
+    ?(opcode = "LINEAR_Q1_G128_FP")
     ?(corpus = hex_root 'd')
     ?observed_opcode_effort
     ?opcode_effort_match
@@ -242,6 +267,8 @@ let report
     ?(vm_semantics_gate_status = "accepted")
     ?(abi_declaration_status = "matched")
     ?(abi_gate_status = "accepted")
+    ?(required_failure_contract_status = "accepted")
+    ?required_failure_contract_blockers
     ?failure
     system
     machine =
@@ -250,7 +277,7 @@ let report
     "execution_status", `String "accepted";
     "execution_mode", `String "positive_template_vm_execution";
     "platform", platform ?runner_sha system machine;
-    "selected_opcodes", `List [`String "LINEAR_Q1_G128_FP"];
+    "selected_opcodes", `List [`String opcode];
     "template_corpus_root", `String corpus;
     "profile_catalog_root", `String (hex_root 'c');
     "failure_case_gate", `Assoc ["status", `String "accepted"];
@@ -265,11 +292,14 @@ let report
     "results",
     `List [
       result
+        ~opcode
         ?observed_opcode_effort
         ?opcode_effort_match
         ~profile_root_status
         ~vm_semantics_status
         ~abi_declaration_status
+        ~required_failure_contract_status
+        ?required_failure_contract_blockers
         ?failure
         ();
     ];
@@ -285,6 +315,26 @@ let replace_assoc_field name value = function
     `Assoc
       ((name, value)
        :: List.filter (fun (key, _) -> not (String.equal key name)) fields)
+  | _ -> failwith "report must be object"
+
+let remove_result_field name = function
+  | `Assoc fields ->
+    let results =
+      match assoc_value "results" fields with
+      | `List results ->
+        `List
+          (List.map
+             (function
+               | `Assoc result_fields ->
+                 `Assoc
+                   (List.filter
+                      (fun (key, _) -> not (String.equal key name))
+                      result_fields)
+               | value -> value)
+             results)
+      | _ -> failwith "results must be a list"
+    in
+    replace_assoc_field "results" results (`Assoc fields)
   | _ -> failwith "report must be object"
 
 let with_temp_dir f =
@@ -545,6 +595,159 @@ let check_matrix_rejects_profile_root_result_mismatch_with_gate_accepted () =
         (List.mem "profile_root_binding_mismatch" readiness_blockers)
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_failure_contract_result_mismatch_with_gate_accepted () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~required_failure_contract_status:"rejected"
+           "Linux"
+           "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "failure contract result mismatch exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      let readiness_blockers =
+        string_list_value "validator_readiness_blockers" fields
+      in
+      check
+        "failure contract result mismatch blocker"
+        (List.mem
+        "required_failure_case_contract_rejected"
+           readiness_blockers)
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_missing_failure_contract_with_gate_accepted () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Linux" "x86_64"
+         |> remove_result_field "required_failure_case_contract")
+    in
+    let code, json = run_matrix [a; b] in
+    check "missing failure contract exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      let readiness_blockers =
+        string_list_value "validator_readiness_blockers" fields
+      in
+      check
+        "missing failure contract blocker"
+        (List.mem
+           "required_failure_case_contract_rejected"
+           readiness_blockers)
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_q1_failure_contract_accepted_with_blockers () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~required_failure_contract_status:"accepted"
+           ~required_failure_contract_blockers:
+             ["q1_failure_case_missing_partial_output_input_aliasing"]
+           "Linux"
+           "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "accepted failure contract with blockers exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "accepted failure contract with blockers is rejected"
+        (List.mem
+           "required_failure_case_contract_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_q1_failure_contract_not_applicable () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~required_failure_contract_status:"not_applicable"
+           "Linux"
+           "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "q1 not-applicable failure contract exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "q1 not-applicable failure contract blocker"
+        (List.mem
+           "required_failure_case_contract_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_accepts_non_q1_failure_contract_not_applicable () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report
+           ~runner_sha:(hex_root '1')
+           ~opcode:"RMSNORM_FP_EPS"
+           ~required_failure_contract_status:"not_applicable"
+           "Darwin"
+           "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~opcode:"RMSNORM_FP_EPS"
+           ~required_failure_contract_status:"not_applicable"
+           "Linux"
+           "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "non-q1 not-applicable matrix exits zero" (code = 0);
+    match json with
+    | `Assoc fields ->
+      check "non-q1 not-applicable matrix accepted"
+        (String.equal (string_value "status" fields) "accepted")
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_empty_results () =
   with_temp_dir (fun dir ->
     let a =
@@ -648,6 +851,11 @@ let () =
   check_matrix_rejects_opcode_effort_mismatch ();
   check_matrix_rejects_profile_root_binding_mismatch ();
   check_matrix_rejects_profile_root_result_mismatch_with_gate_accepted ();
+  check_matrix_rejects_failure_contract_result_mismatch_with_gate_accepted ();
+  check_matrix_rejects_missing_failure_contract_with_gate_accepted ();
+  check_matrix_rejects_q1_failure_contract_accepted_with_blockers ();
+  check_matrix_rejects_q1_failure_contract_not_applicable ();
+  check_matrix_accepts_non_q1_failure_contract_not_applicable ();
   check_matrix_rejects_empty_results ();
   check_matrix_rejects_abi_declaration_binding_mismatch ();
   check_matrix_rejects_vm_semantics_binding_mismatch ();

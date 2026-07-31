@@ -241,6 +241,8 @@ let result_signature = function
       `Bool (bool_field "opcode_effort_match" fields);
       "effort_match", `Bool (bool_field "effort_match" fields);
       "strict_effort", `Bool (bool_field "strict_effort" fields);
+      "required_failure_case_contract",
+      json_field_or_null "required_failure_case_contract" fields;
       "subspans", `List (List.map subspan_signature (list_field "subspans" fields));
       "failure_cases",
       `List
@@ -253,6 +255,25 @@ let result_signature = function
 let result_opcode = function
   | `Assoc fields -> string_field "opcode" fields
   | _ -> fail "result must be an object"
+
+let opcode_requires_failure_case_contract opcode =
+  String.equal opcode "LINEAR_Q1_G128_FP"
+
+let required_failure_case_contract_accepted fields =
+  let opcode = string_field "opcode" fields in
+  match opt_assoc_field "required_failure_case_contract" fields with
+  | Some contract_fields ->
+    let blockers_empty =
+      match field "blockers" contract_fields with
+      | Some (`List []) -> true
+      | _ -> false
+    in
+    (match opt_string_field "status" contract_fields with
+     | Some "accepted" -> blockers_empty
+     | Some "not_applicable" ->
+       (not (opcode_requires_failure_case_contract opcode)) && blockers_empty
+     | _ -> false)
+  | None -> false
 
 let optional_string_list_field name fields =
   match field name fields with
@@ -392,6 +413,9 @@ let report_summary path =
            | None -> false)
         result_fields
     in
+    let required_failure_case_contracts_accepted =
+      List.for_all required_failure_case_contract_accepted result_fields
+    in
     let runner_executable_sha256 =
       opt_string_from_assoc "runner_executable_sha256" platform
     in
@@ -403,6 +427,7 @@ let report_summary path =
       && (match failure_gate with
           | Some fields -> opt_status_is_accepted "status" fields
           | None -> false)
+      && required_failure_case_contracts_accepted
       && strict_effort
       && output_matched
       && effort_matched
@@ -433,6 +458,9 @@ let report_summary path =
                | Some fields -> opt_status_is_accepted "status" fields
                | None -> false))
            "punitive_failure_cases_rejected"
+      |> add_if
+           (not required_failure_case_contracts_accepted)
+           "required_failure_case_contract_rejected"
       |> add_if (not strict_effort) "strict_effort_not_enabled"
       |> add_if (not output_matched) "output_mismatch"
       |> add_if (not effort_matched) "effort_mismatch"
@@ -517,6 +545,12 @@ let report_summary path =
             | Some value -> value
             | None -> "missing")
          | None -> "missing");
+      "required_failure_case_contract_status",
+      `String
+        (if required_failure_case_contracts_accepted then
+           "accepted"
+         else
+           "rejected");
       "profile_catalog_root",
       (match profile_catalog_root with
        | Some root -> `String root
