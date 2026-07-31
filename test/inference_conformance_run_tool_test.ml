@@ -362,7 +362,7 @@ let with_temp_dir f =
 
 let write_fixture dir template =
   let fixtures = Filename.concat dir "fixtures" in
-  Unix.mkdir fixtures 0o700;
+  if not (Sys.file_exists fixtures) then Unix.mkdir fixtures 0o700;
   write_file (Filename.concat fixtures "lhs.f64le.bin") input;
   write_file (Filename.concat fixtures "q1-owner.bin") q1_owner;
   write_file (Filename.concat fixtures "expected.f64le.bin") expected_output;
@@ -406,6 +406,47 @@ let gate_status name report =
   match report with
   | `Assoc fields -> string_value "status" (assoc_json name fields)
   | _ -> failwith "report must be object"
+
+let string_list name fields =
+  list_value name fields
+  |> List.map (function
+    | `String value -> value
+    | _ -> failwith ("json field must be a string list: " ^ name))
+
+let bound_matrix_report_row platform_key runner_sha =
+  `Assoc [
+    "accepted", `Bool true;
+    "runner_report_sha256", `String (sha256 platform_key);
+    "result_signature_sha256", `String (sha256 (platform_key ^ ":result"));
+    "platform_key", `String platform_key;
+    "runner_executable_sha256", `String runner_sha;
+  ]
+
+let accepted_matrix ~profile_catalog_root ~template_corpus_root =
+  `Assoc [
+    "status", `String "accepted";
+    "schema", `String "octra.inference.conformance.matrix.v1";
+    "cross_platform_status", `String "accepted";
+    "blockers", `List [];
+    "result_opcodes", `List [`String opcode];
+    "profile_catalog_roots", `List [`String profile_catalog_root];
+    "template_corpus_roots", `List [`String template_corpus_root];
+    "reports",
+    `List [
+      bound_matrix_report_row
+        "4.14.2|Unix|Darwin|1.0|arm64|64|false|native"
+        (hex_root '1');
+      bound_matrix_report_row
+        "4.14.2|Unix|Linux|1.0|x86_64|64|false|native"
+        (hex_root '2');
+    ];
+  ]
+
+let write_matrix dir matrix =
+  let path = Filename.concat dir "matrix.cjson" in
+  let raw = Yojson.Safe.to_string matrix in
+  write_file path raw;
+  path, sha256 raw
 
 let check_good_template_reports_bound_abi () =
   with_temp_dir (fun dir ->
@@ -506,7 +547,67 @@ let check_readiness_gate_rejects_stale_abi () =
         (List.mem "unbound_abi_declaration_binding" blockers)
     | _ -> failwith "report must be object")
 
+let check_pinned_cross_platform_matrix_is_consumed () =
+  with_temp_dir (fun dir ->
+    let code, seed_report =
+      run_conformance
+        dir
+        (q1_template ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "matrix seed run exits zero" (code = 0);
+    match seed_report with
+    | `Assoc seed_fields ->
+      let matrix =
+        accepted_matrix
+          ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
+      in
+      let matrix_path, matrix_sha = write_matrix dir matrix in
+      let code, report =
+        run_conformance
+          dir
+          (q1_template ())
+          [
+            "--strict-effort";
+            "--include-failures";
+            "--require-failure-cases";
+            "--require-profile-roots-bound";
+            "--cross-platform-matrix";
+            Filename.quote matrix_path;
+            "--expected-cross-platform-matrix-sha256";
+            matrix_sha;
+            "--require-validator-readiness";
+          ]
+      in
+      check "matrix-backed readiness exits nonzero" (code = 1);
+      (match report with
+       | `Assoc fields ->
+         let readiness = assoc_json "validator_readiness_gate" fields in
+         let cross_platform = assoc_json "cross_platform_evidence" readiness in
+         check
+           "matrix-backed cross-platform accepted"
+           (String.equal (string_value "status" cross_platform) "accepted");
+         check
+           "matrix sha is pinned"
+           (String.equal (string_value "matrix_sha256_status" cross_platform) "accepted");
+         let blockers = string_list "blockers" readiness in
+         check
+           "matrix-backed readiness no longer blocked by missing matrix"
+           (not (List.mem "cross_platform_conformance_missing" blockers));
+         check
+           "matrix-backed readiness still needs consensus promotion"
+           (List.mem "consensus_candidate_profile_gates" blockers)
+       | _ -> failwith "report must be object")
+    | _ -> failwith "seed report must be object")
+
 let () =
   check_good_template_reports_bound_abi ();
   check_stale_abi_is_visible_in_executable_report ();
-  check_readiness_gate_rejects_stale_abi ()
+  check_readiness_gate_rejects_stale_abi ();
+  check_pinned_cross_platform_matrix_is_consumed ()
