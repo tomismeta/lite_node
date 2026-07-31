@@ -891,6 +891,72 @@ let check_rejects_q1_bad_offset_failure_mutations () =
          ["value", `Int 0])
       "byte_offset_truncated_span must set byte_offset inside q1_owner but leave insufficient Q1 bytes")
 
+let check_rejects_q1_exact_mutation_shape_contract () =
+  with_temp_dir (fun dir ->
+    let check_case case mutations =
+      let failures =
+        List.map (replace_failure_mutations case mutations) q1_failure_cases
+      in
+      let code, report =
+        run_check
+          dir
+          (q1_template ()
+           |> replace_assoc_field
+                "expected_failure_atomicity_behavior"
+                (`List failures))
+      in
+      check (case ^ " exact mutation shape exits nonzero") (code = 1);
+      check
+        (case ^ " exact mutation shape issue")
+        (List.mem
+           ("q1_failure_case_mutation_mismatch_" ^ case)
+           (report_issues report))
+    in
+    check_case
+      "negative_byte_offset"
+      [
+        mutation
+          "set_scalar_param"
+          "parameter_addresses_and_scalar_params.values.byte_offset"
+          ["value", `Int (-1)];
+        mutation
+          "set_scalar_param"
+          "parameter_addresses_and_scalar_params.values.k"
+          ["value", `Int 127];
+      ];
+    check_case
+      "nonfinite_input_nan"
+      [
+        mutation
+          "replace_first_f64_input_cell"
+          "lhs"
+          ["value_bits", `Intlit "9218868437227405312"];
+      ];
+    check_case
+      "partial_output_input_aliasing"
+      [
+        mutation
+          "set_output_base_to_first_input_base_plus"
+          "output.base_address"
+          ["offset_cells", `Int 128];
+      ];
+    check_case
+      "nonfinite_fp16_scale"
+      [
+        mutation
+          "replace_q1_scale_bits"
+          "q1_owner[0..2]"
+          ["value_hex_le", `String "003c"];
+      ];
+    check_case
+      "lower_effort_limit"
+      [
+        mutation
+          "lower_effort_limit"
+          "effort"
+          ["value", `Int 201];
+      ])
+
 let check_rejects_string_executable_mutation () =
   with_temp_dir (fun dir ->
     let failures =
@@ -1005,6 +1071,7 @@ let () =
   check_rejects_q1_exact_alias_without_alias_mutation ();
   check_rejects_q1_partial_alias_without_partial_mutation ();
   check_rejects_q1_bad_offset_failure_mutations ();
+  check_rejects_q1_exact_mutation_shape_contract ();
   check_rejects_string_executable_mutation ();
   check_rejects_string_unchanged_span ();
   check_rejects_incomplete_unchanged_span ();

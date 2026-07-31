@@ -14,6 +14,7 @@ Include at startup:
 
 module Template = Octra_vm.Inference_conformance_template
 module Profile = Octra_vm.Inference_numerical_profile
+module Fp64 = Octra_vm.Inference_fp64
 
 let template_path = ref None
 let template_dir = ref None
@@ -224,6 +225,28 @@ let mutation_target = function
 let mutation_int_value = function
   | `Assoc fields -> int_field "value" fields
   | _ -> None
+
+let mutation_string_value name = function
+  | `Assoc fields -> string_field name fields
+  | _ -> None
+
+let mutation_intlike_string_value name = function
+  | `Assoc fields ->
+    (match field name fields with
+     | Some (`Int value) -> Some (string_of_int value)
+     | Some (`Intlit value) -> Some value
+     | _ -> None)
+  | _ -> None
+
+let mutation_is name mutation =
+  match mutation_name mutation with
+  | Some value -> String.equal value name
+  | None -> false
+
+let mutation_targets target mutation =
+  match mutation_target mutation with
+  | Some value -> String.equal value target
+  | None -> false
 
 let exact_q1_alias_mutation mutation =
   match mutation_name mutation with
@@ -962,6 +985,17 @@ let q1_required_owner_bytes fields =
      | None -> None)
   | None -> None
 
+let q1_lhs_cell_count fields =
+  match assoc_field "parameter_addresses_and_scalar_params" fields with
+  | Some params ->
+    (match assoc_field "values" params with
+     | Some values ->
+       (match int_field "m" values, int_field "k" values with
+        | Some m, Some k when m > 0 && k > 0 -> q1_small_mul m k
+        | _ -> None)
+     | None -> None)
+  | None -> None
+
 let q1_scalar_param_mutation param predicate mutation =
   match
     mutation_name mutation,
@@ -973,6 +1007,115 @@ let q1_scalar_param_mutation param predicate mutation =
       target
       ("parameter_addresses_and_scalar_params.values." ^ param)
     && predicate value
+  | _ -> false
+
+let q1_truncates_raw target = function
+  | `Assoc fields ->
+    string_field "mutation" fields = Some "truncate_input_manifest"
+    && string_field "target" fields = Some target
+    &&
+    (match int_field "truncate_bytes" fields with
+     | Some value -> value > 0
+     | None -> false)
+  | _ -> false
+
+let hex_nibble = function
+  | '0' .. '9' as value -> Some (Char.code value - Char.code '0')
+  | 'a' .. 'f' as value -> Some (10 + Char.code value - Char.code 'a')
+  | 'A' .. 'F' as value -> Some (10 + Char.code value - Char.code 'A')
+  | _ -> None
+
+let q1_fp16_bits_from_hex_le value =
+  if String.length value <> 4 then None
+  else
+    match
+      hex_nibble value.[0],
+      hex_nibble value.[1],
+      hex_nibble value.[2],
+      hex_nibble value.[3]
+    with
+    | Some lo_a, Some lo_b, Some hi_a, Some hi_b ->
+      let lo = lo_a lsl 4 lor lo_b in
+      let hi = hi_a lsl 4 lor hi_b in
+      Some (lo lor (hi lsl 8))
+    | _ -> None
+
+let q1_nonfinite_fp16_scale_mutation mutation =
+  mutation_is "replace_q1_scale_bits" mutation
+  && mutation_targets "q1_owner[0..2]" mutation
+  &&
+  match mutation_string_value "value_hex_le" mutation with
+  | Some value ->
+    (match q1_fp16_bits_from_hex_le value with
+     | Some bits -> Fp64.of_binary16 bits = None
+     | None -> false)
+  | None -> false
+
+let q1_required_mutation_shape_ok fields case mutations =
+  match mutations with
+  | [mutation] ->
+    (match case with
+     | "nonfinite_input_nan" ->
+       mutation_is "replace_first_f64_input_cell" mutation
+       && mutation_targets "lhs" mutation
+       && mutation_intlike_string_value "value_bits" mutation
+          = Some "9221120237041090560"
+     | "nonfinite_input_infinity" ->
+       mutation_is "replace_first_f64_input_cell" mutation
+       && mutation_targets "lhs" mutation
+       && mutation_intlike_string_value "value_bits" mutation
+          = Some "9218868437227405312"
+     | "output_input_aliasing" ->
+       mutation_targets "output.base_address" mutation
+       &&
+       (mutation_is "set_output_base_to_first_input_base" mutation
+        ||
+        (mutation_is "set_output_base_to_first_input_base_plus" mutation
+         && mutation_offset_cells mutation = Some 0))
+     | "partial_output_input_aliasing" ->
+       (match q1_lhs_cell_count fields, mutation_offset_cells mutation with
+        | Some lhs_cells, Some offset ->
+          mutation_is "set_output_base_to_first_input_base_plus" mutation
+          && mutation_targets "output.base_address" mutation
+          && offset > 0
+          && offset < lhs_cells
+        | _ -> false)
+     | "k_not_multiple_of_128" ->
+       q1_scalar_param_mutation
+         "k"
+         (fun value -> value > 0 && value mod 128 <> 0)
+         mutation
+     | "bad_q1_owner_length" -> q1_truncates_raw "q1_owner" mutation
+     | "negative_byte_offset" ->
+       q1_scalar_param_mutation "byte_offset" (fun value -> value < 0) mutation
+     | "byte_offset_out_of_bounds" ->
+       (match q1_owner_source_bytes fields with
+        | Some source_bytes ->
+          q1_scalar_param_mutation
+            "byte_offset"
+            (fun value -> value > source_bytes)
+            mutation
+        | None -> false)
+     | "byte_offset_truncated_span" ->
+       (match q1_owner_source_bytes fields, q1_required_owner_bytes fields with
+        | Some source_bytes, Some required_bytes ->
+          q1_scalar_param_mutation
+            "byte_offset"
+            (fun value ->
+               value >= 0
+               && value <= source_bytes
+               && required_bytes > source_bytes - value)
+            mutation
+        | _ -> false)
+     | "nonfinite_fp16_scale" -> q1_nonfinite_fp16_scale_mutation mutation
+     | "lower_effort_limit" ->
+       mutation_is "lower_effort_limit" mutation
+       && mutation_targets "effort" mutation
+       &&
+       (match mutation_int_value mutation, int_field "expected_effort" fields with
+        | Some value, Some expected -> value < expected
+        | _ -> false)
+     | _ -> true)
   | _ -> false
 
 let failure_issues path opcode fields =
@@ -1219,6 +1362,29 @@ let failure_issues path opcode fields =
           in
           negative_issue @ out_of_bounds_issue @ truncated_issue
       in
+      let q1_required_mutation_shape_issues =
+        if not (String.equal opcode "LINEAR_Q1_G128_FP") then []
+        else
+          let mutations_for case =
+            List.find_map
+              (function
+                | `Case (actual, _, mutations, _, _, _)
+                  when String.equal actual case ->
+                  Some mutations
+                | _ -> None)
+              parsed
+          in
+          Template.q1_required_failure_expectations
+          |> List.filter_map (fun (case, _) ->
+            match mutations_for case with
+            | Some mutations
+              when q1_required_mutation_shape_ok fields case mutations -> None
+            | Some _ ->
+              Some
+                (issue ~opcode path
+                   ("q1_failure_case_mutation_mismatch_" ^ case))
+            | None -> None)
+      in
       let expected_issue =
         if missing_expected = [] then []
         else
@@ -1244,6 +1410,7 @@ let failure_issues path opcode fields =
       @ unchanged_span_issues @ executable_mutation_issues
       @ q1_required_case_issues @ q1_alias_shape_issues
       @ q1_offset_shape_issues
+      @ q1_required_mutation_shape_issues
       @ (if not (String.equal opcode "LINEAR_Q1_G128_FP") then []
          else
            match q1_output_span fields with

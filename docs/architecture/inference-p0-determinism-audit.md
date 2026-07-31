@@ -837,6 +837,16 @@ The static checker also validates the alias mutation shape. Exact
 `partial_output_input_aliasing` must declare a nonzero partial output-to-lhs
 offset before the template can pass Q1 schema validation.
 
+The checker now applies the same exact-mutation discipline as the executable
+runner for every required Q1 punitive case. Each required case must declare one
+executable mutation, and that mutation must match the intended contract shape:
+the pinned NaN/infinity payloads, exact or bounded partial alias offset,
+positive non-128 `k`, positive Q1 owner truncation, negative/out-of-bounds/
+truncated byte offsets, nonfinite binary16 scale bits, or an effort limit below
+the positive-template effort. Composite mutations and softer substitutes are
+rejected before VM execution, so a producer artifact cannot pass the static
+gate by including a valid-looking mutation beside an unrelated one.
+
 Q1 `reject_before_write` failure cases must also declare an unchanged span that
 covers the full declared output, `dst` through `dst + (m * n)`. Narrow sentinel
 spans are rejected by the static checker because they do not prove full-output
