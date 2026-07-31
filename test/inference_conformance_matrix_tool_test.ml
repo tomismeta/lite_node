@@ -889,6 +889,46 @@ let check_matrix_rejects_failure_mutation_payload_mismatch () =
         (List.mem "result_mismatch_across_platforms" (blockers fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_forged_failure_mutation_payload_shape () =
+  with_temp_dir (fun dir ->
+    let forged =
+      failure_case
+        ~case:"nonfinite_input_nan"
+        ~executable_mutations:
+          [
+            executable_mutation
+              "replace_first_f64_input_cell"
+              "lhs"
+              ["value_bits", `Intlit "9218868437227405312"];
+          ]
+        ()
+    in
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') ~failure:forged "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') ~failure:forged "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "forged mutation payload shape exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "forged mutation payload shape top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      check
+        "forged mutation payload shape validator blocker"
+        (List.mem
+           "required_q1_failure_cases_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_missing_failure_mutation_payload () =
   with_temp_dir (fun dir ->
     let a =
@@ -1601,6 +1641,7 @@ let () =
   check_matrix_rejects_corpus_mismatch ();
   check_matrix_rejects_failure_case_mismatch ();
   check_matrix_rejects_failure_mutation_payload_mismatch ();
+  check_matrix_rejects_forged_failure_mutation_payload_shape ();
   check_matrix_rejects_missing_failure_mutation_payload ();
   check_matrix_rejects_missing_required_q1_failure_row ();
   check_matrix_rejects_failure_snapshot_mismatch ();

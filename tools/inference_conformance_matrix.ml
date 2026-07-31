@@ -116,6 +116,12 @@ let opt_string_field name fields =
   | None -> None
   | _ -> fail ("invalid string field: " ^ name)
 
+let json_intlike_string name fields =
+  match field name fields with
+  | Some (`Int value) -> Some (string_of_int value)
+  | Some (`Intlit value) -> Some value
+  | _ -> None
+
 let json_field_or_null name fields =
   match field name fields with
   | Some value -> value
@@ -312,6 +318,86 @@ let q1_failure_mutation_shapes_accepted fields =
         cases
     | _ -> false
 
+let q1_failure_mutation_payload_shape_ok result_fields case_fields =
+  let mutation_matches name target mutation_fields =
+    opt_string_field "mutation" mutation_fields = Some name
+    && opt_string_field "target" mutation_fields = Some target
+  in
+  let scalar_param param predicate mutation_fields =
+    mutation_matches
+      "set_scalar_param"
+      ("parameter_addresses_and_scalar_params.values." ^ param)
+      mutation_fields
+    &&
+    match field "value" mutation_fields with
+    | Some (`Int value) -> predicate value
+    | _ -> false
+  in
+  let case = string_field "case" case_fields in
+  match field "executable_mutations" case_fields with
+  | Some (`List [`Assoc mutation_fields]) ->
+    (match case with
+     | "nonfinite_input_nan" ->
+       mutation_matches "replace_first_f64_input_cell" "lhs" mutation_fields
+       && json_intlike_string "value_bits" mutation_fields
+          = Some "9221120237041090560"
+     | "nonfinite_input_infinity" ->
+       mutation_matches "replace_first_f64_input_cell" "lhs" mutation_fields
+       && json_intlike_string "value_bits" mutation_fields
+          = Some "9218868437227405312"
+     | "output_input_aliasing" ->
+       (mutation_matches
+          "set_output_base_to_first_input_base"
+          "output.base_address"
+          mutation_fields
+        ||
+        (mutation_matches
+           "set_output_base_to_first_input_base_plus"
+           "output.base_address"
+           mutation_fields
+         &&
+         match field "offset_cells" mutation_fields with
+         | Some (`Int 0) -> true
+         | _ -> false))
+     | "partial_output_input_aliasing" ->
+       mutation_matches
+         "set_output_base_to_first_input_base_plus"
+         "output.base_address"
+         mutation_fields
+       &&
+       (match field "offset_cells" mutation_fields with
+        | Some (`Int value) -> value > 0
+        | _ -> false)
+     | "k_not_multiple_of_128" ->
+       scalar_param "k" (fun value -> value > 0 && value mod 128 <> 0) mutation_fields
+     | "bad_q1_owner_length" ->
+       mutation_matches "truncate_input_manifest" "q1_owner" mutation_fields
+       &&
+       (match field "truncate_bytes" mutation_fields with
+        | Some (`Int value) -> value > 0
+        | _ -> false)
+     | "negative_byte_offset" ->
+       scalar_param "byte_offset" (fun value -> value < 0) mutation_fields
+     | "byte_offset_out_of_bounds" ->
+       scalar_param "byte_offset" (fun value -> value > 0) mutation_fields
+     | "byte_offset_truncated_span" ->
+       scalar_param "byte_offset" (fun value -> value >= 0) mutation_fields
+     | "nonfinite_fp16_scale" ->
+       mutation_matches "replace_q1_scale_bits" "q1_owner[0..2]" mutation_fields
+       &&
+       (match field "value_hex_le" mutation_fields with
+        | Some (`String "007c")
+        | Some (`String "00fc") -> true
+        | _ -> false)
+     | "lower_effort_limit" ->
+       mutation_matches "lower_effort_limit" "effort" mutation_fields
+       &&
+       (match field "value" mutation_fields with
+        | Some (`Int value) -> value < int_field "expected_effort" result_fields
+        | _ -> false)
+     | _ -> true)
+  | _ -> false
+
 let q1_required_failure_rows_accepted fields =
   let opcode = string_field "opcode" fields in
   if not (String.equal opcode "LINEAR_Q1_G128_FP") then
@@ -343,12 +429,13 @@ let q1_required_failure_rows_accepted fields =
              &&
              (match opt_string_field "mutation_shape_status" case_fields,
                     field "mutation_shape_blockers" case_fields with
-              | Some "accepted", Some (`List []) -> true
-              | _ -> false)
+             | Some "accepted", Some (`List []) -> true
+             | _ -> false)
              &&
              (match field "executable_mutations" case_fields with
               | Some (`List (_ :: _)) -> true
               | _ -> false)
+             && q1_failure_mutation_payload_shape_ok fields case_fields
            | _ -> false)
         Template.q1_required_failure_expectations
     | _ -> false

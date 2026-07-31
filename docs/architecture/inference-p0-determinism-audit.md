@@ -285,9 +285,11 @@ local Q1 result against independent rows rather than merely proving that some
 compatible-looking matrix exists for the same corpus roots. For
 `LINEAR_Q1_G128_FP`, matrix acceptance also independently requires each of the
 11 required punitive failure rows to be present, counted, accepted, bound to
-the expected outcome prefix, and backed by a nonempty executable mutation
-payload. This keeps a forged or truncated runner report from satisfying
-validator-readiness with only a top-level `failure_case_gate: accepted` claim.
+the expected outcome prefix, and backed by an executable mutation payload whose
+shape matches the required case. This keeps a forged or truncated runner report
+from satisfying validator-readiness with only a top-level
+`failure_case_gate: accepted` claim or a locally consistent but wrong mutation
+payload.
 For a
 focused Q1 runner report with positive execution, counted failure cases, strict
 effort, bound profile roots, bound VM-semantics roots, and bound ABI
