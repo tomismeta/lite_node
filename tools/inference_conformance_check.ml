@@ -898,6 +898,29 @@ let expected_issues path opcode fields =
   in
   manifest_issues @ span_issues
 
+let checked_small_product left right =
+  if left < 0 || right < 0 then None
+  else if left <> 0 && right > max_int / left then None
+  else Some (left * right)
+
+let q1_output_span fields =
+  match assoc_field "parameter_addresses_and_scalar_params" fields with
+  | Some params ->
+    (match assoc_field "values" params with
+     | Some values ->
+       (match int_field "dst" values, int_field "m" values, int_field "n" values with
+        | Some dst, Some m, Some n when dst >= 0 && m > 0 && n > 0 ->
+          Option.map (fun cells -> dst, cells) (checked_small_product m n)
+        | _ -> None)
+     | None -> None)
+  | None -> None
+
+let span_covers base cells = function
+  | `Assoc span_fields ->
+    int_field "base_address" span_fields = Some base
+    && int_field "length_f64_cells" span_fields = Some cells
+  | _ -> false
+
 let failure_issues path opcode fields =
   match list_field "expected_failure_atomicity_behavior" fields with
   | None -> [issue ~opcode path "missing expected_failure_atomicity_behavior"]
@@ -1095,6 +1118,21 @@ let failure_issues path opcode fields =
       bad @ expected_issue @ mutation_issue @ unchanged_issue
       @ unchanged_span_issues @ executable_mutation_issues
       @ q1_required_case_issues @ q1_alias_shape_issues
+      @ (if not (String.equal opcode "LINEAR_Q1_G128_FP") then []
+         else
+           match q1_output_span fields with
+           | None -> []
+           | Some (base, cells) ->
+             parsed
+             |> List.filter_map (function
+               | `Case (case, Some expected, _, _, spans, _)
+                 when starts_with "reject_before_write" expected
+                      && not (List.exists (span_covers base cells) spans) ->
+                 Some
+                   (issue ~opcode path
+                      (case
+                       ^ " must preserve full LINEAR_Q1_G128_FP output span"))
+               | _ -> None))
 
 let gated_delta_semantic_issues path opcode fields =
   if not (String.equal opcode "GATED_DELTA_RULE_FP") then []

@@ -744,6 +744,11 @@ The static checker also validates the alias mutation shape. Exact
 `partial_output_input_aliasing` must declare a nonzero partial output-to-lhs
 offset before the template can pass Q1 schema validation.
 
+Q1 `reject_before_write` failure cases must also declare an unchanged span that
+covers the full declared output, `dst` through `dst + (m * n)`. Narrow sentinel
+spans are rejected by the static checker because they do not prove full-output
+atomicity.
+
 The static checker also validates the Q1 positive-template shape before any
 runner execution. `LINEAR_Q1_G128_FP` templates must bind an `lhs` range as
 `f64le`, bind a raw `q1_owner` range as `tensor.q1-g128`, declare register names

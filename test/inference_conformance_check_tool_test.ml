@@ -830,6 +830,30 @@ let check_rejects_incomplete_unchanged_span () =
          "failure case unchanged span missing length_f64_cells: nonfinite_input_nan"
          (report_issues report)))
 
+let check_rejects_q1_reject_case_without_full_output_span () =
+  with_temp_dir (fun dir ->
+    let failures =
+      List.map
+        (replace_failure_unchanged_spans
+           "nonfinite_input_nan"
+           [span "output_prefix" 10000 1])
+        q1_failure_cases
+    in
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "expected_failure_atomicity_behavior"
+              (`List failures))
+    in
+    check "partial reject span exits nonzero" (code = 1);
+    check
+      "partial reject span issue"
+      (List.mem
+         "nonfinite_input_nan must preserve full LINEAR_Q1_G128_FP output span"
+         (report_issues report)))
+
 let () =
   check_accepts_bound_abi_declaration ();
   check_rejects_stale_session_abi_root ();
@@ -850,4 +874,5 @@ let () =
   check_rejects_q1_partial_alias_without_partial_mutation ();
   check_rejects_string_executable_mutation ();
   check_rejects_string_unchanged_span ();
-  check_rejects_incomplete_unchanged_span ()
+  check_rejects_incomplete_unchanged_span ();
+  check_rejects_q1_reject_case_without_full_output_span ()
