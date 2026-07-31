@@ -164,7 +164,10 @@ rejected as `insufficient_distinct_platforms`. Matrix reports include
 `runner_report_sha256`, `result_signature_sha256`, and
 `matrix_signature_sha256` as diagnostic evidence roots; those hashes identify
 the compared report bytes and normalized result signatures, but they are not
-platform attestation.
+platform attestation. Matrix reports also lift `validator_readiness_status`
+and `validator_readiness_blockers` to the top level; this is the readiness
+answer to use when distinguishing local execution evidence from
+validator-ready inference math.
 
 The saved reports live beside the indexes as
 `litenode-failure-atomicity-report.cjson`.

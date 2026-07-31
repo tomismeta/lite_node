@@ -74,6 +74,16 @@ let list_field name fields =
   | Some (`List values) -> values
   | _ -> fail ("missing list field: " ^ name)
 
+let string_list_field name fields =
+  match field name fields with
+  | Some (`List values) ->
+    List.map
+      (function
+        | `String value -> value
+        | _ -> fail ("invalid string list field: " ^ name))
+      values
+  | _ -> fail ("missing list field: " ^ name)
+
 let assoc_field name fields =
   match field name fields with
   | Some (`Assoc fields) -> fields
@@ -145,6 +155,18 @@ let signature_json results =
   |> List.map result_signature
   |> List.sort compare
   |> fun values -> Yojson.Safe.to_string (`List values)
+
+let validator_readiness_summary fields =
+  match opt_assoc_field "validator_readiness_gate" fields with
+  | Some gate ->
+    let status =
+      match opt_string_field "status" gate with
+      | Some status -> status
+      | None -> "missing"
+    in
+    status, string_list_field "blockers" gate
+  | None ->
+    "missing", ["missing_validator_readiness_gate"]
 
 let report_summary path =
   let raw_report = read_file path in
@@ -220,9 +242,13 @@ let report_summary path =
     in
     let signature = signature_json results in
     let signature_sha256 = sha256 signature in
+    let validator_readiness_status, validator_readiness_blockers =
+      validator_readiness_summary fields
+    in
     accepted,
     platform_key platform,
     signature,
+    validator_readiness_blockers,
     `Assoc [
       "path", `String path;
       "runner_report_sha256", `String report_sha256;
@@ -249,6 +275,12 @@ let report_summary path =
             | Some value -> value
             | None -> "missing")
          | None -> "missing");
+      "validator_readiness_status", `String validator_readiness_status;
+      "validator_readiness_blockers",
+      `List
+        (List.map
+           (fun blocker -> `String blocker)
+           validator_readiness_blockers);
       "strict_effort", `Bool strict_effort;
       "output_status", `String (if output_matched then "matched" else "mismatch");
       "effort_status", `String (if effort_matched then "matched" else "mismatch");
@@ -259,17 +291,29 @@ let report_summary path =
 let unique values =
   List.sort_uniq String.compare values
 
+let without_cross_platform_blocker blockers =
+  List.filter
+    (fun blocker -> not (String.equal blocker "cross_platform_conformance_missing"))
+    blockers
+
 let matrix_report paths =
   let summaries = List.map report_summary paths in
   let report_count = List.length summaries in
   let accepted_reports =
-    List.length (List.filter (fun (accepted, _, _, _) -> accepted) summaries)
+    List.length (List.filter (fun (accepted, _, _, _, _) -> accepted) summaries)
   in
   let platforms =
-    unique (List.map (fun (_, platform, _, _) -> platform) summaries)
+    unique (List.map (fun (_, platform, _, _, _) -> platform) summaries)
   in
   let signatures =
-    unique (List.map (fun (_, _, signature, _) -> signature) summaries)
+    unique (List.map (fun (_, _, signature, _, _) -> signature) summaries)
+  in
+  let per_report_validator_blockers =
+    summaries
+    |> List.map (fun (_, _, _, blockers, _) -> blockers)
+    |> List.concat
+    |> without_cross_platform_blocker
+    |> unique
   in
   let matrix_signature =
     signatures
@@ -298,6 +342,12 @@ let matrix_report paths =
          (List.length signatures <> 1)
          "result_mismatch_across_platforms"
   in
+  let validator_readiness_blockers =
+    unique (blockers @ per_report_validator_blockers)
+  in
+  let validator_readiness_accepted =
+    matrix_accepted && validator_readiness_blockers = []
+  in
   `Assoc [
     "status", `String (if matrix_accepted then "accepted" else "rejected");
     "diagnostic_only", `Bool true;
@@ -309,13 +359,20 @@ let matrix_report paths =
     "cross_platform_status",
     `String (if matrix_accepted then "accepted" else "rejected");
     "blockers", `List (List.map (fun blocker -> `String blocker) blockers);
+    "validator_readiness_status",
+    `String (if validator_readiness_accepted then "accepted" else "rejected");
+    "validator_readiness_blockers",
+    `List
+      (List.map
+         (fun blocker -> `String blocker)
+         validator_readiness_blockers);
     "platform_keys", `List (List.map (fun value -> `String value) platforms);
     "result_signature_count", `Int (List.length signatures);
     "matrix_signature_sha256",
     (match matrix_signature_sha256 with
      | None -> `Null
      | Some value -> `String value);
-    "reports", `List (List.map (fun (_, _, _, json) -> json) summaries);
+    "reports", `List (List.map (fun (_, _, _, _, json) -> json) summaries);
   ]
 
 let () =
