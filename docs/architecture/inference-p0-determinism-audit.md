@@ -222,6 +222,49 @@ declaration, an accepted and pinned matrix removes
 then be `consensus_candidate_profile_gates` until the profile itself is
 explicitly promoted.
 
+Current matrix invocation for Q1 must pin opcode scope explicitly:
+
+```text
+tools/inference_conformance_matrix.exe \
+  --opcode LINEAR_Q1_G128_FP \
+  --runner-report <darwin-report.cjson> \
+  --runner-report <linux-report.cjson> \
+  --require-validator-readiness
+```
+
+The matrix report now includes `required_opcodes` and
+`opcode_coverage_status`, so cross-platform evidence cannot accidentally
+qualify a different primitive. Static checker, runner, and matrix reports also
+include a diagnostic `next_blocker` field. This field does not change
+admission or readiness semantics; it gives the producer and reviewer a stable
+first actionable blocker while preserving the complete blocker list.
+
+Against the stale effort-authority producer index, the current report surface
+is:
+
+```text
+static validator_readiness_gate.next_blocker:
+  schema_rejected
+
+runner validator_readiness_gate.next_blocker:
+  q1_failure_case_expected_mismatch_output_input_aliasing
+
+matrix next_validator_readiness_blocker:
+  q1_failure_case_expected_mismatch_output_input_aliasing
+
+matrix required_opcodes:
+  [LINEAR_Q1_G128_FP]
+
+matrix opcode_coverage_status:
+  accepted
+```
+
+That means the current Q1 blocker is no longer ambiguous. The VM accepts the
+positive Q1 execution path, but validator readiness rejects the stale producer
+evidence until it re-emits `output_input_aliasing` and
+`partial_output_input_aliasing` as counted `accept_from_snapshot` failure
+contracts and binds the current profile, VM-semantics, and session-ABI roots.
+
 The first accepted producer indexes are:
 
 ```text
