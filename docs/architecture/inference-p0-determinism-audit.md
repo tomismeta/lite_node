@@ -389,6 +389,18 @@ when distinguishing local execution evidence from validator-ready inference
 math. Each matrix `reports[]` row also preserves the source runner's nested
 `validator_readiness_gate`, so aggregate matrix failures and per-platform
 runner failures can be inspected without reopening the original report files.
+When the runner consumes a matrix, it treats the rows as the authority for
+aggregate evidence. It recomputes distinct platform count, distinct runner
+executable count, result-signature count, profile-catalog roots, and
+template-corpus roots from `reports[]`, compares those values to the top-level
+matrix fields, and emits both declared and row-derived counts in
+`cross_platform_evidence`. Forged or stale top-level matrix summaries reject as
+row-aggregate failures such as `matrix_runner_executable_count_mismatch`,
+`matrix_result_signature_count_mismatch`,
+`matrix_row_profile_catalog_mismatch`, or
+`matrix_row_template_corpus_mismatch`. A row without bound
+`profile_catalog_root` and `template_corpus_root` is not validator-readiness
+evidence, even if the matrix envelope carries those roots.
 
 Checker, runner, and matrix reports all expose top-level
 `validator_readiness_required` so consumers can tell whether a report was

@@ -797,6 +797,10 @@ let cross_platform_evidence
          `String (if template_corpus_accepted then "accepted" else "rejected");
          "source_report_status",
          `String (if report_rows_accepted then "accepted" else "rejected");
+         "matrix_distinct_platform_count", `Int matrix_distinct_platform_count;
+         "matrix_distinct_runner_executable_count",
+         `Int matrix_distinct_runner_count;
+         "matrix_result_signature_count", `Int matrix_result_signature_count;
          "row_distinct_platform_count",
          `Int (List.length row_platforms);
          "row_distinct_runner_executable_count",

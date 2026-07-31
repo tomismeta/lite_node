@@ -935,6 +935,24 @@ let check_pinned_cross_platform_matrix_is_consumed () =
          check
            "matrix sha is pinned"
            (String.equal (string_value "matrix_sha256_status" cross_platform) "accepted");
+         check
+           "matrix-backed declared platform count"
+           (int_value "matrix_distinct_platform_count" cross_platform = 2);
+         check
+           "matrix-backed row platform count"
+           (int_value "row_distinct_platform_count" cross_platform = 2);
+         check
+           "matrix-backed declared runner count"
+           (int_value "matrix_distinct_runner_executable_count" cross_platform = 2);
+         check
+           "matrix-backed row runner count"
+           (int_value "row_distinct_runner_executable_count" cross_platform = 2);
+         check
+           "matrix-backed declared signature count"
+           (int_value "matrix_result_signature_count" cross_platform = 1);
+         check
+           "matrix-backed row signature count"
+           (int_value "row_result_signature_count" cross_platform = 1);
          let blockers = string_list "blockers" readiness in
          check
            "matrix-backed readiness no longer blocked by missing matrix"
@@ -1110,6 +1128,12 @@ let check_cross_platform_matrix_forged_runner_count_rejects () =
          check
            "matrix forged count row aggregate rejected"
            (String.equal (string_value "row_aggregate_status" cross_platform) "rejected");
+         check
+           "matrix forged count reports declared runner count"
+           (int_value "matrix_distinct_runner_executable_count" cross_platform = 3);
+         check
+           "matrix forged count reports row runner count"
+           (int_value "row_distinct_runner_executable_count" cross_platform = 2);
          let blockers = string_list "blockers" cross_platform in
          check
            "matrix forged count blocker"
