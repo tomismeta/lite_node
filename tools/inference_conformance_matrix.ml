@@ -14,6 +14,7 @@ Include at startup:
 
 module Template = Octra_vm.Inference_conformance_template
 module Signature = Octra_vm.Inference_conformance_signature
+module Fp64 = Octra_vm.Inference_fp64
 
 let runner_reports = ref []
 let min_platforms = ref 2
@@ -121,6 +122,27 @@ let json_intlike_string name fields =
   | Some (`Int value) -> Some (string_of_int value)
   | Some (`Intlit value) -> Some value
   | _ -> None
+
+let hex_nibble = function
+  | '0' .. '9' as value -> Some (Char.code value - Char.code '0')
+  | 'a' .. 'f' as value -> Some (10 + Char.code value - Char.code 'a')
+  | 'A' .. 'F' as value -> Some (10 + Char.code value - Char.code 'A')
+  | _ -> None
+
+let q1_fp16_bits_from_hex_le value =
+  if String.length value <> 4 then None
+  else
+    match
+      hex_nibble value.[0],
+      hex_nibble value.[1],
+      hex_nibble value.[2],
+      hex_nibble value.[3]
+    with
+    | Some lo_a, Some lo_b, Some hi_a, Some hi_b ->
+      let lo = lo_a lsl 4 lor lo_b in
+      let hi = hi_a lsl 4 lor hi_b in
+      Some (lo lor (hi lsl 8))
+    | _ -> None
 
 let json_field_or_null name fields =
   match field name fields with
@@ -319,6 +341,11 @@ let q1_failure_mutation_shapes_accepted fields =
     | _ -> false
 
 let q1_failure_mutation_payload_shape_ok result_fields case_fields =
+  let shape_int name =
+    match opt_assoc_field "q1_contract_shape" result_fields with
+    | Some shape -> (match field name shape with Some (`Int value) -> Some value | _ -> None)
+    | None -> None
+  in
   let mutation_matches name target mutation_fields =
     opt_string_field "mutation" mutation_fields = Some name
     && opt_string_field "target" mutation_fields = Some target
@@ -365,8 +392,8 @@ let q1_failure_mutation_payload_shape_ok result_fields case_fields =
          "output.base_address"
          mutation_fields
        &&
-       (match field "offset_cells" mutation_fields with
-        | Some (`Int value) -> value > 0
+       (match field "offset_cells" mutation_fields, shape_int "lhs_cells" with
+        | Some (`Int value), Some lhs_cells -> value > 0 && value < lhs_cells
         | _ -> false)
      | "k_not_multiple_of_128" ->
        scalar_param "k" (fun value -> value > 0 && value mod 128 <> 0) mutation_fields
@@ -379,21 +406,36 @@ let q1_failure_mutation_payload_shape_ok result_fields case_fields =
      | "negative_byte_offset" ->
        scalar_param "byte_offset" (fun value -> value < 0) mutation_fields
      | "byte_offset_out_of_bounds" ->
-       scalar_param "byte_offset" (fun value -> value > 0) mutation_fields
+       (match shape_int "q1_owner_source_bytes" with
+        | Some source_bytes ->
+          scalar_param "byte_offset" (fun value -> value > source_bytes) mutation_fields
+        | None -> false)
      | "byte_offset_truncated_span" ->
-       scalar_param "byte_offset" (fun value -> value >= 0) mutation_fields
+       (match shape_int "q1_owner_source_bytes",
+             shape_int "q1_required_owner_bytes" with
+        | Some source_bytes, Some required_bytes ->
+          scalar_param
+            "byte_offset"
+            (fun value ->
+               value >= 0
+               && value <= source_bytes
+               && required_bytes > source_bytes - value)
+            mutation_fields
+        | _ -> false)
      | "nonfinite_fp16_scale" ->
        mutation_matches "replace_q1_scale_bits" "q1_owner[0..2]" mutation_fields
        &&
        (match field "value_hex_le" mutation_fields with
-        | Some (`String "007c")
-        | Some (`String "00fc") -> true
+        | Some (`String value) ->
+          (match q1_fp16_bits_from_hex_le value with
+           | Some bits -> Fp64.of_binary16 bits = None
+           | None -> false)
         | _ -> false)
      | "lower_effort_limit" ->
        mutation_matches "lower_effort_limit" "effort" mutation_fields
        &&
-       (match field "value" mutation_fields with
-        | Some (`Int value) -> value < int_field "expected_effort" result_fields
+       (match field "value" mutation_fields, shape_int "expected_effort" with
+        | Some (`Int value), Some expected_effort -> value < expected_effort
         | _ -> false)
      | _ -> true)
   | _ -> false

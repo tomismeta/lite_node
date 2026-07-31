@@ -442,6 +442,19 @@ let result
     "opcode_effort_match", `Bool opcode_effort_match;
     "effort_match", `Bool true;
     "strict_effort", `Bool true;
+    "q1_contract_shape",
+    (if String.equal opcode "LINEAR_Q1_G128_FP" then
+       `Assoc [
+         "m", `Int 1;
+         "k", `Int 128;
+         "n", `Int 2;
+         "lhs_cells", `Int 128;
+         "q1_owner_source_bytes", `Int 36;
+         "q1_required_owner_bytes", `Int 36;
+         "expected_effort", `Int 201;
+       ]
+     else
+       `Null);
     "required_failure_case_contract",
     `Assoc required_failure_contract_fields;
     "subspans",
@@ -661,7 +674,7 @@ let check_matrix_accepts_bound_reports () =
         "matrix carries result signature schema"
         (String.equal
            (string_value "result_signature_schema" fields)
-           "octra.inference.conformance.result-signature.v3");
+           "octra.inference.conformance.result-signature.v4");
       check
         "matrix carries runner hashes"
         (List.length (string_list_value "runner_executable_sha256s" fields) = 2)
@@ -924,6 +937,80 @@ let check_matrix_rejects_forged_failure_mutation_payload_shape () =
         (List.mem "runner_report_rejected" (blockers fields));
       check
         "forged mutation payload shape validator blocker"
+        (List.mem
+           "required_q1_failure_cases_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_accepts_nonfinite_fp16_nan_scale_payload () =
+  with_temp_dir (fun dir ->
+    let nan_scale =
+      failure_case
+        ~case:"nonfinite_fp16_scale"
+        ~executable_mutations:
+          [
+            executable_mutation
+              "replace_q1_scale_bits"
+              "q1_owner[0..2]"
+              ["value_hex_le", `String "017c"];
+          ]
+        ()
+    in
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') ~failure:nan_scale "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') ~failure:nan_scale "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "nonfinite fp16 nan scale matrix exits zero" (code = 0);
+    match json with
+    | `Assoc fields ->
+      check "nonfinite fp16 nan scale accepted" (String.equal (string_value "status" fields) "accepted")
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_partial_alias_payload_outside_lhs () =
+  with_temp_dir (fun dir ->
+    let forged =
+      failure_case
+        ~case:"partial_output_input_aliasing"
+        ~expected:"accept_from_snapshot_partial"
+        ~executable_mutations:
+          [
+            executable_mutation
+              "set_output_base_to_first_input_base_plus"
+              "output.base_address"
+              ["offset_cells", `Int 128];
+          ]
+        ()
+    in
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') ~failure:forged "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') ~failure:forged "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "partial alias outside lhs matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "partial alias outside lhs top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      check
+        "partial alias outside lhs validator blocker"
         (List.mem
            "required_q1_failure_cases_rejected"
            (string_list_value "validator_readiness_blockers" fields))
@@ -1642,6 +1729,8 @@ let () =
   check_matrix_rejects_failure_case_mismatch ();
   check_matrix_rejects_failure_mutation_payload_mismatch ();
   check_matrix_rejects_forged_failure_mutation_payload_shape ();
+  check_matrix_accepts_nonfinite_fp16_nan_scale_payload ();
+  check_matrix_rejects_partial_alias_payload_outside_lhs ();
   check_matrix_rejects_missing_failure_mutation_payload ();
   check_matrix_rejects_missing_required_q1_failure_row ();
   check_matrix_rejects_failure_snapshot_mismatch ();

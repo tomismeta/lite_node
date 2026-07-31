@@ -13,7 +13,7 @@ Include at startup:
 *)
 
 let schema =
-  "octra.inference.conformance.result-signature.v3"
+  "octra.inference.conformance.result-signature.v4"
 
 let fail message =
   failwith message
@@ -216,6 +216,7 @@ let result_signature = function
       `Bool (bool_field "opcode_effort_match" fields);
       "effort_match", `Bool (bool_field "effort_match" fields);
       "strict_effort", `Bool (bool_field "strict_effort" fields);
+      "q1_contract_shape", json_field_or_null "q1_contract_shape" fields;
       "required_failure_case_contract",
       json_field_or_null "required_failure_case_contract" fields;
       "subspans", `List (List.map subspan_signature (list_field "subspans" fields));

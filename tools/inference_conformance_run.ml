@@ -2459,6 +2459,24 @@ let required_failure_case_contract_payload opcode =
   else
     `Null
 
+let q1_contract_shape_json opcode template values expected_effort =
+  if not (String.equal opcode "LINEAR_Q1_G128_FP") then
+    `Null
+  else
+    let int_or_null = function
+      | Some value -> `Int value
+      | None -> `Null
+    in
+    `Assoc [
+      "m", int_or_null (opt_int_field "m" values);
+      "k", int_or_null (opt_int_field "k" values);
+      "n", int_or_null (opt_int_field "n" values);
+      "lhs_cells", int_or_null (q1_lhs_cell_count values);
+      "q1_owner_source_bytes", int_or_null (q1_owner_source_bytes template);
+      "q1_required_owner_bytes", int_or_null (q1_required_owner_bytes values);
+      "expected_effort", `Int expected_effort;
+    ]
+
 let execute_template root_dir entry =
   let opcode = string_field "opcode" entry in
   let primitive = opt_string_field "primitive" entry in
@@ -2579,6 +2597,8 @@ let execute_template root_dir entry =
     "opcode_profile", `List (List.map opcode_profile_json opcode_profile);
     "effort_match", `Bool effort_match;
     "strict_effort", `Bool !strict_effort;
+    "q1_contract_shape",
+    q1_contract_shape_json opcode template values expected_effort;
     "subspans", `List (List.map snd span_results);
     "failure_cases_included", `Bool !include_failures;
     "required_failure_case_contract",
