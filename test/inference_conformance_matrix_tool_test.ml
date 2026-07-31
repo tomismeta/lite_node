@@ -139,12 +139,30 @@ let failure_case ?(observed = "vm_rejected") ?(observed_effort = 200) () =
 let result
     ?(observed_opcode_effort = 200)
     ?(opcode_effort_match = true)
+    ?(profile_root_status = "matched")
     ?(vm_semantics_status = "matched")
     ?(abi_declaration_status = "matched")
     ?(failure = failure_case ())
     () =
   `Assoc [
     "opcode", `String "LINEAR_Q1_G128_FP";
+    "profile_root_binding",
+    `Assoc [
+      "status", `String profile_root_status;
+      "classification",
+      `String
+        (if String.equal profile_root_status "matched" then
+           "none"
+         else
+           "profile_root_mismatch");
+      "numerical_profile_root", `String (hex_root '3');
+      "profile_root",
+      `String
+        (if String.equal profile_root_status "matched" then
+           hex_root '3'
+         else
+           hex_root '8');
+    ];
     "vm_semantics_binding",
     `Assoc [
       "status", `String vm_semantics_status;
@@ -218,6 +236,8 @@ let report
     ?(corpus = hex_root 'd')
     ?observed_opcode_effort
     ?opcode_effort_match
+    ?(profile_root_status = "matched")
+    ?(profile_gate_status = "accepted")
     ?(vm_semantics_status = "matched")
     ?(vm_semantics_gate_status = "accepted")
     ?(abi_declaration_status = "matched")
@@ -234,7 +254,7 @@ let report
     "template_corpus_root", `String corpus;
     "profile_catalog_root", `String (hex_root 'c');
     "failure_case_gate", `Assoc ["status", `String "accepted"];
-    "profile_root_binding_gate", `Assoc ["status", `String "accepted"];
+    "profile_root_binding_gate", `Assoc ["status", `String profile_gate_status];
     "vm_semantics_binding_gate", `Assoc ["status", `String vm_semantics_gate_status];
     "abi_declaration_binding_gate", `Assoc ["status", `String abi_gate_status];
     "validator_readiness_gate",
@@ -247,6 +267,7 @@ let report
       result
         ?observed_opcode_effort
         ?opcode_effort_match
+        ~profile_root_status
         ~vm_semantics_status
         ~abi_declaration_status
         ?failure
@@ -258,6 +279,13 @@ let write_report dir name json =
   let path = Filename.concat dir name in
   write_json path json;
   path
+
+let replace_assoc_field name value = function
+  | `Assoc fields ->
+    `Assoc
+      ((name, value)
+       :: List.filter (fun (key, _) -> not (String.equal key name)) fields)
+  | _ -> failwith "report must be object"
 
 let with_temp_dir f =
   let dir = Filename.temp_file "octra-matrix-test" "" in
@@ -446,6 +474,106 @@ let check_matrix_rejects_abi_declaration_binding_mismatch () =
            (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_profile_root_binding_mismatch () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~profile_root_status:"unbound"
+           ~profile_gate_status:"rejected"
+           "Linux"
+           "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "profile root mismatch matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "profile root mismatch top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      check
+        "profile root mismatch validator blocker"
+        (List.mem
+           "profile_root_binding_rejected"
+           (string_list_value "validator_readiness_blockers" fields));
+      check
+        "profile root mismatch row blocker"
+        (List.mem
+           "profile_root_binding_mismatch"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_profile_root_result_mismatch_with_gate_accepted () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~profile_root_status:"unbound"
+           "Linux"
+           "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "profile root result mismatch exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      let readiness_blockers =
+        string_list_value "validator_readiness_blockers" fields
+      in
+      check
+        "profile root result mismatch is isolated"
+        (not (List.mem "profile_root_binding_rejected" readiness_blockers));
+      check
+        "profile root result mismatch blocker"
+        (List.mem "profile_root_binding_mismatch" readiness_blockers)
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_empty_results () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Linux" "x86_64"
+         |> replace_assoc_field "results" (`List []))
+    in
+    let code, json = run_matrix [a; b] in
+    check "empty results matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "empty results top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      check
+        "empty results validator blocker"
+        (List.mem
+           "missing_results"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_vm_semantics_binding_mismatch () =
   with_temp_dir (fun dir ->
     let a =
@@ -518,6 +646,9 @@ let () =
   check_matrix_rejects_corpus_mismatch ();
   check_matrix_rejects_failure_case_mismatch ();
   check_matrix_rejects_opcode_effort_mismatch ();
+  check_matrix_rejects_profile_root_binding_mismatch ();
+  check_matrix_rejects_profile_root_result_mismatch_with_gate_accepted ();
+  check_matrix_rejects_empty_results ();
   check_matrix_rejects_abi_declaration_binding_mismatch ();
   check_matrix_rejects_vm_semantics_binding_mismatch ();
   check_matrix_rejects_same_platform ()

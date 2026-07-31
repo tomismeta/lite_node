@@ -214,6 +214,10 @@ let result_signature = function
   | `Assoc fields ->
     `Assoc [
       "opcode", `String (string_field "opcode" fields);
+      "profile_root_binding",
+      (match field "profile_root_binding" fields with
+       | Some (`Assoc _ as binding) -> binding
+       | _ -> fail "missing profile_root_binding");
       "vm_semantics_binding",
       (match field "vm_semantics_binding" fields with
        | Some (`Assoc _ as binding) -> binding
@@ -310,6 +314,7 @@ let report_summary path =
           | _ -> fail "result must be an object")
         results
     in
+    let has_results = result_fields <> [] in
     let strict_effort =
       List.for_all
         (fun fields ->
@@ -343,6 +348,17 @@ let report_summary path =
       match opt_assoc_field "profile_root_binding_gate" fields with
       | Some gate_fields -> opt_status_is_accepted "status" gate_fields
       | None -> false
+    in
+    let profile_root_bindings_matched =
+      List.for_all
+        (fun fields ->
+           match opt_assoc_field "profile_root_binding" fields with
+           | Some binding_fields ->
+             (match opt_string_field "status" binding_fields with
+              | Some "matched" -> true
+              | _ -> false)
+           | None -> false)
+        result_fields
     in
     let vm_semantics_binding_accepted =
       match opt_assoc_field "vm_semantics_binding_gate" fields with
@@ -383,6 +399,7 @@ let report_summary path =
       String.equal execution_mode "positive_template_vm_execution"
       && opt_status_is_accepted "status" fields
       && opt_status_is_accepted "execution_status" fields
+      && has_results
       && (match failure_gate with
           | Some fields -> opt_status_is_accepted "status" fields
           | None -> false)
@@ -391,6 +408,7 @@ let report_summary path =
       && effort_matched
       && opcode_effort_matched
       && profile_root_binding_accepted
+      && profile_root_bindings_matched
       && vm_semantics_binding_accepted
       && vm_semantics_bindings_matched
       && abi_declaration_binding_accepted
@@ -408,6 +426,7 @@ let report_summary path =
       |> add_if
            (not (opt_status_is_accepted "execution_status" fields))
            "execution_rejected"
+      |> add_if (not has_results) "missing_results"
       |> add_if
            (not
               (match failure_gate with
@@ -421,6 +440,9 @@ let report_summary path =
       |> add_if
            (not profile_root_binding_accepted)
            "profile_root_binding_rejected"
+      |> add_if
+           (not profile_root_bindings_matched)
+           "profile_root_binding_mismatch"
       |> add_if
            (not vm_semantics_binding_accepted)
            "vm_semantics_binding_rejected"
@@ -509,6 +531,8 @@ let report_summary path =
       json_field_or_null "profile_root_binding_status_counts" fields;
       "profile_root_binding_gate",
       json_field_or_null "profile_root_binding_gate" fields;
+      "profile_root_binding_status",
+      `String (if profile_root_bindings_matched then "matched" else "mismatch");
       "vm_semantics_binding_gate",
       json_field_or_null "vm_semantics_binding_gate" fields;
       "abi_declaration_binding_gate",
