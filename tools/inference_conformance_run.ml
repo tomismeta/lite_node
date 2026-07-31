@@ -1174,6 +1174,14 @@ let replace_raw_prefix state reg replacement =
     state.VM.regs.(reg) <- VM.VString (Bytes.to_string bytes)
   | _ -> fail "mutation target is not raw bytes"
 
+let truncate_raw_suffix state reg truncate_bytes =
+  if truncate_bytes < 0 then fail "truncate_bytes must be nonnegative";
+  match state.VM.regs.(reg) with
+  | VM.VString raw ->
+    let keep = max 0 (String.length raw - truncate_bytes) in
+    state.VM.regs.(reg) <- VM.VString (String.sub raw 0 keep)
+  | _ -> fail "mutation target is not raw bytes"
+
 let float_bits value =
   Z.of_int64 (Int64.bits_of_float value)
 
@@ -1274,7 +1282,13 @@ let apply_mutation state registers values inputs mutation =
           replace_raw_prefix state reg (bytes_of_hex (string_field "value_hex_le" fields));
           `Executed
         | None -> fail "q1_owner must be raw bytes")
-     | "truncate_input_manifest" -> `Ingress_rejected
+     | "truncate_input_manifest" ->
+       let input = find_input target inputs in
+       (match input.raw_register with
+        | Some reg ->
+          truncate_raw_suffix state reg (int_field "truncate_bytes" fields);
+          `Executed
+        | None -> fail "truncate_input_manifest target must be raw bytes")
      | "lower_effort_limit" ->
        `Executed
      | _ -> fail ("unsupported mutation: " ^ name))

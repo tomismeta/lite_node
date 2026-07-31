@@ -572,6 +572,14 @@ let check_good_template_reports_bound_abi () =
       (String.equal
          (string_value "snapshot_output_status" partial_alias)
          "matched");
+    let bad_q1_owner =
+      failure_case_fields result "bad_q1_owner_length"
+    in
+    check
+      "bad q1 owner length reaches VM"
+      (String.equal
+         (string_value "observed" bad_q1_owner)
+         "vm_rejected");
     (match report with
      | `Assoc fields ->
        check_q1_contract_visible (assoc_json "failure_case_gate" fields)
