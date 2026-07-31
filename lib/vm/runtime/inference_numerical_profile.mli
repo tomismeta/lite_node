@@ -83,3 +83,4 @@ val root_binding_classification_counts_json :
 val status_counts_json : status_counts -> Yojson.Safe.t
 val profile_root_catalog_json : Yojson.Safe.t list -> Yojson.Safe.t
 val consensus_blocker_catalog_json : Yojson.Safe.t list -> Yojson.Safe.t
+val consensus_blocker_class_counts_json : Yojson.Safe.t list -> Yojson.Safe.t

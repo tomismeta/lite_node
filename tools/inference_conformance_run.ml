@@ -1328,6 +1328,8 @@ let run_p0_plus_pack path =
     Profile.profile_root_catalog_json profile_gates;
     "consensus_blocker_catalog",
     Profile.consensus_blocker_catalog_json profile_gates;
+    "consensus_blocker_class_counts",
+    Profile.consensus_blocker_class_counts_json profile_gates;
     "profile_root_binding_status_counts",
     Profile.root_binding_counts_json root_binding_counts;
     "profile_root_binding_classification_counts",
@@ -1408,6 +1410,8 @@ let run_index path =
     Profile.profile_root_catalog_json profile_gates;
     "consensus_blocker_catalog",
     Profile.consensus_blocker_catalog_json profile_gates;
+    "consensus_blocker_class_counts",
+    Profile.consensus_blocker_class_counts_json profile_gates;
     "profile_root_binding_status_counts",
     Profile.root_binding_counts_json root_binding_counts;
     "profile_root_binding_classification_counts",

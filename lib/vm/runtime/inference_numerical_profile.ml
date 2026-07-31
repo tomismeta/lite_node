@@ -339,6 +339,15 @@ let add_blocker_pair groups (blocker, opcode) =
   in
   loop [] groups
 
+let consensus_blocker_groups values =
+  values
+  |> List.fold_left
+       (fun pairs value -> consensus_blocker_pairs value @ pairs)
+       []
+  |> List.sort_uniq compare
+  |> List.fold_left add_blocker_pair []
+  |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+
 let blocker_class = function
   | "host_fp_exp"
   | "host_fp_arithmetic"
@@ -403,13 +412,50 @@ let blocker_entry_json (blocker, opcodes) =
 
 let consensus_blocker_catalog_json values =
   values
-  |> List.fold_left
-       (fun pairs value -> consensus_blocker_pairs value @ pairs)
-       []
-  |> List.sort_uniq compare
-  |> List.fold_left add_blocker_pair []
-  |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+  |> consensus_blocker_groups
   |> List.map blocker_entry_json
+  |> fun entries -> `List entries
+
+let add_blocker_class groups (blocker, opcodes) =
+  let class_name = blocker_class blocker in
+  let rec loop acc = function
+    | [] -> List.rev ((class_name, [blocker], opcodes) :: acc)
+    | (candidate, blockers, class_opcodes) :: rest
+      when String.equal candidate class_name ->
+      let blockers =
+        if List.exists (String.equal blocker) blockers then blockers
+        else blocker :: blockers
+      in
+      let class_opcodes =
+        List.fold_left
+          (fun acc opcode ->
+             if List.exists (String.equal opcode) acc then acc
+             else opcode :: acc)
+          class_opcodes
+          opcodes
+      in
+      List.rev_append acc ((candidate, blockers, class_opcodes) :: rest)
+    | entry :: rest -> loop (entry :: acc) rest
+  in
+  loop [] groups
+
+let blocker_class_count_json (class_name, blockers, opcodes) =
+  let blockers = List.sort_uniq String.compare blockers in
+  let opcodes = List.sort_uniq String.compare opcodes in
+  `Assoc [
+    "blocker_class", `String class_name;
+    "blocker_count", `Int (List.length blockers);
+    "opcode_count", `Int (List.length opcodes);
+    "blocker_codes", `List (List.map (fun value -> `String value) blockers);
+    "opcodes", `List (List.map (fun value -> `String value) opcodes);
+  ]
+
+let consensus_blocker_class_counts_json values =
+  values
+  |> consensus_blocker_groups
+  |> List.fold_left add_blocker_class []
+  |> List.sort (fun (left, _, _) (right, _, _) -> String.compare left right)
+  |> List.map blocker_class_count_json
   |> fun entries -> `List entries
 
 let error_message = function

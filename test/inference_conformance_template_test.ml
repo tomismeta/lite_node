@@ -722,6 +722,50 @@ let check_inference_profile_surface_coverage () =
        "atomic_writeback"
        "safety_policy"
    | _ -> failwith "surface consensus blocker catalog must be list")
+  ;
+  (match Profile.consensus_blocker_class_counts_json gates with
+   | `List counts ->
+     let class_entry name =
+       List.find_opt
+         (function
+           | `Assoc fields ->
+             String.equal (string_value "blocker_class" fields) name
+           | _ -> false)
+         counts
+     in
+     let check_class name blocker opcode =
+       match class_entry name with
+       | Some (`Assoc fields) ->
+         check
+           (name ^ " blocker count is positive")
+           (int_value "blocker_count" fields > 0);
+         check
+           (name ^ " opcode count is positive")
+           (int_value "opcode_count" fields > 0);
+         check
+           (name ^ " includes blocker")
+           (List.mem blocker (string_list_field "blocker_codes" fields));
+         check
+           (name ^ " includes opcode")
+           (List.mem opcode (string_list_field "opcodes" fields))
+       | _ -> failwith ("missing blocker class entry: " ^ name)
+     in
+     check_class
+       "software_fp64_conformance"
+       "fp64_sqrt_conformance"
+       "RMSNORM_FP_EPS";
+     check_class
+       "host_native_math"
+       "host_fp_exp"
+       "SOFTMAX_FP";
+     check_class
+       "safety_policy"
+       "atomic_writeback"
+       "LINEAR_Q1_G128_FP";
+     check
+       "class count entries are objects"
+       (List.for_all (function `Assoc _ -> true | _ -> false) counts)
+   | _ -> failwith "surface consensus blocker class counts must be list")
 
 let check_remaining_p0_profile_obligations () =
   List.iter

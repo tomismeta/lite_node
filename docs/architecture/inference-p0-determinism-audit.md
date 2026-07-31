@@ -315,6 +315,9 @@ encoding/layout, execution order, safety policy, storage binding, and external
 qualification work without changing the stable blocker codes.
 The surface test rejects `unknown` blocker classes so newly introduced blocker
 codes must be intentionally classified before the report shape is extended.
+Reports also expose `consensus_blocker_class_counts`, a class-level summary
+derived from the same catalog for planning and review. The detailed
+`blocker_code` entries remain the stable automation keys.
 
 `local_semantics` records what the current VM does today.
 `consensus_obligations` records what must become protocol-owned before the
