@@ -120,5 +120,11 @@
  (libraries octra_vm))
 
 (test
+ (name inference_conformance_matrix_tool_test)
+ (modules inference_conformance_matrix_tool_test)
+ (libraries yojson unix)
+ (deps ../tools/inference_conformance_matrix.exe))
+
+(test
  (name runtime_ontology_test)
  (modules runtime_ontology_test))
