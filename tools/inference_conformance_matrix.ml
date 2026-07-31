@@ -295,6 +295,15 @@ let failure_case_signature = function
       "status", `String (string_field "status" fields);
       "counted", `Bool (bool_field "counted" fields);
       "observed", `String (string_field "observed" fields);
+      "ingress_rejection_authority",
+      `String (string_field "ingress_rejection_authority" fields);
+      "mutation_shape_status",
+      `String (string_field "mutation_shape_status" fields);
+      "mutation_shape_blockers",
+      `List
+        (List.map
+           (fun blocker -> `String blocker)
+           (string_list_field "mutation_shape_blockers" fields));
       "observed_effort", `Int (int_field "observed_effort" fields);
       "unchanged_status", `String (string_field "unchanged_status" fields);
       "changed_status", `String (string_field "changed_status" fields);
@@ -430,6 +439,26 @@ let required_failure_case_contract_accepted fields =
        (not (opcode_requires_failure_case_contract opcode)) && blockers_empty
      | _ -> false)
   | None -> false
+
+let q1_failure_mutation_shapes_accepted fields =
+  let opcode = string_field "opcode" fields in
+  if not (String.equal opcode "LINEAR_Q1_G128_FP") then
+    true
+  else
+    match field "failure_cases" fields with
+    | Some (`List cases) ->
+      cases <> []
+      &&
+      List.for_all
+        (function
+          | `Assoc case_fields ->
+            (match opt_string_field "mutation_shape_status" case_fields,
+                   field "mutation_shape_blockers" case_fields with
+             | Some "accepted", Some (`List []) -> true
+             | _ -> false)
+          | _ -> false)
+        cases
+    | _ -> false
 
 let optional_string_list_field name fields =
   match field name fields with
@@ -583,6 +612,9 @@ let report_summary path =
     let required_failure_case_contracts_accepted =
       List.for_all required_failure_case_contract_accepted result_fields
     in
+    let q1_failure_mutation_shapes_accepted =
+      List.for_all q1_failure_mutation_shapes_accepted result_fields
+    in
     let runner_executable_sha256 =
       opt_string_from_assoc "runner_executable_sha256" platform
     in
@@ -595,6 +627,7 @@ let report_summary path =
           | Some fields -> opt_status_is_accepted "status" fields
           | None -> false)
       && required_failure_case_contracts_accepted
+      && q1_failure_mutation_shapes_accepted
       && strict_effort
       && output_matched
       && effort_matched
@@ -629,6 +662,9 @@ let report_summary path =
       |> add_if
            (not required_failure_case_contracts_accepted)
            "required_failure_case_contract_rejected"
+      |> add_if
+           (not q1_failure_mutation_shapes_accepted)
+           "q1_failure_case_mutation_shape_rejected"
       |> add_if (not strict_effort) "strict_effort_not_enabled"
       |> add_if (not output_matched) "output_mismatch"
       |> add_if (not effort_matched) "effort_mismatch"

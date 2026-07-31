@@ -110,6 +110,9 @@ let failure_case
     ?(case = "nonfinite_input_nan")
     ?(expected = "reject_before_write")
     ?(observed = "vm_rejected")
+    ?(ingress_rejection_authority = "not_applicable")
+    ?(mutation_shape_status = "accepted")
+    ?(mutation_shape_blockers = [])
     ?(observed_effort = 200)
     ?(finite_spans = `List [])
     ?(active_finite_spans = `List [])
@@ -140,6 +143,10 @@ let failure_case
     "status", `String "accepted";
     "counted", `Bool true;
     "observed", `String observed;
+    "ingress_rejection_authority", `String ingress_rejection_authority;
+    "mutation_shape_status", `String mutation_shape_status;
+    "mutation_shape_blockers",
+    `List (List.map (fun blocker -> `String blocker) mutation_shape_blockers);
     "observed_effort", `Int observed_effort;
     "unchanged_status", `String "matched";
     "changed_status", `String "not_changed";
@@ -1118,6 +1125,44 @@ let check_matrix_rejects_q1_failure_contract_accepted_with_blockers () =
            (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_q1_failure_mutation_shape_rejected () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~failure:
+             (failure_case
+                ~case:"negative_byte_offset"
+                ~mutation_shape_status:"rejected"
+                ~mutation_shape_blockers:
+                  ["q1_failure_case_mutation_mismatch_negative_byte_offset"]
+                ())
+           "Linux"
+           "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "rejected Q1 mutation shape exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "rejected Q1 mutation shape top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      check
+        "rejected Q1 mutation shape validator blocker"
+        (List.mem
+           "q1_failure_case_mutation_shape_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_q1_failure_contract_not_applicable () =
   with_temp_dir (fun dir ->
     let a =
@@ -1292,6 +1337,7 @@ let () =
   check_matrix_rejects_q1_failure_contract_missing_payload ();
   check_matrix_rejects_q1_failure_contract_weakened_payload ();
   check_matrix_rejects_q1_failure_contract_accepted_with_blockers ();
+  check_matrix_rejects_q1_failure_mutation_shape_rejected ();
   check_matrix_rejects_q1_failure_contract_not_applicable ();
   check_matrix_accepts_non_q1_failure_contract_not_applicable ();
   check_matrix_rejects_empty_results ();
