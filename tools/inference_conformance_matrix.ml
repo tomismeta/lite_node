@@ -218,6 +218,10 @@ let result_signature = function
       (match field "vm_semantics_binding" fields with
        | Some (`Assoc _ as binding) -> binding
        | _ -> fail "missing vm_semantics_binding");
+      "abi_binding",
+      (match field "abi_binding" fields with
+       | Some (`Assoc _ as binding) -> binding
+       | _ -> fail "missing abi_binding");
       "status", `String (string_field "status" fields);
       "vm_run", `String (string_field "vm_run" fields);
       "output_status", `String (string_field "output_status" fields);
@@ -345,6 +349,22 @@ let report_summary path =
       | Some gate_fields -> opt_status_is_accepted "status" gate_fields
       | None -> false
     in
+    let abi_binding_accepted =
+      match opt_assoc_field "abi_binding_gate" fields with
+      | Some gate_fields -> opt_status_is_accepted "status" gate_fields
+      | None -> false
+    in
+    let abi_bindings_matched =
+      List.for_all
+        (fun fields ->
+           match opt_assoc_field "abi_binding" fields with
+           | Some binding_fields ->
+             (match opt_string_field "status" binding_fields with
+              | Some "matched" -> true
+              | _ -> false)
+           | None -> false)
+        result_fields
+    in
     let runner_executable_sha256 =
       opt_string_from_assoc "runner_executable_sha256" platform
     in
@@ -361,6 +381,8 @@ let report_summary path =
       && opcode_effort_matched
       && profile_root_binding_accepted
       && vm_semantics_binding_accepted
+      && abi_binding_accepted
+      && abi_bindings_matched
       && Option.is_some template_corpus_root
       && Option.is_some runner_executable_sha256
     in
@@ -390,6 +412,10 @@ let report_summary path =
       |> add_if
            (not vm_semantics_binding_accepted)
            "vm_semantics_binding_rejected"
+      |> add_if
+           (not abi_binding_accepted)
+           "abi_binding_rejected"
+      |> add_if (not abi_bindings_matched) "abi_binding_mismatch"
       |> add_if
            (Option.is_none template_corpus_root)
            "missing_template_corpus_root"
@@ -470,6 +496,8 @@ let report_summary path =
       json_field_or_null "profile_root_binding_gate" fields;
       "vm_semantics_binding_gate",
       json_field_or_null "vm_semantics_binding_gate" fields;
+      "abi_binding_gate",
+      json_field_or_null "abi_binding_gate" fields;
       "validator_readiness_status", `String validator_readiness_status;
       "validator_readiness_blockers",
       `List
@@ -483,6 +511,8 @@ let report_summary path =
       "effort_status", `String (if effort_matched then "matched" else "mismatch");
       "opcode_effort_status",
       `String (if opcode_effort_matched then "matched" else "mismatch");
+      "abi_binding_status",
+      `String (if abi_bindings_matched then "matched" else "mismatch");
       "blockers", `List (List.map (fun blocker -> `String blocker) blockers);
     ];
     }
