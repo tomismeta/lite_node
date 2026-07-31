@@ -267,6 +267,39 @@ let profile_root_binding_classification_counts values =
   |> List.filter_map profile_root_binding_value
   |> Profile.root_binding_classification_counts_of_json
 
+let vm_semantics_binding_value = function
+  | `Assoc fields ->
+    (match List.assoc_opt "vm_semantics_binding" fields with
+     | Some (`Assoc _ as binding) -> Some binding
+     | _ -> Some Profile.unavailable_root_binding_json)
+  | _ -> None
+
+let vm_semantics_binding_status_counts values =
+  values
+  |> List.filter_map vm_semantics_binding_value
+  |> Profile.root_binding_counts_of_json
+
+let vm_semantics_root_blockers counts =
+  let add_if condition value values =
+    if condition then value :: values else values
+  in
+  let total = counts.Profile.matched + counts.unbound + counts.unavailable in
+  []
+  |> add_if (total = 0) "no_vm_semantics_roots"
+  |> add_if (counts.unavailable > 0) "unavailable_vm_semantics_roots"
+  |> add_if (counts.unbound > 0) "unbound_vm_semantics_roots"
+
+let vm_semantics_binding_gate_json counts =
+  let ready = Profile.root_bindings_are_consensus_ready counts in
+  `Assoc [
+    "status", `String (if ready then "accepted" else "rejected");
+    "blockers",
+    `List
+      (List.map
+         (fun blocker -> `String blocker)
+         (vm_semantics_root_blockers counts));
+  ]
+
 let consensus_candidate_gate
     ~profile_gate_count
     ~unprofiled_count
@@ -377,6 +410,7 @@ let static_validator_readiness_gate
     ~profile_gate_count
     ~unprofiled_count
     ~root_binding_counts
+    ~vm_semantics_binding_counts
     status_counts =
   let schema_accepted = String.equal schema_status "accepted" in
   let profile_ready =
@@ -388,6 +422,9 @@ let static_validator_readiness_gate
   let roots_ready =
     Profile.root_bindings_are_consensus_ready root_binding_counts
   in
+  let vm_semantics_ready =
+    Profile.root_bindings_are_consensus_ready vm_semantics_binding_counts
+  in
   let cross_platform_ready = false in
   let ready =
     Profile.validator_readiness_accepted
@@ -397,6 +434,7 @@ let static_validator_readiness_gate
       ~profile_ready
       ~roots_ready
       ~cross_platform_ready
+    && vm_semantics_ready
   in
   let blockers =
     []
@@ -404,6 +442,9 @@ let static_validator_readiness_gate
     |> add_blocker true "execution_not_run"
     |> add_blocker true "punitive_failure_cases_not_run"
     |> add_blocker true "effort_not_run"
+    |> add_blocker
+         (not vm_semantics_ready)
+         "vm_semantics_root_binding_not_proven"
     |> add_blocker
          (not cross_platform_ready)
          "cross_platform_conformance_missing"
@@ -415,6 +456,7 @@ let static_validator_readiness_gate
         ~unprofiled_count
         status_counts
     @ Profile.root_binding_blockers root_binding_counts
+    @ vm_semantics_root_blockers vm_semantics_binding_counts
   in
   `Assoc [
     "diagnostic_only", `Bool true;
@@ -429,6 +471,10 @@ let static_validator_readiness_gate
     `String (if profile_ready then "accepted" else "rejected");
     "profile_root_status",
     `String (if roots_ready then "accepted" else "rejected");
+    "vm_semantics_root_status",
+    `String (if vm_semantics_ready then "accepted" else "rejected");
+    "vm_semantics_binding_gate",
+    vm_semantics_binding_gate_json vm_semantics_binding_counts;
     "cross_platform_status",
     `String (if cross_platform_ready then "accepted" else "rejected");
     "blockers",
@@ -766,12 +812,19 @@ let profile_gate_entry path opcode fields =
         Profile.root_binding_json ~numerical_profile_root profile_gate
       | None -> `Null
     in
+    let vm_semantics_binding =
+      match string_field "vm_semantics_root" fields with
+      | Some vm_semantics_root ->
+        Template.vm_semantics_binding_json ~opcode ~vm_semantics_root
+      | None -> `Null
+    in
     Some
       (`Assoc [
         "path", `String path;
         "opcode", `String opcode;
         "profile_gate", profile_gate;
         "profile_root_binding", profile_root_binding;
+        "vm_semantics_binding", vm_semantics_binding;
       ])
   | Error _ -> None
 
@@ -905,6 +958,9 @@ let producer_index_report index_path =
     let profile_root_binding_counts =
       profile_root_binding_status_counts profile_gates
     in
+    let vm_semantics_binding_counts =
+      vm_semantics_binding_status_counts profile_gates
+    in
     let profile_root_binding_classification_counts =
       profile_root_binding_classification_counts profile_gates
     in
@@ -937,6 +993,7 @@ let producer_index_report index_path =
         ~profile_gate_count
         ~unprofiled_count:unprofiled_template_count
         ~root_binding_counts:profile_root_binding_counts
+        ~vm_semantics_binding_counts
         profile_status_counts
     in
     let status =
@@ -998,6 +1055,10 @@ let producer_index_report index_path =
       Profile.root_binding_gate_json
         ~required:!require_profile_roots_bound
         profile_root_binding_counts;
+      "vm_semantics_binding_status_counts",
+      Profile.root_binding_counts_json vm_semantics_binding_counts;
+      "vm_semantics_binding_gate",
+      vm_semantics_binding_gate_json vm_semantics_binding_counts;
       "validator_readiness_gate", validator_readiness_gate_json;
       "consensus_candidate_gate",
       consensus_candidate_gate
@@ -1076,6 +1137,9 @@ let () =
           let profile_root_binding_counts =
             profile_root_binding_status_counts [template_json]
           in
+          let vm_semantics_binding_counts =
+            vm_semantics_binding_status_counts [template_json]
+          in
           let profile_root_binding_classification_counts =
             profile_root_binding_classification_counts [template_json]
           in
@@ -1090,6 +1154,7 @@ let () =
               ~profile_gate_count
               ~unprofiled_count:(1 - profile_gate_count)
               ~root_binding_counts:profile_root_binding_counts
+              ~vm_semantics_binding_counts
               profile_status_counts
           in
           let status =
@@ -1147,6 +1212,10 @@ let () =
               Profile.root_binding_gate_json
                 ~required:!require_profile_roots_bound
                 profile_root_binding_counts;
+              "vm_semantics_binding_status_counts",
+              Profile.root_binding_counts_json vm_semantics_binding_counts;
+              "vm_semantics_binding_gate",
+              vm_semantics_binding_gate_json vm_semantics_binding_counts;
               "validator_readiness_gate", validator_readiness_gate_json;
               "consensus_candidate_gate",
               consensus_candidate_gate
@@ -1184,6 +1253,9 @@ let () =
     let root_binding_counts =
       profile_root_binding_status_counts template_jsons
     in
+    let vm_semantics_binding_counts =
+      vm_semantics_binding_status_counts template_jsons
+    in
     let root_binding_classification_counts =
       profile_root_binding_classification_counts template_jsons
     in
@@ -1199,6 +1271,7 @@ let () =
         ~profile_gate_count
         ~unprofiled_count
         ~root_binding_counts
+        ~vm_semantics_binding_counts
         status_counts
     in
     let status =
@@ -1255,6 +1328,10 @@ let () =
         Profile.root_binding_gate_json
           ~required:!require_profile_roots_bound
           root_binding_counts;
+        "vm_semantics_binding_status_counts",
+        Profile.root_binding_counts_json vm_semantics_binding_counts;
+        "vm_semantics_binding_gate",
+        vm_semantics_binding_gate_json vm_semantics_binding_counts;
         "validator_readiness_gate", validator_readiness_gate_json;
         "consensus_candidate_gate",
         consensus_candidate_gate

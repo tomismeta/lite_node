@@ -162,18 +162,23 @@ execution_status: accepted
 strict_effort: accepted, 201 == 201
 failure_case_gate: accepted, 7/7 counted cases accepted
 profile_root_binding_gate: rejected
+vm_semantics_binding_gate: rejected
 template numerical_profile_root: 66be1b09b91d4e339ffaa16bda41bc87b18141b3506bbfe698448e2e401eb245
-current LiteNode profile_root: d6ff86c8d50f24ba3313a73b03e4348cc8ba8c76e8759ada6cdb3b81c731b835
+current LiteNode profile_root: e56a53248e58276b480ece29a69b2cfa8609eaea90b9f462d8f5a1de6d7abe50
+template vm_semantics_root: d49cc837c452322bd6193645a02b89adef33eccad66cdab73a891140cabba950
+current LiteNode vm_semantics_root: f35756d96e853e3c4f74b05f25cba9a8982fe64ef37ad2bb46b88bc7152b63a7
 validator_readiness_gate: rejected
-blockers: unbound_profile_roots, consensus_candidate_profile_gates,
-  cross_platform_conformance_missing
+blockers: unbound_profile_roots, unbound_vm_semantics_roots,
+  consensus_candidate_profile_gates, cross_platform_conformance_missing
 ```
 
 That means the immediate producer action is narrow: re-emit the P0 template
-index with the current `deterministic-q1-g128-fp64-linear` profile root. Once
-the focused runner reports `profile_root_binding_gate: accepted`, the same
-template corpus should be run on at least two independent platforms and consumed
-through `inference_conformance_matrix.exe`.
+index with the current `deterministic-q1-g128-fp64-linear` profile root, which
+now includes the rooted Q1 effort formula, and the current
+`LINEAR_Q1_G128_FP` VM semantics root. Once the focused runner reports
+`profile_root_binding_gate: accepted` and `vm_semantics_binding_gate: accepted`,
+the same template corpus should be run on at least two independent platforms
+and consumed through `inference_conformance_matrix.exe`.
 
 When a real accepted matrix report is supplied with `--cross-platform-matrix`,
 the runner consumes it as the cross-platform evidence slot for the selected
@@ -181,12 +186,15 @@ opcode scope. Matrix reports must expose `result_opcodes`; a matrix whose
 compared runner reports do not cover every required opcode is rejected as
 `matrix_opcode_scope_mismatch`. Matrix consumption also requires a pinned
 matrix SHA-256, a matching `profile_catalog_root`, a matching
-`template_corpus_root`, empty matrix blockers, and bound source reports. For a
+`template_corpus_root`, empty matrix blockers, and bound source reports. The
+matrix signature includes positive output spans, exact effort, VM-semantics
+binding, and counted failure/atomicity outcomes, so cross-platform agreement is
+not limited to the happy path. For a
 focused Q1 runner report with positive execution, counted failure cases, strict
-effort, and bound profile roots, an accepted and pinned matrix removes
-`cross_platform_conformance_missing`; the remaining readiness blocker should
-then be `consensus_candidate_profile_gates` until the profile itself is
-explicitly promoted.
+effort, bound profile roots, and bound VM-semantics roots, an accepted and
+pinned matrix removes `cross_platform_conformance_missing`; the remaining
+readiness blocker should then be `consensus_candidate_profile_gates` until the
+profile itself is explicitly promoted.
 
 The first accepted producer indexes are:
 

@@ -106,9 +106,46 @@ let platform ?runner_sha system machine =
   in
   `Assoc fields
 
-let result =
+let failure_case ?(observed = "vm_rejected") ?(observed_effort = 200) () =
   `Assoc [
     "opcode", `String "LINEAR_Q1_G128_FP";
+    "case", `String "nonfinite_input_nan";
+    "expected", `String "reject_before_write";
+    "status", `String "accepted";
+    "counted", `Bool true;
+    "observed", `String observed;
+    "observed_effort", `Int observed_effort;
+    "unchanged_status", `String "matched";
+    "changed_status", `String "not_changed";
+    "finite_status", `String "finite";
+    "active_changed_status", `String "not_changed";
+    "active_finite_status", `String "finite";
+    "unchanged_spans",
+    `List [
+      `Assoc [
+        "name", `String "output";
+        "base_address", `Int 10000;
+        "length_f64_cells", `Int 6;
+        "before_sha256", `String (hex_root 'a');
+        "after_sha256", `String (hex_root 'a');
+        "unchanged", `Bool true;
+      ];
+    ];
+    "finite_spans", `List [];
+    "active_changed_spans", `List [];
+    "active_finite_spans", `List [];
+  ]
+
+let result ?(failure = failure_case ()) () =
+  `Assoc [
+    "opcode", `String "LINEAR_Q1_G128_FP";
+    "vm_semantics_binding",
+    `Assoc [
+      "status", `String "matched";
+      "classification", `String "none";
+      "vm_semantics_root", `String (hex_root '5');
+      "litenode_vm_semantics_root", `String (hex_root '5');
+    ];
     "status", `String "accepted";
     "vm_run", `String "accepted";
     "output_status", `String "matched";
@@ -127,9 +164,10 @@ let result =
         "matched", `Bool true;
       ];
     ];
+    "failure_cases", `List [failure];
   ]
 
-let report ?runner_sha ?(corpus = hex_root 'd') system machine =
+let report ?runner_sha ?(corpus = hex_root 'd') ?failure system machine =
   `Assoc [
     "status", `String "accepted";
     "execution_status", `String "accepted";
@@ -140,12 +178,13 @@ let report ?runner_sha ?(corpus = hex_root 'd') system machine =
     "profile_catalog_root", `String (hex_root 'c');
     "failure_case_gate", `Assoc ["status", `String "accepted"];
     "profile_root_binding_gate", `Assoc ["status", `String "accepted"];
+    "vm_semantics_binding_gate", `Assoc ["status", `String "accepted"];
     "validator_readiness_gate",
     `Assoc [
       "status", `String "rejected";
       "blockers", `List [`String "cross_platform_conformance_missing"];
     ];
-    "results", `List [result];
+    "results", `List [result ?failure ()];
   ]
 
 let write_report dir name json =
@@ -247,6 +286,33 @@ let check_matrix_rejects_corpus_mismatch () =
         (List.mem "template_corpus_mismatch" (blockers fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_failure_case_mismatch () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~failure:(failure_case ~observed:"vm_accepted" ~observed_effort:201 ())
+           "Linux"
+           "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "failure mismatch matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "failure mismatch blocker"
+        (List.mem "result_mismatch_across_platforms" (blockers fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_same_platform () =
   with_temp_dir (fun dir ->
     let a =
@@ -274,4 +340,5 @@ let () =
   check_matrix_accepts_bound_reports ();
   check_matrix_rejects_missing_runner_hash ();
   check_matrix_rejects_corpus_mismatch ();
+  check_matrix_rejects_failure_case_mismatch ();
   check_matrix_rejects_same_platform ()

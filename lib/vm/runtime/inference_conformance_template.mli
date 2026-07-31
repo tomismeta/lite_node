@@ -73,3 +73,6 @@ val of_json : Yojson.Safe.t -> (t, error) result
 val to_json : t -> Yojson.Safe.t
 val error_message : error -> string
 val p0_opcodes : string list
+val vm_semantics_root_for_opcode : opcode:string -> string option
+val vm_semantics_binding_json :
+  opcode:string -> vm_semantics_root:string -> Yojson.Safe.t

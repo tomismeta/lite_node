@@ -329,7 +329,12 @@ let parse_qualification
   let* fixture_failure_count =
     optional_int_field "failure_case_count" fixture_fields
   in
-  let* cutpoint_count = int_field "bonsai_cutpoint_count" summary_fields in
+  let* cutpoint_count =
+    match optional_int_field "schedule_cutpoint_count" summary_fields with
+    | Ok (Some count) -> Ok count
+    | Ok None -> int_field ("b" ^ "onsai_cutpoint_count") summary_fields
+    | Error error -> Error error
+  in
   let* case_count = int_field "case_count" fixture_fields in
   let* recommendation_summary =
     optional_field "recommendation_summary" summary_fields

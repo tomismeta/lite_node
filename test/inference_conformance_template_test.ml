@@ -293,8 +293,58 @@ let check_q1_profile_obligations () =
             "q1 contract snapshots inputs"
             (list_contains_substring
                "snapshot_lhs_and_q1"
-               (string_list_value "operation_sequence" contract))
+               (string_list_value "operation_sequence" contract));
+          let effort_policy =
+            match List.assoc_opt "effort_policy" contract with
+            | Some (`Assoc effort_policy) -> effort_policy
+            | _ -> failwith "missing q1 effort policy"
+          in
+          check
+            "q1 effort static cost"
+            (int_value "static_cost" effort_policy = 200);
+          check
+            "q1 effort dynamic formula"
+            (String.equal
+               (string_value "dynamic_cost" effort_policy)
+               "floor(m * n * k / 512)");
+          check
+            "q1 effort total formula"
+            (String.equal
+               (string_value "total_cost" effort_policy)
+               "200 + floor(m * n * k / 512)")
         | _ -> failwith "missing q1 profile gate");
+       check
+         "q1 vm semantics root"
+         (match
+            Template.vm_semantics_root_for_opcode
+              ~opcode:"LINEAR_Q1_G128_FP"
+          with
+          | Some root ->
+            String.equal
+              root
+              "f35756d96e853e3c4f74b05f25cba9a8982fe64ef37ad2bb46b88bc7152b63a7"
+          | None -> false);
+       (match
+          Template.vm_semantics_binding_json
+            ~opcode:"LINEAR_Q1_G128_FP"
+            ~vm_semantics_root:
+              "f35756d96e853e3c4f74b05f25cba9a8982fe64ef37ad2bb46b88bc7152b63a7"
+        with
+        | `Assoc binding ->
+          check
+            "q1 vm semantics binding accepted"
+            (String.equal (string_value "status" binding) "matched")
+        | _ -> failwith "q1 vm semantics binding must be object");
+       (match
+          Template.vm_semantics_binding_json
+            ~opcode:"LINEAR_Q1_G128_FP"
+            ~vm_semantics_root:(hex_root 'a')
+        with
+        | `Assoc binding ->
+          check
+            "q1 vm semantics binding rejected"
+            (String.equal (string_value "status" binding) "unbound")
+        | _ -> failwith "q1 stale vm semantics binding must be object");
        (match
           Profile.validate_for_opcode
             ~opcode:"LINEAR_Q1_G128_FP"
@@ -815,7 +865,7 @@ let check_inference_profile_surface_coverage () =
       "d9c2a61f7e058320bef47cd240c6193b2c3b00426ce50ee61556b41779da0c45";
       "LINEAR_Q1_G128_FP", "deterministic-q1-g128-fp64-linear",
       "consensus_candidate",
-      "d6ff86c8d50f24ba3313a73b03e4348cc8ba8c76e8759ada6cdb3b81c731b835";
+      "e56a53248e58276b480ece29a69b2cfa8609eaea90b9f462d8f5a1de6d7abe50";
       "SIGMOID_FP", "host-fp-exp-local-candidate", "local_only",
       "7fdfb04d5c91a7f2b5e80e88c753eb4c16a5d302d52d25374bdccc8cada5bd24";
       "SOFTPLUS_FP", "host-fp-exp-local-candidate", "local_only",
@@ -877,7 +927,7 @@ let check_inference_profile_surface_coverage () =
        "p0 profile catalog root"
        (String.equal
           (string_value "profile_catalog_root" fields)
-          "3577fa7a42bbc1e9f2389b2f4f91b1f3c4f8a2f056fd2fba3a43826fe72e4032");
+          "30256c5b7e47a4158d1b697c181c1a883780d87fb64163736361c7fcdc2b253c");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "p0 readiness worklist count" (List.length rows = 5);
@@ -937,7 +987,7 @@ let check_inference_profile_surface_coverage () =
        "runtime profile catalog root"
        (String.equal
           (string_value "profile_catalog_root" fields)
-          "d9ba136d7472c4ce36bf8b69e0d664c0b318251c1f79257f242f2e66e9241c3f");
+          "918ef22b6c94b9c81bf3b7153e5705fa609766e4ad29ced6ea226ea1167bcdba");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "runtime readiness worklist count" (List.length rows = 17)
@@ -1014,8 +1064,8 @@ let check_inference_profile_surface_coverage () =
     (match Profile.profile_catalog_root_json gates with
      | `String root ->
        String.equal
-       root
-         "d9ba136d7472c4ce36bf8b69e0d664c0b318251c1f79257f242f2e66e9241c3f"
+         root
+         "918ef22b6c94b9c81bf3b7153e5705fa609766e4ad29ced6ea226ea1167bcdba"
      | _ -> false);
   check
     "empty profile catalog root"

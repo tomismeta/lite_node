@@ -30,7 +30,7 @@ let qualification_summary =
     "status", `String "emitted";
     "fixture_count", `Int 5;
     "failure_case_count", `Int 2;
-    "bonsai_cutpoint_count", `Int 32;
+    "schedule_cutpoint_count", `Int 32;
     "recommendation_summary",
     `Assoc [
       "selected_token_changes_under_q16_16_candidate", `Int 0;

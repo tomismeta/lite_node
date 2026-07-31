@@ -318,6 +318,39 @@ let profile_root_binding_classification_counts values =
   |> List.filter_map profile_root_binding_value
   |> Profile.root_binding_classification_counts_of_json
 
+let vm_semantics_binding_value = function
+  | `Assoc fields ->
+    (match field "vm_semantics_binding" fields with
+     | Some (`Assoc _ as binding) -> Some binding
+     | _ -> Some Profile.unavailable_root_binding_json)
+  | _ -> None
+
+let vm_semantics_binding_status_counts values =
+  values
+  |> List.filter_map vm_semantics_binding_value
+  |> Profile.root_binding_counts_of_json
+
+let vm_semantics_root_blockers counts =
+  let add_if condition value values =
+    if condition then value :: values else values
+  in
+  let total = counts.Profile.matched + counts.unbound + counts.unavailable in
+  []
+  |> add_if (total = 0) "no_vm_semantics_roots"
+  |> add_if (counts.unavailable > 0) "unavailable_vm_semantics_roots"
+  |> add_if (counts.unbound > 0) "unbound_vm_semantics_roots"
+
+let vm_semantics_binding_gate_json counts =
+  let ready = Profile.root_bindings_are_consensus_ready counts in
+  `Assoc [
+    "status", `String (if ready then "accepted" else "rejected");
+    "blockers",
+    `List
+      (List.map
+         (fun blocker -> `String blocker)
+         (vm_semantics_root_blockers counts));
+  ]
+
 let consensus_candidate_gate
     ~profile_gate_count
     ~unprofiled_count
@@ -686,6 +719,7 @@ let validator_readiness_gate
     ~profile_gate_count
     ~unprofiled_count
     ~root_binding_counts
+    ~vm_semantics_binding_counts
     ~cross_platform_evidence
     ~included_template_count
     ~counted_failure_case_count
@@ -707,6 +741,9 @@ let validator_readiness_gate
   let roots_ready =
     Profile.root_bindings_are_consensus_ready root_binding_counts
   in
+  let vm_semantics_ready =
+    Profile.root_bindings_are_consensus_ready vm_semantics_binding_counts
+  in
   let cross_platform_ready = gate_status_accepted cross_platform_evidence in
   let ready =
     Profile.validator_readiness_accepted
@@ -716,6 +753,7 @@ let validator_readiness_gate
       ~profile_ready
       ~roots_ready
       ~cross_platform_ready
+    && vm_semantics_ready
   in
   let blockers =
     []
@@ -723,6 +761,9 @@ let validator_readiness_gate
     |> add_blocker
          (not failure_cases_ready)
          "punitive_failure_cases_not_accepted"
+    |> add_blocker
+         (not vm_semantics_ready)
+         "vm_semantics_root_binding_not_proven"
     |> add_blocker
          (not cross_platform_ready)
          "cross_platform_conformance_missing"
@@ -735,6 +776,7 @@ let validator_readiness_gate
         ~counted_failure_case_count
         ~accepted_counted_failure_case_count
     @ effort_blockers
+    @ vm_semantics_root_blockers vm_semantics_binding_counts
     @ Profile.consensus_ready_blockers
         ~profile_gate_count
         ~unprofiled_count
@@ -756,6 +798,10 @@ let validator_readiness_gate
     `String (if profile_ready then "accepted" else "rejected");
     "profile_root_status",
     `String (if roots_ready then "accepted" else "rejected");
+    "vm_semantics_root_status",
+    `String (if vm_semantics_ready then "accepted" else "rejected");
+    "vm_semantics_binding_gate",
+    vm_semantics_binding_gate_json vm_semantics_binding_counts;
     "cross_platform_status",
     `String (if cross_platform_ready then "accepted" else "rejected");
     "cross_platform_evidence", cross_platform_evidence;
@@ -1352,6 +1398,7 @@ let failure_case_result root_dir opcode template registers values op case =
       "status", `String (if passed then "accepted" else "rejected");
       "counted", `Bool counted;
       "observed", `String observed;
+      "observed_effort", `Int state.VM.effort_used;
       "unchanged_status",
       `String (if unchanged_ok then "matched" else "changed");
       "changed_status",
@@ -1395,6 +1442,11 @@ let execute_template root_dir entry =
     Profile.root_binding_json
       ~numerical_profile_root:(string_field "numerical_profile_root" template)
       profile_gate
+  in
+  let vm_semantics_binding =
+    Template.vm_semantics_binding_json
+      ~opcode
+      ~vm_semantics_root:(string_field "vm_semantics_root" template)
   in
   let expected_effort = int_field "expected_effort" template in
   let params = assoc_field "parameter_addresses_and_scalar_params" template in
@@ -1445,6 +1497,7 @@ let execute_template root_dir entry =
     "template_path", `String template_path;
     "profile_gate", profile_gate;
     "profile_root_binding", profile_root_binding;
+    "vm_semantics_binding", vm_semantics_binding;
     "status", `String (if accepted then "accepted" else "rejected");
     "vm_run", `String (if ran then "accepted" else "rejected");
     "output_status",
@@ -1850,6 +1903,9 @@ let run_p0_plus_pack path =
   let root_binding_counts =
     Profile.root_binding_counts_of_json profile_root_bindings
   in
+  let vm_semantics_binding_counts =
+    Profile.root_binding_counts_of_json []
+  in
   let root_binding_classification_counts =
     Profile.root_binding_classification_counts_of_json profile_root_bindings
   in
@@ -1875,6 +1931,7 @@ let run_p0_plus_pack path =
       ~profile_gate_count
       ~unprofiled_count:0
       ~root_binding_counts
+      ~vm_semantics_binding_counts
       ~cross_platform_evidence:cross_platform_evidence_json
       ~included_template_count:0
       ~counted_failure_case_count:0
@@ -1935,6 +1992,10 @@ let run_p0_plus_pack path =
     Profile.root_binding_gate_json
       ~required:!require_profile_roots_bound
       root_binding_counts;
+    "vm_semantics_binding_status_counts",
+    Profile.root_binding_counts_json vm_semantics_binding_counts;
+    "vm_semantics_binding_gate",
+    vm_semantics_binding_gate_json vm_semantics_binding_counts;
     "validator_readiness_gate", validator_readiness_gate_json;
     "consensus_candidate_gate",
     consensus_candidate_gate
@@ -2053,6 +2114,9 @@ let run_index path =
   let root_binding_counts =
     profile_root_binding_status_counts (List.map snd results)
   in
+  let vm_semantics_binding_counts =
+    vm_semantics_binding_status_counts (List.map snd results)
+  in
   let root_binding_classification_counts =
     profile_root_binding_classification_counts (List.map snd results)
   in
@@ -2111,6 +2175,7 @@ let run_index path =
       ~profile_gate_count
       ~unprofiled_count
       ~root_binding_counts
+      ~vm_semantics_binding_counts
       ~cross_platform_evidence:cross_platform_evidence_json
       ~included_template_count:included_failure_template_count
       ~counted_failure_case_count
@@ -2170,6 +2235,10 @@ let run_index path =
     Profile.root_binding_gate_json
       ~required:!require_profile_roots_bound
       root_binding_counts;
+    "vm_semantics_binding_status_counts",
+    Profile.root_binding_counts_json vm_semantics_binding_counts;
+    "vm_semantics_binding_gate",
+    vm_semantics_binding_gate_json vm_semantics_binding_counts;
     "validator_readiness_gate", validator_readiness_gate_json;
     "consensus_candidate_gate",
     consensus_candidate_gate

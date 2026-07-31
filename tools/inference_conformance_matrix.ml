@@ -170,10 +170,54 @@ let subspan_signature = function
     ]
   | _ -> fail "subspan must be an object"
 
+let failure_span_signature = function
+  | `Assoc fields ->
+    `Assoc [
+      "name", `String (string_field "name" fields);
+      "base_address", `Int (int_field "base_address" fields);
+      "length_f64_cells", `Int (int_field "length_f64_cells" fields);
+      "before_sha256", `String (string_field "before_sha256" fields);
+      "after_sha256", `String (string_field "after_sha256" fields);
+    ]
+  | _ -> fail "failure span must be an object"
+
+let failure_case_signature = function
+  | `Assoc fields ->
+    `Assoc [
+      "case", `String (string_field "case" fields);
+      "expected", `String (string_field "expected" fields);
+      "status", `String (string_field "status" fields);
+      "counted", `Bool (bool_field "counted" fields);
+      "observed", `String (string_field "observed" fields);
+      "observed_effort", `Int (int_field "observed_effort" fields);
+      "unchanged_status", `String (string_field "unchanged_status" fields);
+      "changed_status", `String (string_field "changed_status" fields);
+      "finite_status", `String (string_field "finite_status" fields);
+      "active_changed_status",
+      `String (string_field "active_changed_status" fields);
+      "active_finite_status",
+      `String (string_field "active_finite_status" fields);
+      "unchanged_spans",
+      `List
+        (List.map
+           failure_span_signature
+           (list_field "unchanged_spans" fields));
+      "active_changed_spans",
+      `List
+        (List.map
+           failure_span_signature
+           (list_field "active_changed_spans" fields));
+    ]
+  | _ -> fail "failure case must be an object"
+
 let result_signature = function
   | `Assoc fields ->
     `Assoc [
       "opcode", `String (string_field "opcode" fields);
+      "vm_semantics_binding",
+      (match field "vm_semantics_binding" fields with
+       | Some (`Assoc _ as binding) -> binding
+       | _ -> fail "missing vm_semantics_binding");
       "status", `String (string_field "status" fields);
       "vm_run", `String (string_field "vm_run" fields);
       "output_status", `String (string_field "output_status" fields);
@@ -182,6 +226,11 @@ let result_signature = function
       "effort_match", `Bool (bool_field "effort_match" fields);
       "strict_effort", `Bool (bool_field "strict_effort" fields);
       "subspans", `List (List.map subspan_signature (list_field "subspans" fields));
+      "failure_cases",
+      `List
+        (list_field "failure_cases" fields
+         |> List.map failure_case_signature
+         |> List.sort compare);
     ]
   | _ -> fail "result must be an object"
 
@@ -278,6 +327,11 @@ let report_summary path =
       | Some gate_fields -> opt_status_is_accepted "status" gate_fields
       | None -> false
     in
+    let vm_semantics_binding_accepted =
+      match opt_assoc_field "vm_semantics_binding_gate" fields with
+      | Some gate_fields -> opt_status_is_accepted "status" gate_fields
+      | None -> false
+    in
     let runner_executable_sha256 =
       opt_string_from_assoc "runner_executable_sha256" platform
     in
@@ -292,6 +346,7 @@ let report_summary path =
       && output_matched
       && effort_matched
       && profile_root_binding_accepted
+      && vm_semantics_binding_accepted
       && Option.is_some template_corpus_root
       && Option.is_some runner_executable_sha256
     in
@@ -317,6 +372,9 @@ let report_summary path =
       |> add_if
            (not profile_root_binding_accepted)
            "profile_root_binding_rejected"
+      |> add_if
+           (not vm_semantics_binding_accepted)
+           "vm_semantics_binding_rejected"
       |> add_if
            (Option.is_none template_corpus_root)
            "missing_template_corpus_root"
@@ -395,6 +453,8 @@ let report_summary path =
       json_field_or_null "profile_root_binding_status_counts" fields;
       "profile_root_binding_gate",
       json_field_or_null "profile_root_binding_gate" fields;
+      "vm_semantics_binding_gate",
+      json_field_or_null "vm_semantics_binding_gate" fields;
       "validator_readiness_status", `String validator_readiness_status;
       "validator_readiness_blockers",
       `List

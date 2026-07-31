@@ -1930,7 +1930,22 @@ let oracle_vector_root ~opcode =
     digest_string ("octra:inference:oracle-vectors\000" ^ payload) |> to_hex)
 
 let contract_json_for_opcode ~opcode profile =
-  `Assoc [
+  let q1_effort_policy =
+    match opcode with
+    | "LINEAR_Q1_G128_FP" ->
+      [
+        "effort_policy",
+        `Assoc [
+          "static_cost", `Int 200;
+          "dynamic_cost", `String "floor(m * n * k / 512)";
+          "total_cost", `String "200 + floor(m * n * k / 512)";
+          "dimension_names", `List [`String "m"; `String "k"; `String "n"];
+          "overflow_policy", `String "reject_before_writeback";
+        ];
+      ]
+    | _ -> []
+  in
+  `Assoc ([
     "schema", `String "octra.inference.numerical-contract.v1";
     "profile_name", `String profile.name;
     "opcode", `String opcode;
@@ -1943,7 +1958,7 @@ let contract_json_for_opcode ~opcode profile =
     "overflow_policy", `String "reject_nonfinite_before_writeback";
     "writeback_policy", `String "atomic_after_successful_full_output";
     "oracle_vector_root", `String (oracle_vector_root ~opcode);
-  ]
+  ] @ q1_effort_policy)
 
 let root_for_opcode ~opcode profile =
   let payload =

@@ -114,6 +114,93 @@ let requirements = [
 
 let p0_opcodes = List.map (fun requirement -> requirement.opcode) requirements
 
+let sha256 raw =
+  Digestif.SHA256.(digest_string raw |> to_hex)
+
+let vm_semantics_contract_json ~opcode =
+  match opcode with
+  | "LINEAR_Q1_G128_FP" ->
+    Some
+      (`Assoc [
+        "schema", `String "octra.inference.vm-semantics.v1";
+        "opcode", `String opcode;
+        "bytecode", `String "0x89";
+        "signature",
+        `String "LINEAR_Q1_G128_FP(dst, lhs, q1_owner, byte_offset, m, k, n)";
+        "register_roles",
+        `List [
+          `String "dst: output base cell";
+          `String "lhs: f64 cell input base";
+          `String "q1_owner: immutable Q1 owner bytes";
+          `String "byte_offset: byte offset into q1_owner";
+          `String "m: row count";
+          `String "k: inner dimension, multiple of 128";
+          `String "n: output column count";
+        ];
+        "memory_units",
+        `List [
+          `String "lhs and output use f64 VM cells";
+          `String "q1_owner uses immutable octets";
+          `String "output ABI uses r0 base and r1 f64 cell count";
+        ];
+        "shape_policy",
+        `List [
+          `String "m,k,n must be positive";
+          `String "k must be a multiple of 128";
+          `String "m,k,n each must be at most 32768";
+          `String "lhs span is m*k cells";
+          `String "output span is m*n cells";
+          `String "q1 span is n*(k/128)*18 bytes from byte_offset";
+        ];
+        "read_write_policy",
+        `List [
+          `String "snapshot lhs before output writeback";
+          `String "decode all Q1 scale bits before output writeback";
+          `String "write output only after full output buffer succeeds";
+          `String "preserve output on validation or arithmetic rejection";
+        ];
+        "iteration_order",
+        `List [
+          `String "row ascending";
+          `String "column ascending";
+          `String "block ascending";
+          `String "lane ascending";
+        ];
+      ])
+  | _ -> None
+
+let vm_semantics_root_for_opcode ~opcode =
+  match vm_semantics_contract_json ~opcode with
+  | None -> None
+  | Some json ->
+    let payload = Yojson.Safe.to_string json in
+    Some
+      (sha256 ("octra:inference:vm-semantics\000" ^ payload))
+
+let vm_semantics_binding_json ~opcode ~vm_semantics_root =
+  match vm_semantics_root_for_opcode ~opcode with
+  | Some root when String.equal root vm_semantics_root ->
+    `Assoc [
+      "status", `String "matched";
+      "classification", `String "none";
+      "vm_semantics_root", `String vm_semantics_root;
+      "litenode_vm_semantics_root", `String root;
+    ]
+  | Some root ->
+    `Assoc [
+      "status", `String "unbound";
+      "classification", `String "vm_semantics_root_mismatch";
+      "vm_semantics_root", `String vm_semantics_root;
+      "litenode_vm_semantics_root", `String root;
+    ]
+  | None ->
+    `Assoc [
+      "status", `String "unavailable";
+      "classification", `String "vm_semantics_root_unavailable";
+      "vm_semantics_root", `String vm_semantics_root;
+      "litenode_vm_semantics_root", `Null;
+    ]
+
 let assoc name = function
   | `Assoc fields -> Ok fields
   | _ -> Error (Json_error ("expected object: " ^ name))
@@ -566,6 +653,10 @@ let to_json (template : t) =
     "profile_gate", profile;
     "consensus_status", `String consensus_status;
     "vm_semantics_root", `String template.vm_semantics_root;
+    "vm_semantics_binding",
+    vm_semantics_binding_json
+      ~opcode:template.opcode
+      ~vm_semantics_root:template.vm_semantics_root;
     "numerical_profile_root", `String template.numerical_profile_root;
     "profile_root_binding",
     Inference_numerical_profile.root_binding_json
