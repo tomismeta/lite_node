@@ -796,6 +796,10 @@ Valid nonzero offsets still execute against the shifted Q1 span.
 These offset-bound cases are also part of the required Q1 failure-case
 contract for producer VM templates, so validator-readiness cannot be satisfied
 by positive offset execution plus a generic short-owner case alone.
+The static checker validates their executable mutation shape: negative offset
+must set `byte_offset < 0`, out-of-bounds offset must exceed the Q1 owner byte
+length, and truncated-span offset must stay inside the owner while leaving too
+few bytes for the required Q1 span.
 
 `finite_square_overflow` is now counted for `RMSNORM_FP_EPS` and `L2NORM_FP`
 under the current deterministic normalization profile: finite square/reduction
