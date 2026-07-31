@@ -20,6 +20,7 @@ let template_index = ref None
 let p0_plus_pack = ref None
 let strict_effort = ref false
 let include_failures = ref false
+let require_failure_cases = ref false
 let require_profile_roots_bound = ref false
 let require_consensus_candidate = ref false
 let require_consensus_ready = ref false
@@ -41,6 +42,9 @@ let args = [
   "--include-failures",
   Arg.Set include_failures,
   "execute definitive failure/atomicity cases where the direct VM runner can";
+  "--require-failure-cases",
+  Arg.Set require_failure_cases,
+  "reject template-index reports unless executable failure cases were run and accepted";
   "--require-profile-roots-bound",
   Arg.Set require_profile_roots_bound,
   "reject reports whose numerical_profile_root values do not match LiteNode profile roots";
@@ -54,7 +58,8 @@ let args = [
 
 let usage =
   "inference_conformance_run --template-index <path> [--strict-effort] \
-   [--include-failures] [--require-profile-roots-bound] \
+   [--include-failures] [--require-failure-cases] \
+   [--require-profile-roots-bound] \
    [--require-consensus-candidate] [--require-consensus-ready]\n\
    or inference_conformance_run --p0-plus-pack <path> \
    [--require-profile-roots-bound] [--require-consensus-candidate] \
@@ -126,6 +131,11 @@ let opt_int_field name fields =
   | Some `Null
   | None -> None
   | _ -> fail ("invalid int field: " ^ name)
+
+let bool_field name fields =
+  match field name fields with
+  | Some (`Bool value) -> value
+  | _ -> fail ("missing bool field: " ^ name)
 
 let profile_gate_json opcode fields =
   let add_source source = function
@@ -291,6 +301,60 @@ let consensus_candidate_required_passes
      ~unprofiled_count
      status_counts
    && Profile.root_bindings_are_consensus_ready root_binding_counts)
+
+let add_blocker condition blocker blockers =
+  if condition then blocker :: blockers else blockers
+
+let failure_case_gate
+    ~template_count
+    ~included_template_count
+    ~counted_failure_case_count
+    ~accepted_counted_failure_case_count =
+  let passed =
+    template_count > 0
+    && included_template_count = template_count
+    && counted_failure_case_count > 0
+    && accepted_counted_failure_case_count = counted_failure_case_count
+  in
+  let blockers =
+    []
+    |> add_blocker
+         (included_template_count <> template_count)
+         "failure_cases_not_included"
+    |> add_blocker
+         (counted_failure_case_count = 0)
+         "no_counted_failure_cases"
+    |> add_blocker
+         (accepted_counted_failure_case_count <> counted_failure_case_count)
+         "failure_cases_rejected"
+  in
+  `Assoc [
+    "required", `Bool !require_failure_cases;
+    "status",
+    `String
+      (if not !require_failure_cases then "not_required"
+       else if passed then "accepted"
+       else "rejected");
+    "template_count", `Int template_count;
+    "included_template_count", `Int included_template_count;
+    "counted_failure_case_count", `Int counted_failure_case_count;
+    "accepted_counted_failure_case_count",
+    `Int accepted_counted_failure_case_count;
+    "blockers",
+    `List (List.map (fun blocker -> `String blocker) blockers);
+  ]
+
+let failure_cases_required_pass
+    ~template_count
+    ~included_template_count
+    ~counted_failure_case_count
+    ~accepted_counted_failure_case_count =
+  (not !require_failure_cases)
+  ||
+  (template_count > 0
+   && included_template_count = template_count
+   && counted_failure_case_count > 0
+   && accepted_counted_failure_case_count = counted_failure_case_count)
 
 let profile_roots_required_passes ~root_binding_counts =
   Profile.root_bindings_required_pass
@@ -1440,6 +1504,35 @@ let run_index path =
   let execution_status =
     if execution_accepted then "accepted" else "rejected"
   in
+  let template_count = List.length results in
+  let included_failure_template_count =
+    List.length
+      (List.filter
+         (fun (_, result) ->
+            match result with
+            | `Assoc fields -> bool_field "failure_cases_included" fields
+            | _ -> false)
+         results)
+  in
+  let counted_failure_case_count =
+    List.fold_left
+      (fun count (_, result) ->
+         match result with
+         | `Assoc fields -> count + int_field "counted_failure_case_count" fields
+         | _ -> count)
+      0
+      results
+  in
+  let accepted_counted_failure_case_count =
+    List.fold_left
+      (fun count (_, result) ->
+         match result with
+         | `Assoc fields ->
+           count + int_field "accepted_counted_failure_case_count" fields
+         | _ -> count)
+      0
+      results
+  in
   let profile_gate_count =
     List.fold_left
       (fun count (_, result) -> count + result_profile_gate_count result)
@@ -1464,6 +1557,11 @@ let run_index path =
   let unprofiled_count = List.length results - profile_gate_count in
   let accepted =
     execution_accepted
+    && failure_cases_required_pass
+         ~template_count
+         ~included_template_count:included_failure_template_count
+         ~counted_failure_case_count
+         ~accepted_counted_failure_case_count
     && profile_roots_required_passes ~root_binding_counts
     &&
     consensus_candidate_required_passes
@@ -1485,7 +1583,13 @@ let run_index path =
     "diagnostic_only", `Bool true;
     "execution_mode", `String "positive_template_vm_execution";
     "template_index", `String path;
-    "template_count", `Int (List.length results);
+    "template_count", `Int template_count;
+    "failure_case_gate",
+    failure_case_gate
+      ~template_count
+      ~included_template_count:included_failure_template_count
+      ~counted_failure_case_count
+      ~accepted_counted_failure_case_count;
     "profile_gate_count", `Int profile_gate_count;
     "classified_profile_gate_count", `Int classified_profile_gate_count;
     "unprofiled_template_count", `Int unprofiled_count;
@@ -1529,6 +1633,8 @@ let run_index path =
 
 let () =
   Arg.parse args (fun value -> fail ("unexpected argument: " ^ value)) usage;
+  if !require_failure_cases && !p0_plus_pack <> None then
+    fail "--require-failure-cases is only supported with --template-index";
   let report =
     match !template_index, !p0_plus_pack with
     | Some _, Some _ -> fail "choose only one input mode"

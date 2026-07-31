@@ -133,6 +133,12 @@ tools/inference_conformance_run.exe \
   --include-failures
 ```
 
+Qualification runs should add `--require-failure-cases`; otherwise a report can
+still be useful local positive execution evidence, but it is not punitive
+failure/atomicity evidence. The top-level `failure_case_gate` records whether
+failure cases were included, how many counted cases ran, and whether every
+counted case accepted.
+
 The saved reports live beside the indexes as
 `litenode-failure-atomicity-report.cjson`.
 The checker requires each executable failure case to carry `case`, `expected`,
