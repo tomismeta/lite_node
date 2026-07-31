@@ -313,6 +313,8 @@ worklist after local execution succeeds. Each entry also carries an advisory
 `blocker_class`, separating software-fp64 qualification, host-native math,
 encoding/layout, execution order, safety policy, storage binding, and external
 qualification work without changing the stable blocker codes.
+The surface test rejects `unknown` blocker classes so newly introduced blocker
+codes must be intentionally classified before the report shape is extended.
 
 `local_semantics` records what the current VM does today.
 `consensus_obligations` records what must become protocol-owned before the

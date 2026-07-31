@@ -341,7 +341,9 @@ let add_blocker_pair groups (blocker, opcode) =
 
 let blocker_class = function
   | "host_fp_exp"
+  | "host_fp_arithmetic"
   | "host_fp_exponentiation"
+  | "host_fp_log1p"
   | "host_fp_trig" ->
     "host_native_math"
   | "fp64_add_conformance"
@@ -366,9 +368,11 @@ let blocker_class = function
     "execution_order"
   | "alias_rejection"
   | "atomic_writeback"
+  | "edge_value_policy"
   | "finite_overflow_policy"
   | "finite_rejection"
   | "overlap_policy"
+  | "snapshot_alias_policy"
   | "signed_zero_subnormal_policy" ->
     "safety_policy"
   | "authenticated_range_binding" ->
@@ -377,6 +381,7 @@ let blocker_class = function
   | "epsilon_bit_interpretation"
   | "first_max_tie_policy"
   | "float_byte_decode"
+  | "causal_indexing"
   | "position_base_policy"
   | "q1_sign_mapping"
   | "selected_index_encoding"

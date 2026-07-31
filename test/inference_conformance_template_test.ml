@@ -660,6 +660,16 @@ let check_inference_profile_surface_coverage () =
    | _ -> failwith "surface profile root catalog must be list");
   (match Profile.consensus_blocker_catalog_json gates with
    | `List catalog ->
+     List.iter
+       (function
+         | `Assoc fields ->
+           let code = string_value "blocker_code" fields in
+           let blocker_class = string_value "blocker_class" fields in
+           check
+             (code ^ " blocker class is known")
+             (not (String.equal blocker_class "unknown"))
+         | _ -> failwith "blocker catalog entry must be object")
+       catalog;
      let blocker_entry code =
        List.find_opt
          (function
