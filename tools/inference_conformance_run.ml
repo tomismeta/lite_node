@@ -704,7 +704,8 @@ let failure_case_gate
     ~included_template_count
     ~declared_failure_case_count
     ~counted_failure_case_count
-    ~accepted_counted_failure_case_count =
+    ~accepted_counted_failure_case_count
+    ~required_failure_case_contract_blockers =
   let passed =
     failure_cases_accepted
       ~template_count
@@ -712,6 +713,7 @@ let failure_case_gate
       ~declared_failure_case_count
       ~counted_failure_case_count
       ~accepted_counted_failure_case_count
+    && required_failure_case_contract_blockers = []
   in
   let blockers =
     failure_case_blockers
@@ -720,6 +722,7 @@ let failure_case_gate
       ~declared_failure_case_count
       ~counted_failure_case_count
       ~accepted_counted_failure_case_count
+    @ required_failure_case_contract_blockers
   in
   `Assoc [
     "required", `Bool !require_failure_cases;
@@ -743,7 +746,8 @@ let failure_cases_required_pass
     ~included_template_count
     ~declared_failure_case_count
     ~counted_failure_case_count
-    ~accepted_counted_failure_case_count =
+    ~accepted_counted_failure_case_count
+    ~required_failure_case_contract_blockers =
   (not !require_failure_cases)
   ||
   failure_cases_accepted
@@ -752,6 +756,7 @@ let failure_cases_required_pass
     ~declared_failure_case_count
     ~counted_failure_case_count
     ~accepted_counted_failure_case_count
+  && required_failure_case_contract_blockers = []
 
 let validator_readiness_gate
     ~required
@@ -771,6 +776,7 @@ let validator_readiness_gate
     ~declared_failure_case_count
     ~counted_failure_case_count
     ~accepted_counted_failure_case_count
+    ~required_failure_case_contract_blockers
     status_counts =
   let failure_cases_ready =
     failure_cases_accepted
@@ -779,6 +785,7 @@ let validator_readiness_gate
       ~declared_failure_case_count
       ~counted_failure_case_count
       ~accepted_counted_failure_case_count
+    && required_failure_case_contract_blockers = []
   in
   let profile_ready =
     Profile.consensus_ready
@@ -831,6 +838,7 @@ let validator_readiness_gate
         ~declared_failure_case_count
         ~counted_failure_case_count
         ~accepted_counted_failure_case_count
+    @ required_failure_case_contract_blockers
     @ effort_blockers
     @ vm_semantics_root_blockers vm_semantics_binding_counts
     @ abi_declaration_binding_blockers abi_declaration_binding_counts
@@ -1538,6 +1546,60 @@ let failure_case_results root_dir opcode template registers values op =
         cases
     | _ -> []
 
+let q1_required_failure_cases =
+  [
+    "nonfinite_input_nan", "reject_before_write";
+    "nonfinite_input_infinity", "reject_before_write";
+    "output_input_aliasing", "accept_from_snapshot";
+    "partial_output_input_aliasing", "accept_from_snapshot";
+    "k_not_multiple_of_128", "reject_before_write";
+    "bad_q1_owner_length", "reject_before_write";
+    "nonfinite_fp16_scale", "reject_before_write";
+  ]
+
+let required_failure_case_contract opcode failure_results =
+  if not (String.equal opcode "LINEAR_Q1_G128_FP") then
+    "not_applicable", []
+  else
+    let rows =
+      List.filter_map
+        (function
+          | _, _, `Assoc fields -> Some fields
+          | _ -> None)
+        failure_results
+    in
+    let row_for case =
+      List.find_opt
+        (fun fields -> String.equal (string_field "case" fields) case)
+        rows
+    in
+    let blockers =
+      q1_required_failure_cases
+      |> List.fold_left
+           (fun blockers (case, expected_prefix) ->
+              match row_for case with
+              | None ->
+                ("q1_failure_case_missing_" ^ case) :: blockers
+              | Some fields ->
+                let blockers =
+                  if starts_with expected_prefix (string_field "expected" fields) then
+                    blockers
+                  else
+                    ("q1_failure_case_expected_mismatch_" ^ case) :: blockers
+                in
+                let blockers =
+                  if bool_field "counted" fields then blockers
+                  else ("q1_failure_case_uncounted_" ^ case) :: blockers
+                in
+                if String.equal (string_field "status" fields) "accepted" then
+                  blockers
+                else
+                  ("q1_failure_case_rejected_" ^ case) :: blockers)
+           []
+      |> List.rev
+    in
+    (if blockers = [] then "accepted" else "rejected"), blockers
+
 let execute_template root_dir entry =
   let opcode = string_field "opcode" entry in
   let primitive = opt_string_field "primitive" entry in
@@ -1614,6 +1676,10 @@ let execute_template root_dir entry =
   let failure_results =
     failure_case_results root_dir opcode template registers values op
   in
+  let required_failure_case_contract_status,
+      required_failure_case_contract_blockers =
+    required_failure_case_contract opcode failure_results
+  in
   let counted_failures =
     List.filter (fun (_, counted, _) -> counted) failure_results
   in
@@ -1649,6 +1715,15 @@ let execute_template root_dir entry =
     "strict_effort", `Bool !strict_effort;
     "subspans", `List (List.map snd span_results);
     "failure_cases_included", `Bool !include_failures;
+    "required_failure_case_contract",
+    `Assoc [
+      "status", `String required_failure_case_contract_status;
+      "blockers",
+      `List
+        (List.map
+           (fun blocker -> `String blocker)
+           required_failure_case_contract_blockers);
+    ];
     "failure_case_count", `Int (List.length failure_results);
     "counted_failure_case_count", `Int (List.length counted_failures);
     "accepted_counted_failure_case_count",
@@ -2082,6 +2157,7 @@ let run_p0_plus_pack path =
       ~declared_failure_case_count:0
       ~counted_failure_case_count:0
       ~accepted_counted_failure_case_count:0
+      ~required_failure_case_contract_blockers:[]
       status_counts
   in
   let accepted =
@@ -2257,6 +2333,20 @@ let run_index path =
       0
       results
   in
+  let required_failure_case_contract_blockers =
+    List.fold_left
+      (fun blockers (_, result) ->
+         match result with
+         | `Assoc fields ->
+           (match field "required_failure_case_contract" fields with
+            | Some (`Assoc contract_fields) ->
+              string_list_field "blockers" contract_fields @ blockers
+            | _ -> blockers)
+         | _ -> blockers)
+      []
+      results
+    |> List.sort_uniq String.compare
+  in
   let profile_gate_count =
     List.fold_left
       (fun count (_, result) -> count + result_profile_gate_count result)
@@ -2309,6 +2399,7 @@ let run_index path =
          ~declared_failure_case_count
          ~counted_failure_case_count
          ~accepted_counted_failure_case_count
+         ~required_failure_case_contract_blockers
     && profile_roots_required_passes ~root_binding_counts
     &&
     consensus_candidate_required_passes
@@ -2344,6 +2435,7 @@ let run_index path =
       ~declared_failure_case_count
       ~counted_failure_case_count
       ~accepted_counted_failure_case_count
+      ~required_failure_case_contract_blockers
       status_counts
   in
   let accepted =
@@ -2375,7 +2467,8 @@ let run_index path =
       ~included_template_count:included_failure_template_count
       ~declared_failure_case_count
       ~counted_failure_case_count
-      ~accepted_counted_failure_case_count;
+      ~accepted_counted_failure_case_count
+      ~required_failure_case_contract_blockers;
     "profile_gate_count", `Int profile_gate_count;
     "classified_profile_gate_count", `Int classified_profile_gate_count;
     "unprofiled_template_count", `Int unprofiled_count;

@@ -233,6 +233,7 @@ let q1_failure_cases =
   ]
 
 let q1_template ?(session_abi_root = Abi.v1_root)
+    ?(failure_cases = q1_failure_cases)
     ?(output_count_unit = "cells") ?(r1 = 1) () =
   `Assoc [
     "type", `String "p0_litenode_vm_execution_template";
@@ -325,8 +326,21 @@ let q1_template ?(session_abi_root = Abi.v1_root)
         ];
       ];
     ];
-    "expected_failure_atomicity_behavior", `List q1_failure_cases;
+    "expected_failure_atomicity_behavior", `List failure_cases;
   ]
+
+let replace_failure_expected case expected = function
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (key, value) ->
+            if String.equal key "expected"
+               && String.equal (string_value "case" fields) case then
+              key, `String expected
+            else
+              key, value)
+         fields)
+  | value -> value
 
 let index_json =
   `Assoc [
@@ -497,6 +511,78 @@ let check_good_template_reports_bound_abi () =
     check
       "good ABI gate accepted"
       (String.equal (gate_status "abi_declaration_binding_gate" report) "accepted"))
+
+let check_require_failure_cases_rejects_missing_q1_case () =
+  with_temp_dir (fun dir ->
+    let failure_cases =
+      List.filter
+        (function
+          | `Assoc fields ->
+            not
+              (String.equal
+                 (string_value "case" fields)
+                 "nonfinite_fp16_scale")
+          | _ -> true)
+        q1_failure_cases
+    in
+    let code, report =
+      run_conformance
+        dir
+        (q1_template ~failure_cases ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "missing Q1 failure case runner exits nonzero" (code = 1);
+    (match report with
+     | `Assoc fields ->
+       let gate = assoc_json "failure_case_gate" fields in
+       check
+         "missing Q1 failure gate rejected"
+         (String.equal (string_value "status" gate) "rejected");
+       check
+         "missing Q1 failure gate blocker"
+         (List.mem
+            "q1_failure_case_missing_nonfinite_fp16_scale"
+            (string_list "blockers" gate))
+     | _ -> failwith "report must be object"))
+
+let check_require_failure_cases_rejects_wrong_q1_expectation () =
+  with_temp_dir (fun dir ->
+    let failure_cases =
+      List.map
+        (replace_failure_expected
+           "nonfinite_fp16_scale"
+           "accept_from_snapshot_wrong")
+        q1_failure_cases
+    in
+    let code, report =
+      run_conformance
+        dir
+        (q1_template ~failure_cases ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "wrong Q1 expectation runner exits nonzero" (code = 1);
+    (match report with
+     | `Assoc fields ->
+       let gate = assoc_json "failure_case_gate" fields in
+       check
+         "wrong Q1 expectation gate rejected"
+         (String.equal (string_value "status" gate) "rejected");
+       check
+         "wrong Q1 expectation blocker"
+         (List.mem
+            "q1_failure_case_expected_mismatch_nonfinite_fp16_scale"
+            (string_list "blockers" gate))
+     | _ -> failwith "report must be object"))
 
 let check_stale_abi_is_visible_in_executable_report () =
   with_temp_dir (fun dir ->
@@ -725,6 +811,8 @@ let check_cross_platform_matrix_sha_mismatch_rejects () =
 
 let () =
   check_good_template_reports_bound_abi ();
+  check_require_failure_cases_rejects_missing_q1_case ();
+  check_require_failure_cases_rejects_wrong_q1_expectation ();
   check_stale_abi_is_visible_in_executable_report ();
   check_readiness_gate_rejects_stale_abi ();
   check_pinned_cross_platform_matrix_is_consumed ();
