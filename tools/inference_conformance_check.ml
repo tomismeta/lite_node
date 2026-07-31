@@ -217,6 +217,14 @@ let mutation_offset_cells = function
   | `Assoc fields -> int_field "offset_cells" fields
   | _ -> None
 
+let mutation_target = function
+  | `Assoc fields -> string_field "target" fields
+  | _ -> None
+
+let mutation_int_value = function
+  | `Assoc fields -> int_field "value" fields
+  | _ -> None
+
 let exact_q1_alias_mutation mutation =
   match mutation_name mutation with
   | Some "set_output_base_to_first_input_base" ->
@@ -921,6 +929,52 @@ let span_covers base cells = function
     && int_field "length_f64_cells" span_fields = Some cells
   | _ -> false
 
+let q1_small_mul left right =
+  if left < 0 || right < 0 then None
+  else if left <> 0 && right > max_int / left then None
+  else Some (left * right)
+
+let q1_owner_source_bytes fields =
+  match list_field "input_memory_ranges" fields with
+  | Some ranges ->
+    List.find_map
+      (function
+        | `Assoc range_fields
+          when string_field "name" range_fields = Some "q1_owner" ->
+          (match assoc_field "source" range_fields with
+           | Some source_fields -> int_field "bytes" source_fields
+           | None -> None)
+        | _ -> None)
+      ranges
+  | None -> None
+
+let q1_required_owner_bytes fields =
+  match assoc_field "parameter_addresses_and_scalar_params" fields with
+  | Some params ->
+    (match assoc_field "values" params with
+     | Some values ->
+       (match int_field "k" values, int_field "n" values with
+        | Some k, Some n when k > 0 && n > 0 && k mod 128 = 0 ->
+          Option.bind
+            (q1_small_mul n (k / 128))
+            (fun blocks -> q1_small_mul blocks 18)
+        | _ -> None)
+     | None -> None)
+  | None -> None
+
+let q1_scalar_param_mutation param predicate mutation =
+  match
+    mutation_name mutation,
+    mutation_target mutation,
+    mutation_int_value mutation
+  with
+  | Some "set_scalar_param", Some target, Some value ->
+    String.equal
+      target
+      ("parameter_addresses_and_scalar_params.values." ^ param)
+    && predicate value
+  | _ -> false
+
 let failure_issues path opcode fields =
   match list_field "expected_failure_atomicity_behavior" fields with
   | None -> [issue ~opcode path "missing expected_failure_atomicity_behavior"]
@@ -1094,6 +1148,66 @@ let failure_issues path opcode fields =
           in
           exact_issue @ partial_issue
       in
+      let q1_offset_shape_issues =
+        if not (String.equal opcode "LINEAR_Q1_G128_FP") then []
+        else
+          let mutations_for case =
+            List.find_map
+              (function
+                | `Case (actual, _, mutations, _, _, _)
+                  when String.equal actual case ->
+                  Some mutations
+                | _ -> None)
+              parsed
+          in
+          let negative_issue =
+            match mutations_for "negative_byte_offset" with
+            | Some mutations
+              when List.exists
+                     (q1_scalar_param_mutation
+                        "byte_offset"
+                        (fun value -> value < 0))
+                     mutations -> []
+            | Some _ ->
+              [issue ~opcode path
+                 "negative_byte_offset must set byte_offset below zero"]
+            | None -> []
+          in
+          let owner_bytes = q1_owner_source_bytes fields in
+          let required_bytes = q1_required_owner_bytes fields in
+          let out_of_bounds_issue =
+            match mutations_for "byte_offset_out_of_bounds", owner_bytes with
+            | Some mutations, Some source_bytes
+              when List.exists
+                     (q1_scalar_param_mutation
+                        "byte_offset"
+                        (fun value -> value > source_bytes))
+                     mutations -> []
+            | Some _, Some _ ->
+              [issue ~opcode path
+                 "byte_offset_out_of_bounds must set byte_offset beyond q1_owner bytes"]
+            | _ -> []
+          in
+          let truncated_issue =
+            match mutations_for "byte_offset_truncated_span",
+                  owner_bytes,
+                  required_bytes with
+            | Some mutations, Some source_bytes, Some required_bytes
+              when List.exists
+                     (q1_scalar_param_mutation
+                        "byte_offset"
+                        (fun value ->
+                           value >= 0
+                           && value <= source_bytes
+                           && required_bytes > source_bytes - value))
+                     mutations -> []
+            | Some _, Some _, Some _ ->
+              [issue ~opcode path
+                 "byte_offset_truncated_span must set byte_offset inside q1_owner but leave insufficient Q1 bytes"]
+            | _ -> []
+          in
+          negative_issue @ out_of_bounds_issue @ truncated_issue
+      in
       let expected_issue =
         if missing_expected = [] then []
         else
@@ -1118,6 +1232,7 @@ let failure_issues path opcode fields =
       bad @ expected_issue @ mutation_issue @ unchanged_issue
       @ unchanged_span_issues @ executable_mutation_issues
       @ q1_required_case_issues @ q1_alias_shape_issues
+      @ q1_offset_shape_issues
       @ (if not (String.equal opcode "LINEAR_Q1_G128_FP") then []
          else
            match q1_output_span fields with

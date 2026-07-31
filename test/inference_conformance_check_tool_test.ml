@@ -821,6 +821,47 @@ let check_rejects_q1_partial_alias_without_partial_mutation () =
          "partial_output_input_aliasing must declare partial output/lhs alias mutation"
          (report_issues report)))
 
+let check_rejects_q1_bad_offset_failure_mutations () =
+  with_temp_dir (fun dir ->
+    let check_case case mutation issue_message =
+      let failures =
+        List.map (replace_failure_mutations case [mutation]) q1_failure_cases
+      in
+      let code, report =
+        run_check
+          dir
+          (q1_template ()
+           |> replace_assoc_field
+                "expected_failure_atomicity_behavior"
+                (`List failures))
+      in
+      check (case ^ " wrong mutation exits nonzero") (code = 1);
+      check
+        (case ^ " wrong mutation issue")
+        (List.mem issue_message (report_issues report))
+    in
+    check_case
+      "negative_byte_offset"
+      (mutation
+         "set_scalar_param"
+         "parameter_addresses_and_scalar_params.values.byte_offset"
+         ["value", `Int 0])
+      "negative_byte_offset must set byte_offset below zero";
+    check_case
+      "byte_offset_out_of_bounds"
+      (mutation
+         "set_scalar_param"
+         "parameter_addresses_and_scalar_params.values.byte_offset"
+         ["value", `Int 1])
+      "byte_offset_out_of_bounds must set byte_offset beyond q1_owner bytes";
+    check_case
+      "byte_offset_truncated_span"
+      (mutation
+         "set_scalar_param"
+         "parameter_addresses_and_scalar_params.values.byte_offset"
+         ["value", `Int 0])
+      "byte_offset_truncated_span must set byte_offset inside q1_owner but leave insufficient Q1 bytes")
+
 let check_rejects_string_executable_mutation () =
   with_temp_dir (fun dir ->
     let failures =
@@ -933,6 +974,7 @@ let () =
   check_rejects_wrong_q1_failure_expectation ();
   check_rejects_q1_exact_alias_without_alias_mutation ();
   check_rejects_q1_partial_alias_without_partial_mutation ();
+  check_rejects_q1_bad_offset_failure_mutations ();
   check_rejects_string_executable_mutation ();
   check_rejects_string_unchanged_span ();
   check_rejects_incomplete_unchanged_span ();
