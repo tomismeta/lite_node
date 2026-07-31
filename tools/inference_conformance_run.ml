@@ -1522,15 +1522,48 @@ let apply_mutation state registers values inputs mutation =
         | None -> fail "q1_owner must be raw bytes")
      | "truncate_input_manifest" ->
        let input = find_input target inputs in
+       let truncate_bytes = int_field "truncate_bytes" fields in
+       if truncate_bytes < 0 then fail "truncate_bytes must be nonnegative";
        (match input.raw_register with
         | Some reg ->
-          truncate_raw_suffix state reg (int_field "truncate_bytes" fields);
+          truncate_raw_suffix state reg truncate_bytes;
           `Executed
-        | None -> fail "truncate_input_manifest target must be raw bytes")
+        | None ->
+          if truncate_bytes > 0 then `Modeled_ingress_rejected else `Executed)
      | "lower_effort_limit" ->
        `Executed
      | _ -> fail ("unsupported mutation: " ^ name))
   | _ -> fail "mutation must be an object"
+
+let mutation_result_ingress_rejected = function
+  | `Ingress_rejected
+  | `Modeled_ingress_rejected -> true
+  | `Executed -> false
+
+let mutation_result_json = function
+  | `Executed ->
+    `Assoc [
+      "status", `String "executed";
+      "authority", `String "direct_vm_mutation";
+    ]
+  | `Ingress_rejected ->
+    `Assoc [
+      "status", `String "ingress_rejected";
+      "authority", `String "direct_ingress_validation";
+    ]
+  | `Modeled_ingress_rejected ->
+    `Assoc [
+      "status", `String "ingress_rejected";
+      "authority", `String "modeled_direct_runner_pre_ingress";
+    ]
+
+let ingress_rejection_authority mutation_results =
+  if List.exists (( = ) `Modeled_ingress_rejected) mutation_results then
+    "modeled_direct_runner_pre_ingress"
+  else if List.exists (( = ) `Ingress_rejected) mutation_results then
+    "direct_ingress_validation"
+  else
+    "not_applicable"
 
 let op_linear registers =
   VM.LINEAR_Q1_G128_FP
@@ -1921,7 +1954,7 @@ let failure_case_result root_dir opcode template registers values op case =
       List.map (apply_mutation state registers values inputs) mutations
     in
     let ingress_rejected =
-      List.exists (( = ) `Ingress_rejected) mutation_results
+      List.exists mutation_result_ingress_rejected mutation_results
     in
     let unchanged_spans =
       list_field "unchanged_spans" fields
@@ -1985,6 +2018,9 @@ let failure_case_result root_dir opcode template registers values op case =
       "status", `String (if passed then "accepted" else "rejected");
       "counted", `Bool counted;
       "observed", `String observed;
+      "ingress_rejection_authority",
+      `String (ingress_rejection_authority mutation_results);
+      "mutation_results", `List (List.map mutation_result_json mutation_results);
       "observed_effort", `Int state.VM.effort_used;
       "unchanged_status",
       `String (if unchanged_ok then "matched" else "changed");

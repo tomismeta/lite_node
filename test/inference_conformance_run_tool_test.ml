@@ -766,6 +766,108 @@ let check_dynamic_q1_effort_vector () =
       "dynamic Q1 lower effort reaches VM"
       (String.equal (string_value "observed" lower_effort) "vm_rejected"))
 
+let check_truncated_decoded_input_manifest_reports_ingress_rejected () =
+  with_temp_dir (fun dir ->
+    let failure_cases =
+      q1_failure_cases ()
+      @ [
+        reject_case
+          "insufficient_input_bytes"
+          [
+            mutation
+              "truncate_input_manifest"
+              "lhs"
+              ["truncate_bytes", `Int 1];
+          ];
+      ]
+    in
+    let code, report =
+      run_conformance
+        dir
+        (q1_template ~failure_cases ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "decoded input truncation runner exits zero" (code = 0);
+    let result = first_result report in
+    let truncated =
+      failure_case_fields result "insufficient_input_bytes"
+    in
+    check
+      "decoded input truncation accepted"
+      (String.equal (string_value "status" truncated) "accepted");
+    check
+      "decoded input truncation is counted"
+      (bool_value "counted" truncated);
+    check
+      "decoded input truncation reports ingress rejection"
+      (String.equal (string_value "observed" truncated) "ingress_rejected");
+    check
+      "decoded input truncation authority is modeled"
+      (String.equal
+         (string_value "ingress_rejection_authority" truncated)
+         "modeled_direct_runner_pre_ingress");
+    (match list_value "mutation_results" truncated with
+     | [`Assoc mutation_result] ->
+       check
+         "decoded input truncation mutation status"
+         (String.equal
+            (string_value "status" mutation_result)
+            "ingress_rejected");
+       check
+         "decoded input truncation mutation authority"
+         (String.equal
+            (string_value "authority" mutation_result)
+            "modeled_direct_runner_pre_ingress")
+     | _ -> failwith "expected one mutation result"))
+
+let check_zero_decoded_input_truncation_is_not_ingress_rejected () =
+  with_temp_dir (fun dir ->
+    let failure_cases =
+      q1_failure_cases ()
+      @ [
+        reject_case
+          "zero_decoded_input_truncation"
+          [
+            mutation
+              "truncate_input_manifest"
+              "lhs"
+              ["truncate_bytes", `Int 0];
+          ];
+      ]
+    in
+    let code, report =
+      run_conformance
+        dir
+        (q1_template ~failure_cases ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "zero decoded truncation runner exits nonzero" (code = 1);
+    let result = first_result report in
+    let truncated =
+      failure_case_fields result "zero_decoded_input_truncation"
+    in
+    check
+      "zero decoded truncation rejected"
+      (String.equal (string_value "status" truncated) "rejected");
+    check
+      "zero decoded truncation reaches VM"
+      (String.equal (string_value "observed" truncated) "vm_accepted");
+    check
+      "zero decoded truncation is not ingress evidence"
+      (String.equal
+         (string_value "ingress_rejection_authority" truncated)
+         "not_applicable"))
+
 let check_require_failure_cases_rejects_missing_q1_case () =
   with_temp_dir (fun dir ->
     let failure_cases =
@@ -1290,6 +1392,8 @@ let check_cross_platform_matrix_forged_row_root_rejects () =
 let () =
   check_good_template_reports_bound_abi ();
   check_dynamic_q1_effort_vector ();
+  check_truncated_decoded_input_manifest_reports_ingress_rejected ();
+  check_zero_decoded_input_truncation_is_not_ingress_rejected ();
   check_require_failure_cases_rejects_missing_q1_case ();
   check_require_failure_cases_rejects_wrong_q1_expectation ();
   check_accept_snapshot_requires_exact_output ();

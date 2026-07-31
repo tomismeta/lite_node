@@ -161,27 +161,66 @@ to the current LiteNode profile root, independent cross-platform oracle
 qualification, and explicit consensus promotion of the profile.
 
 Current focused Q1 checkpoint on 2026-07-31, using the immutable
-effort-authority P0 index against the current LiteNode runner:
+effort-authority P0 index against the current LiteNode runner after executable
+ABI gating:
 
 ```text
 selected_opcodes: [LINEAR_Q1_G128_FP]
 template_count: 1
-execution_status: accepted
-strict_effort: accepted, 201 == 201
+static check status: rejected, 11 LINEAR_Q1_G128_FP issues
+runner status: rejected
+execution_status: rejected
+validator strict_effort_status: accepted
+positive result effort: expected 201, observed 200
 failure_case_gate: rejected, 6/7 declared cases counted
 profile_root_binding_gate: rejected
 vm_semantics_binding_gate: rejected
 abi_declaration_binding_gate: rejected
+executable_abi_binding_gate: rejected, not_run=1, matched=0, mismatch=0
 template numerical_profile_root: 66be1b09b91d4e339ffaa16bda41bc87b18141b3506bbfe698448e2e401eb245
 current LiteNode profile_root: 1247c6e4e8364a774c2585a76a05fadfdf631e9e7562d4949ee5d1b358589367
 template vm_semantics_root: d49cc837c452322bd6193645a02b89adef33eccad66cdab73a891140cabba950
 current LiteNode vm_semantics_root: db31cbfb8754b8a4b53867f338497e57baee17a64d8fa957108fefe1e93e5da7
 current LiteNode session_abi_root: be55d94fec70093495473690eb303aa617162e322b76426205ecaa4617d1bb90
 validator_readiness_gate: rejected
-blockers: unbound_profile_roots, unbound_vm_semantics_roots,
-  unbound_abi_declaration_binding, uncounted_failure_cases,
+next static checker blocker: schema_rejected
+next runner blocker: execution_rejected
+blockers: execution_rejected, uncounted_failure_cases,
+  q1_failure_case_expected_mismatch_output_input_aliasing,
+  q1_failure_case_missing_byte_offset_out_of_bounds,
+  q1_failure_case_missing_byte_offset_truncated_span,
+  q1_failure_case_missing_lower_effort_limit,
+  q1_failure_case_missing_negative_byte_offset,
+  q1_failure_case_missing_partial_output_input_aliasing,
+  q1_failure_case_uncounted_output_input_aliasing,
+  effort_mismatch, executable_abi_binding_not_run,
+  executable_abi_binding_not_proven, unbound_profile_roots,
+  unbound_vm_semantics_roots, unbound_abi_declaration_binding,
   consensus_candidate_profile_gates, cross_platform_conformance_missing
 ```
+
+The positive run now rejects before executable ABI proof because the stale
+producer template binds `lhs` to `r1` while the session ABI also declares `r1`
+as the output-count register. The static checker reports this directly as:
+
+```text
+LINEAR_Q1_G128_FP input/scalar registers must not use ABI output_count_register: lhs
+```
+
+The same static pass also rejects the stale ABI declaration:
+
+```text
+ABI declaration binding rejected: session_abi_root_mismatch
+ABI declaration binding rejected: output_count_unit_mismatch
+```
+
+The runner now treats decoded-input `truncate_input_manifest` cases as modeled
+direct-runner pre-ingress rejection instead of aborting the report. Against
+this stale artifact, `insufficient_input_bytes` is counted and accepted with
+`observed: ingress_rejected` and
+`ingress_rejection_authority: modeled_direct_runner_pre_ingress`; the remaining
+Q1 failure-contract blockers are the stale aliasing expectation and the missing
+byte-offset / lower-effort / partial-aliasing cases.
 
 The current VM-semantics root supersedes the earlier
 `5eddadb896095cbb74b716994cd08743052fd27be0f235e93ea089df9a5a51d1`
@@ -196,8 +235,10 @@ That means the immediate producer action is narrow: re-emit the P0 template
 index with the current `deterministic-q1-g128-fp64-linear` profile root, which
 now includes the rooted Q1 effort formula, and the current
 `LINEAR_Q1_G128_FP` VM semantics root, bind the current session ABI root in
-`abi.session_abi_root`, declare `abi.output_count_unit: cells`, and replace
-the ambiguous `output_input_aliasing` case with explicit
+`abi.session_abi_root`, declare `abi.output_count_unit: cells`, name the Q1
+left-hand input range `lhs`, encode the Q1 owner range as `tensor.q1-g128`,
+and keep all Q1 input/scalar registers disjoint from the ABI output-count
+register `r1`. Replace the ambiguous `output_input_aliasing` case with explicit
 `accept_from_snapshot` evidence for both exact and partial lhs/output overlap.
 The Q1 output representation should remain in `output.length_f64_cells` and
 subspan layout metadata, not in the session ABI declaration. Once the focused runner reports
@@ -249,10 +290,10 @@ static validator_readiness_gate.next_blocker:
   schema_rejected
 
 runner validator_readiness_gate.next_blocker:
-  q1_failure_case_expected_mismatch_output_input_aliasing
+  execution_rejected
 
-matrix next_validator_readiness_blocker:
-  q1_failure_case_expected_mismatch_output_input_aliasing
+runner executable_abi_binding_gate:
+  rejected, executable_abi_binding_not_run
 
 matrix required_opcodes:
   [LINEAR_Q1_G128_FP]
@@ -261,11 +302,14 @@ matrix opcode_coverage_status:
   accepted
 ```
 
-That means the current Q1 blocker is no longer ambiguous. The VM accepts the
-positive Q1 execution path, but validator readiness rejects the stale producer
-evidence until it re-emits `output_input_aliasing` and
-`partial_output_input_aliasing` as counted `accept_from_snapshot` failure
-contracts and binds the current profile, VM-semantics, and session-ABI roots.
+That means the current Q1 blocker is no longer ambiguous. The stale producer
+evidence now fails before positive executable-ABI proof because its Q1 operand
+registers collide with the session ABI output-count register and its rooted
+contracts are old. Re-emitted evidence must fix the `lhs`/`r1` collision,
+replace `output_input_aliasing` and `partial_output_input_aliasing` with
+counted `accept_from_snapshot` contracts, and bind the current profile,
+VM-semantics, and session-ABI roots before cross-platform qualification can be
+meaningful.
 
 The first accepted producer indexes are:
 

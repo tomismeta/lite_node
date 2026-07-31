@@ -1083,7 +1083,18 @@ let failure_issues path opcode fields =
                     [issue ~opcode path
                        ("failure case mutation missing target: " ^ case)]
                 in
-                name_issues @ target_issues
+                let value_issues =
+                  match string_field "mutation" mutation_fields with
+                  | Some "truncate_input_manifest" ->
+                    (match int_field "truncate_bytes" mutation_fields with
+                     | Some value when value < 0 ->
+                       [issue ~opcode path
+                          ("failure case mutation truncate_input_manifest negative truncate_bytes: "
+                           ^ case)]
+                     | _ -> [])
+                  | _ -> []
+                in
+                name_issues @ target_issues @ value_issues
               | _ ->
                 [issue ~opcode path
                    ("failure case executable_mutations entries must be objects: "

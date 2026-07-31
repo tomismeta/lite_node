@@ -763,6 +763,35 @@ let check_rejects_wrong_q1_failure_expectation () =
          "nonfinite_fp16_scale must declare reject_before_write"
          (report_issues report)))
 
+let check_rejects_negative_truncate_bytes () =
+  with_temp_dir (fun dir ->
+    let failures =
+      List.map
+        (replace_failure_mutations
+           "bad_q1_owner_length"
+           [
+             mutation
+               "truncate_input_manifest"
+               "q1_owner"
+               ["truncate_bytes", `Int (-1)];
+           ])
+        q1_failure_cases
+    in
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "expected_failure_atomicity_behavior"
+              (`List failures))
+    in
+    check "negative truncate bytes exits nonzero" (code = 1);
+    check
+      "negative truncate bytes issue"
+      (List.mem
+         "failure case mutation truncate_input_manifest negative truncate_bytes: bad_q1_owner_length"
+         (report_issues report)))
+
 let check_rejects_q1_exact_alias_without_alias_mutation () =
   with_temp_dir (fun dir ->
     let failures =
@@ -972,6 +1001,7 @@ let () =
   check_rejects_q1_bad_k_shape ();
   check_rejects_missing_q1_failure_case ();
   check_rejects_wrong_q1_failure_expectation ();
+  check_rejects_negative_truncate_bytes ();
   check_rejects_q1_exact_alias_without_alias_mutation ();
   check_rejects_q1_partial_alias_without_partial_mutation ();
   check_rejects_q1_bad_offset_failure_mutations ();
