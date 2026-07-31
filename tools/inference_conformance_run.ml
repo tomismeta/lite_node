@@ -395,6 +395,10 @@ let failure_cases_required_pass
 
 let validator_readiness_gate
     ~execution_accepted
+    ~strict_effort_status
+    ~effort_status
+    ~effort_ready
+    ~effort_blockers
     ~template_count
     ~profile_gate_count
     ~unprofiled_count
@@ -424,6 +428,7 @@ let validator_readiness_gate
     Profile.validator_readiness_accepted
       ~execution_ready:execution_accepted
       ~failure_cases_ready
+      ~effort_ready
       ~profile_ready
       ~roots_ready
       ~cross_platform_ready
@@ -445,6 +450,7 @@ let validator_readiness_gate
         ~included_template_count
         ~counted_failure_case_count
         ~accepted_counted_failure_case_count
+    @ effort_blockers
     @ Profile.consensus_ready_blockers
         ~profile_gate_count
         ~unprofiled_count
@@ -459,6 +465,8 @@ let validator_readiness_gate
     `String (if execution_accepted then "accepted" else "rejected");
     "failure_case_status",
     `String (if failure_cases_ready then "accepted" else "rejected");
+    "strict_effort_status", `String strict_effort_status;
+    "effort_status", `String effort_status;
     "profile_status",
     `String (if profile_ready then "accepted" else "rejected");
     "profile_root_status",
@@ -1591,6 +1599,10 @@ let run_p0_plus_pack path =
     "validator_readiness_gate",
     validator_readiness_gate
       ~execution_accepted
+      ~strict_effort_status:"not_supported"
+      ~effort_status:"not_supported"
+      ~effort_ready:false
+      ~effort_blockers:["p0_plus_effort_authority_missing"]
       ~template_count:fixture_count
       ~profile_gate_count
       ~unprofiled_count:0
@@ -1633,6 +1645,32 @@ let run_index path =
     if execution_accepted then "accepted" else "rejected"
   in
   let template_count = List.length results in
+  let result_fields =
+    List.map
+      (function
+        | _, `Assoc fields -> fields
+        | _ -> fail "result must be an object")
+      results
+  in
+  let strict_effort_ready =
+    template_count > 0
+    &&
+    List.for_all
+      (fun fields -> bool_field "strict_effort" fields)
+      result_fields
+  in
+  let effort_match_ready =
+    template_count > 0
+    &&
+    List.for_all
+      (fun fields -> bool_field "effort_match" fields)
+      result_fields
+  in
+  let effort_blockers =
+    []
+    |> add_blocker (not strict_effort_ready) "strict_effort_not_enabled"
+    |> add_blocker (not effort_match_ready) "effort_mismatch"
+  in
   let included_failure_template_count =
     List.length
       (List.filter
@@ -1746,6 +1784,12 @@ let run_index path =
     "validator_readiness_gate",
     validator_readiness_gate
       ~execution_accepted
+      ~strict_effort_status:
+        (if strict_effort_ready then "accepted" else "rejected")
+      ~effort_status:
+        (if effort_match_ready then "accepted" else "rejected")
+      ~effort_ready:(strict_effort_ready && effort_match_ready)
+      ~effort_blockers
       ~template_count
       ~profile_gate_count
       ~unprofiled_count

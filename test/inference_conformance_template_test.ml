@@ -743,6 +743,7 @@ let check_validator_readiness_predicate () =
     (Profile.validator_readiness_accepted
        ~execution_ready:true
        ~failure_cases_ready:true
+       ~effort_ready:true
        ~profile_ready:true
        ~roots_ready:true
        ~cross_platform_ready:true);
@@ -752,15 +753,27 @@ let check_validator_readiness_predicate () =
        (Profile.validator_readiness_accepted
           ~execution_ready:true
           ~failure_cases_ready:true
+          ~effort_ready:true
           ~profile_ready:true
           ~roots_ready:true
           ~cross_platform_ready:false));
+  check
+    "validator readiness rejects missing effort"
+    (not
+       (Profile.validator_readiness_accepted
+          ~execution_ready:true
+          ~failure_cases_ready:true
+          ~effort_ready:false
+          ~profile_ready:true
+          ~roots_ready:true
+          ~cross_platform_ready:true));
   check
     "validator readiness rejects local-only execution evidence"
     (not
        (Profile.validator_readiness_accepted
           ~execution_ready:true
           ~failure_cases_ready:true
+          ~effort_ready:true
           ~profile_ready:false
           ~roots_ready:true
           ~cross_platform_ready:true))

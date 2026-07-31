@@ -353,6 +353,7 @@ let static_validator_readiness_gate
     Profile.validator_readiness_accepted
       ~execution_ready:false
       ~failure_cases_ready:false
+      ~effort_ready:false
       ~profile_ready
       ~roots_ready
       ~cross_platform_ready
@@ -362,6 +363,7 @@ let static_validator_readiness_gate
     |> add_blocker (not schema_accepted) "schema_rejected"
     |> add_blocker true "execution_not_run"
     |> add_blocker true "punitive_failure_cases_not_run"
+    |> add_blocker true "effort_not_run"
     |> add_blocker
          (not cross_platform_ready)
          "cross_platform_conformance_missing"
@@ -380,6 +382,8 @@ let static_validator_readiness_gate
     "schema_status", `String schema_status;
     "execution_status", `String "not_run";
     "failure_case_status", `String "not_run";
+    "strict_effort_status", `String "not_run";
+    "effort_status", `String "not_run";
     "profile_status",
     `String (if profile_ready then "accepted" else "rejected");
     "profile_root_status",

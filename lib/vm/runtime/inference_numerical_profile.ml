@@ -225,11 +225,13 @@ let root_bindings_required_pass ~required counts =
 let validator_readiness_accepted
     ~execution_ready
     ~failure_cases_ready
+    ~effort_ready
     ~profile_ready
     ~roots_ready
     ~cross_platform_ready =
   execution_ready
   && failure_cases_ready
+  && effort_ready
   && profile_ready
   && roots_ready
   && cross_platform_ready

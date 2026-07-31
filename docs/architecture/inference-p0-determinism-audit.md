@@ -140,11 +140,12 @@ failure cases were included, how many counted cases ran, and whether every
 counted case accepted.
 
 Runner reports also include a diagnostic `validator_readiness_gate`. That gate
-composes VM execution, punitive failure execution, consensus-ready profile
-status, and profile-root binding into one answer. It is expected to reject the
-current P0 artifacts even when positive execution and failure cases pass,
-because some P0 profiles are still local-only and the remaining
-consensus-candidate profiles still carry blocker codes. It also rejects
+composes VM execution, punitive failure execution, strict effort authority,
+consensus-ready profile status, profile-root binding, and cross-platform
+evidence into one answer. It is expected to reject the current P0 artifacts
+even when positive execution and failure cases pass, because some P0 profiles
+are still local-only and the remaining consensus-candidate profiles still carry
+blocker codes. It also rejects reports without `--strict-effort` and
 single-platform reports with `cross_platform_conformance_missing`; a local
 Linux runner result is not a validator portability matrix.
 

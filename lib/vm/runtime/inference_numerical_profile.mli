@@ -91,6 +91,7 @@ val root_bindings_required_pass :
 val validator_readiness_accepted :
   execution_ready:bool ->
   failure_cases_ready:bool ->
+  effort_ready:bool ->
   profile_ready:bool ->
   roots_ready:bool ->
   cross_platform_ready:bool ->
