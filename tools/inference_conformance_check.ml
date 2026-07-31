@@ -21,6 +21,7 @@ let template_index = ref None
 let require_profile_roots_bound = ref false
 let require_consensus_candidate = ref false
 let require_consensus_ready = ref false
+let require_validator_readiness = ref false
 
 let fail message =
   prerr_endline message;
@@ -45,18 +46,21 @@ let args = [
   "--require-consensus-ready",
   Arg.Set require_consensus_ready,
   "reject reports whose profile gates are not all consensus_ready";
+  "--require-validator-readiness",
+  Arg.Set require_validator_readiness,
+  "exit nonzero unless the report also proves validator readiness";
 ]
 
 let usage =
   "inference_conformance_check --template <path> \
    [--require-profile-roots-bound] [--require-consensus-candidate] \
-   [--require-consensus-ready]\n\
+   [--require-consensus-ready] [--require-validator-readiness]\n\
    or inference_conformance_check --template-dir <dir> \
    [--require-profile-roots-bound] [--require-consensus-candidate] \
-   [--require-consensus-ready]\n\
+   [--require-consensus-ready] [--require-validator-readiness]\n\
    or inference_conformance_check --template-index <path> \
    [--require-profile-roots-bound] [--require-consensus-candidate] \
-   [--require-consensus-ready]"
+   [--require-consensus-ready] [--require-validator-readiness]"
 
 let read_json path =
   try Yojson.Safe.from_file path with
@@ -333,6 +337,7 @@ let add_blocker condition blocker blockers =
   if condition then blocker :: blockers else blockers
 
 let static_validator_readiness_gate
+    ~required
     ~schema_status
     ~profile_gate_count
     ~unprofiled_count
@@ -378,6 +383,7 @@ let static_validator_readiness_gate
   in
   `Assoc [
     "diagnostic_only", `Bool true;
+    "required", `Bool required;
     "status", `String (if ready then "accepted" else "rejected");
     "schema_status", `String schema_status;
     "execution_status", `String "not_run";
@@ -934,6 +940,7 @@ let producer_index_report index_path =
         profile_root_binding_counts;
       "validator_readiness_gate",
       static_validator_readiness_gate
+        ~required:!require_validator_readiness
         ~schema_status
         ~profile_gate_count
         ~unprofiled_count:unprofiled_template_count
@@ -958,12 +965,28 @@ let producer_index_report index_path =
 
 let print_report_and_exit report =
   print_endline (Yojson.Safe.pretty_to_string report);
-  match report with
-  | `Assoc fields ->
-    (match string_field "status" fields with
-     | Some "accepted" -> ()
-     | _ -> exit 1)
-  | _ -> exit 1
+  let accepted =
+    match report with
+    | `Assoc fields ->
+      let report_accepted =
+        match string_field "status" fields with
+        | Some "accepted" -> true
+        | _ -> false
+      in
+      let validator_readiness_accepted =
+        (not !require_validator_readiness)
+        ||
+        match field "validator_readiness_gate" fields with
+        | Some (`Assoc gate_fields) ->
+          (match string_field "status" gate_fields with
+           | Some "accepted" -> true
+           | _ -> false)
+        | _ -> false
+      in
+      report_accepted && validator_readiness_accepted
+    | _ -> false
+  in
+  if not accepted then exit 1
 
 let () =
   Arg.parse args (fun arg -> fail ("unexpected argument: " ^ arg)) usage;
@@ -1057,6 +1080,7 @@ let () =
                 profile_root_binding_counts;
               "validator_readiness_gate",
               static_validator_readiness_gate
+                ~required:!require_validator_readiness
                 ~schema_status
                 ~profile_gate_count
                 ~unprofiled_count:(1 - profile_gate_count)
@@ -1156,6 +1180,7 @@ let () =
           root_binding_counts;
         "validator_readiness_gate",
         static_validator_readiness_gate
+          ~required:!require_validator_readiness
           ~schema_status
           ~profile_gate_count
           ~unprofiled_count

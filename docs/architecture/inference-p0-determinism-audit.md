@@ -289,6 +289,8 @@ always rejects with `execution_not_run` and
 It also carries `cross_platform_conformance_missing`. That makes schema
 acceptance visibly different from validator readiness before any runner report
 or multi-platform evidence is attached.
+Use `--require-validator-readiness` on the checker only when you intentionally
+want that schema-only report to fail unless the nested readiness gate accepts.
 
 Producer-index reports include diagnostic `profile_gates`, using a declared
 template profile when present and the opcode's current runtime profile when the
