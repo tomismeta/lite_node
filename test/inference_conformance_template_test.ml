@@ -2368,9 +2368,24 @@ let check_rejects_single_delta_expected_span () =
   | Error error -> failwith (Template.error_message error)
   | Ok _ -> failwith "expected delta span rejection"
 
+let check_q1_required_failure_expectations () =
+  check
+    "q1 required failure expectations"
+    (Template.q1_required_failure_expectations
+     = [
+       "nonfinite_input_nan", "reject_before_write";
+       "nonfinite_input_infinity", "reject_before_write";
+       "output_input_aliasing", "accept_from_snapshot";
+       "partial_output_input_aliasing", "accept_from_snapshot";
+       "k_not_multiple_of_128", "reject_before_write";
+       "bad_q1_owner_length", "reject_before_write";
+       "nonfinite_fp16_scale", "reject_before_write";
+     ])
+
 let () =
   check_accepts_template ();
   check_q1_profile_obligations ();
+  check_q1_required_failure_expectations ();
   check_profile_root ();
   check_profile_root_binding_counts ();
   check_profile_root_binding_catalog ();

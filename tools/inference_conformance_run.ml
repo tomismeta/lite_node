@@ -1546,17 +1546,6 @@ let failure_case_results root_dir opcode template registers values op =
         cases
     | _ -> []
 
-let q1_required_failure_cases =
-  [
-    "nonfinite_input_nan", "reject_before_write";
-    "nonfinite_input_infinity", "reject_before_write";
-    "output_input_aliasing", "accept_from_snapshot";
-    "partial_output_input_aliasing", "accept_from_snapshot";
-    "k_not_multiple_of_128", "reject_before_write";
-    "bad_q1_owner_length", "reject_before_write";
-    "nonfinite_fp16_scale", "reject_before_write";
-  ]
-
 let required_failure_case_contract opcode failure_results =
   if not (String.equal opcode "LINEAR_Q1_G128_FP") then
     "not_applicable", []
@@ -1574,7 +1563,7 @@ let required_failure_case_contract opcode failure_results =
         rows
     in
     let blockers =
-      q1_required_failure_cases
+      Template.q1_required_failure_expectations
       |> List.fold_left
            (fun blockers (case, expected_prefix) ->
               match row_for case with

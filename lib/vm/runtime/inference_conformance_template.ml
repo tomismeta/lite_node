@@ -114,6 +114,17 @@ let requirements = [
 
 let p0_opcodes = List.map (fun requirement -> requirement.opcode) requirements
 
+let q1_required_failure_expectations =
+  [
+    "nonfinite_input_nan", "reject_before_write";
+    "nonfinite_input_infinity", "reject_before_write";
+    "output_input_aliasing", "accept_from_snapshot";
+    "partial_output_input_aliasing", "accept_from_snapshot";
+    "k_not_multiple_of_128", "reject_before_write";
+    "bad_q1_owner_length", "reject_before_write";
+    "nonfinite_fp16_scale", "reject_before_write";
+  ]
+
 let sha256 raw =
   Digestif.SHA256.(digest_string raw |> to_hex)
 

@@ -791,15 +791,7 @@ let failure_issues path opcode fields =
                 | _ -> None)
               parsed
           in
-          [
-            "nonfinite_input_nan", "reject_before_write";
-            "nonfinite_input_infinity", "reject_before_write";
-            "output_input_aliasing", "accept_from_snapshot";
-            "partial_output_input_aliasing", "accept_from_snapshot";
-            "k_not_multiple_of_128", "reject_before_write";
-            "bad_q1_owner_length", "reject_before_write";
-            "nonfinite_fp16_scale", "reject_before_write";
-          ]
+          Template.q1_required_failure_expectations
           |> List.filter_map (fun (case, expected_prefix) ->
             match expected_for case with
             | Some expected when starts_with expected_prefix expected -> None
