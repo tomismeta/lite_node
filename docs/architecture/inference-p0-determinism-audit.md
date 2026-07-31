@@ -222,6 +222,18 @@ this stale artifact, `insufficient_input_bytes` is counted and accepted with
 Q1 failure-contract blockers are the stale aliasing expectation and the missing
 byte-offset / lower-effort / partial-aliasing cases.
 
+The runner also validates the shape of every required Q1 punitive mutation.
+The case name alone is not sufficient. For example, a
+`negative_byte_offset` row must actually mutate
+`parameter_addresses_and_scalar_params.values.byte_offset` to a negative value;
+it cannot satisfy the required contract by mutating `k` or another scalar that
+happens to reject. Exact output/input aliasing may use either the direct
+`set_output_base_to_first_input_base` mutation or the same `*_plus` mutation
+with `offset_cells = 0`; partial aliasing must use a positive offset. Every
+failure row now reports `mutation_shape_status` and
+`mutation_shape_blockers`, and those blockers feed the Q1 failure-case
+contract gate.
+
 The current VM-semantics root supersedes the earlier
 `5eddadb896095cbb74b716994cd08743052fd27be0f235e93ea089df9a5a51d1`
 root. The current numerical profile root supersedes
@@ -256,8 +268,14 @@ compared runner reports do not cover every required opcode is rejected as
 matrix SHA-256, a matching `profile_catalog_root`, a matching
 `template_corpus_root`, empty matrix blockers, and bound source reports. The
 matrix signature includes positive output spans, exact effort, VM-semantics
-binding, ABI declaration binding, and counted failure/atomicity outcomes, so
-cross-platform agreement is not limited to the happy path. For a
+binding, ABI declaration binding, executable ABI binding, ingress rejection
+authority, mutation-shape status/blockers, and counted failure/atomicity
+outcomes, so cross-platform agreement is not limited to the happy path. The
+matrix also carries `result_signature_schema =
+octra.inference.conformance.result-signature.v2`; the runner rejects a pinned
+matrix whose signature schema is missing or stale. This prevents an older
+matrix from qualifying current Q1 evidence after the punitive failure signature
+changes. For a
 focused Q1 runner report with positive execution, counted failure cases, strict
 effort, bound profile roots, bound VM-semantics roots, and bound ABI
 declaration, an accepted and pinned matrix removes
