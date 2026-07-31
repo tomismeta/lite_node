@@ -1448,6 +1448,44 @@ let changed_span_result state (name, base, cells, before) =
     "changed", `Bool changed;
   ]
 
+let expected_output_subspan template =
+  let output = assoc_field "output" template in
+  match list_field "subspans" output with
+  | `Assoc fields :: _ -> Some fields
+  | _ -> None
+
+let snapshot_output_result template state active_before =
+  match active_before, expected_output_subspan template with
+  | Some (_, base, cells, _), Some expected ->
+    let expected_cells = int_field "length_f64_cells" expected in
+    let expected_sha = string_field "sha256" expected in
+    let raw = output_bytes state base cells in
+    let observed_sha = sha256 raw in
+    let matched =
+      cells = expected_cells && String.equal observed_sha expected_sha
+    in
+    matched,
+    `Assoc [
+      "status", `String (if matched then "matched" else "mismatch");
+      "base_address", `Int base;
+      "length_f64_cells", `Int cells;
+      "expected_length_f64_cells", `Int expected_cells;
+      "expected_sha256", `String expected_sha;
+      "observed_sha256", `String observed_sha;
+    ]
+  | None, _ ->
+    false,
+    `Assoc [
+      "status", `String "unavailable";
+      "reason", `String "no_active_output_span";
+    ]
+  | _, None ->
+    false,
+    `Assoc [
+      "status", `String "unavailable";
+      "reason", `String "no_expected_output_subspan";
+    ]
+
 let finite_span_result state (name, base, cells, _) =
   let finite = ref true in
   for index = 0 to cells - 1 do
@@ -1553,6 +1591,11 @@ let failure_case_result root_dir opcode template registers values op case =
     let changed_ok =
       unchanged <> [] && List.for_all (fun (unchanged, _) -> not unchanged) unchanged
     in
+    let snapshot_required = starts_with "accept_from_snapshot" expected in
+    let snapshot_ok, snapshot =
+      if snapshot_required then snapshot_output_result template state active_before
+      else true, `Assoc ["status", `String "not_required"]
+    in
     let observed =
       if ingress_rejected then "ingress_rejected"
       else if ran then "vm_accepted"
@@ -1563,7 +1606,11 @@ let failure_case_result root_dir opcode template registers values op case =
       match expectation with
       | `Must_reject -> true, ((not ran) && unchanged_ok)
       | `Must_accept_changed_finite ->
-        true, (ran && changed_ok && finite_ok)
+        true,
+        (if snapshot_required then
+           ran && active_changed_ok && active_finite_ok && snapshot_ok
+         else
+           ran && changed_ok && finite_ok)
       | `Observation -> false, true
     in
     passed,
@@ -1586,6 +1633,12 @@ let failure_case_result root_dir opcode template registers values op case =
       `String (if active_changed_ok then "changed" else "not_changed");
       "active_finite_status",
       `String (if active_finite_ok then "finite" else "nonfinite_or_missing");
+      "snapshot_output_status",
+      `String
+        (if not snapshot_required then "not_required"
+         else if snapshot_ok then "matched"
+         else "mismatch");
+      "snapshot_output", snapshot;
       "unchanged_spans", `List (List.map snd unchanged);
       "finite_spans", `List (List.map snd finite_spans);
       "active_changed_spans", `List (List.map snd active_changed);

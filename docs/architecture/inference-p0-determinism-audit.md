@@ -721,6 +721,12 @@ valid overlap from that snapshot, and preserve the output span on validation or
 arithmetic rejection. Other P0 primitives keep their primitive-specific alias
 contracts until they are promoted in turn.
 
+The direct runner now treats `accept_from_snapshot` as an exact output contract,
+not merely a "changed and finite" observation. For exact and partial Q1 aliasing
+cases, the active aliased output span must hash to the declared expected output
+bytes, and the cross-platform matrix signs that `snapshot_output` evidence in
+the result signature.
+
 `finite_square_overflow` is now counted for `RMSNORM_FP_EPS` and `L2NORM_FP`
 under the current deterministic normalization profile: finite square/reduction
 overflow must reject before output writeback.

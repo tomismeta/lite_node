@@ -106,11 +106,35 @@ let platform ?runner_sha system machine =
   in
   `Assoc fields
 
-let failure_case ?(observed = "vm_rejected") ?(observed_effort = 200) () =
+let failure_case
+    ?(case = "nonfinite_input_nan")
+    ?(expected = "reject_before_write")
+    ?(observed = "vm_rejected")
+    ?(observed_effort = 200)
+    ?snapshot_sha
+    () =
+  let snapshot_output_status =
+    match snapshot_sha with
+    | None -> "not_required"
+    | Some _ -> "matched"
+  in
+  let snapshot_output =
+    match snapshot_sha with
+    | None -> `Assoc ["status", `String "not_required"]
+    | Some observed_sha ->
+      `Assoc [
+        "status", `String "matched";
+        "base_address", `Int 20000;
+        "length_f64_cells", `Int 6;
+        "expected_length_f64_cells", `Int 6;
+        "expected_sha256", `String (hex_root 'a');
+        "observed_sha256", `String observed_sha;
+      ]
+  in
   `Assoc [
     "opcode", `String "LINEAR_Q1_G128_FP";
-    "case", `String "nonfinite_input_nan";
-    "expected", `String "reject_before_write";
+    "case", `String case;
+    "expected", `String expected;
     "status", `String "accepted";
     "counted", `Bool true;
     "observed", `String observed;
@@ -120,6 +144,8 @@ let failure_case ?(observed = "vm_rejected") ?(observed_effort = 200) () =
     "finite_status", `String "finite";
     "active_changed_status", `String "not_changed";
     "active_finite_status", `String "finite";
+    "snapshot_output_status", `String snapshot_output_status;
+    "snapshot_output", snapshot_output;
     "unchanged_spans",
     `List [
       `Assoc [
@@ -535,6 +561,51 @@ let check_matrix_rejects_failure_case_mismatch () =
         (List.mem "result_mismatch_across_platforms" (blockers fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_failure_snapshot_mismatch () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report
+           ~runner_sha:(hex_root '1')
+           ~failure:
+             (failure_case
+                ~case:"output_input_aliasing"
+                ~expected:"accept_from_snapshot_exact"
+                ~observed:"vm_accepted"
+                ~observed_effort:201
+                ~snapshot_sha:(hex_root 'a')
+                ())
+           "Darwin"
+           "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~failure:
+             (failure_case
+                ~case:"output_input_aliasing"
+                ~expected:"accept_from_snapshot_exact"
+                ~observed:"vm_accepted"
+                ~observed_effort:201
+                ~snapshot_sha:(hex_root 'b')
+                ())
+           "Linux"
+           "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "snapshot mismatch matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "snapshot mismatch blocker"
+        (List.mem "result_mismatch_across_platforms" (blockers fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_opcode_effort_mismatch () =
   with_temp_dir (fun dir ->
     let a =
@@ -932,6 +1003,7 @@ let () =
   check_matrix_rejects_missing_runner_hash ();
   check_matrix_rejects_corpus_mismatch ();
   check_matrix_rejects_failure_case_mismatch ();
+  check_matrix_rejects_failure_snapshot_mismatch ();
   check_matrix_rejects_opcode_effort_mismatch ();
   check_matrix_rejects_profile_root_binding_mismatch ();
   check_matrix_rejects_profile_root_result_mismatch_with_gate_accepted ();

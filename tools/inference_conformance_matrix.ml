@@ -248,6 +248,27 @@ let failure_span_signature = function
     ]
   | _ -> fail "failure span must be an object"
 
+let failure_snapshot_signature = function
+  | `Assoc fields ->
+    `Assoc [
+      "status", `String (string_field "status" fields);
+      "base_address", `Int (int_field "base_address" fields);
+      "length_f64_cells", `Int (int_field "length_f64_cells" fields);
+      "expected_length_f64_cells",
+      `Int (int_field "expected_length_f64_cells" fields);
+      "expected_sha256", `String (string_field "expected_sha256" fields);
+      "observed_sha256", `String (string_field "observed_sha256" fields);
+    ]
+  | _ -> fail "failure snapshot must be an object"
+
+let optional_failure_snapshot_signature fields =
+  match string_field "snapshot_output_status" fields with
+  | "not_required" -> `Assoc ["status", `String "not_required"]
+  | _ ->
+    (match field "snapshot_output" fields with
+     | Some value -> failure_snapshot_signature value
+     | None -> fail "missing snapshot_output")
+
 let failure_case_signature = function
   | `Assoc fields ->
     `Assoc [
@@ -264,6 +285,9 @@ let failure_case_signature = function
       `String (string_field "active_changed_status" fields);
       "active_finite_status",
       `String (string_field "active_finite_status" fields);
+      "snapshot_output_status",
+      `String (string_field "snapshot_output_status" fields);
+      "snapshot_output", optional_failure_snapshot_signature fields;
       "unchanged_spans",
       `List
         (List.map

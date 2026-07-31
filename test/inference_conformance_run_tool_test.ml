@@ -482,6 +482,47 @@ let different_sha sha =
     String.make 1 replacement ^ String.sub sha 1 63
   | _ -> failwith "expected sha256 hex"
 
+let failure_case_fields result case =
+  list_value "failure_cases" result
+  |> List.find_map (function
+    | `Assoc fields when String.equal (string_value "case" fields) case ->
+      Some fields
+    | _ -> None)
+  |> function
+  | Some fields -> fields
+  | None -> failwith ("missing failure case: " ^ case)
+
+let replace_output_subspan_sha sha = function
+  | `Assoc fields ->
+    let replace_subspan = function
+      | `Assoc subspan ->
+        `Assoc
+          (List.map
+             (fun (key, value) ->
+                if String.equal key "sha256" then key, `String sha
+                else key, value)
+             subspan)
+      | value -> value
+    in
+    let replace_output = function
+      | `Assoc output ->
+        `Assoc
+          (List.map
+             (fun (key, value) ->
+                if String.equal key "subspans" then
+                  key, `List (List.map replace_subspan (list_value key output))
+                else key, value)
+             output)
+      | value -> value
+    in
+    `Assoc
+      (List.map
+         (fun (key, value) ->
+            if String.equal key "output" then key, replace_output value
+            else key, value)
+         fields)
+  | value -> value
+
 let check_good_template_reports_bound_abi () =
   with_temp_dir (fun dir ->
     let code, report =
@@ -509,6 +550,20 @@ let check_good_template_reports_bound_abi () =
     check
       "good accepted counted failure case count"
       (int_value "accepted_counted_failure_case_count" result = 7);
+    let exact_alias = failure_case_fields result "output_input_aliasing" in
+    check
+      "exact alias snapshot matched"
+      (String.equal
+         (string_value "snapshot_output_status" exact_alias)
+         "matched");
+    let partial_alias =
+      failure_case_fields result "partial_output_input_aliasing"
+    in
+    check
+      "partial alias snapshot matched"
+      (String.equal
+         (string_value "snapshot_output_status" partial_alias)
+         "matched");
     (match report with
      | `Assoc fields ->
        check_q1_contract_visible (assoc_json "failure_case_gate" fields)
@@ -603,7 +658,45 @@ let check_require_failure_cases_rejects_wrong_q1_expectation () =
        check
          "wrong Q1 expectation blocker"
          (List.mem
-            "q1_failure_case_expected_mismatch_nonfinite_fp16_scale"
+         "q1_failure_case_expected_mismatch_nonfinite_fp16_scale"
+            (string_list "blockers" gate))
+     | _ -> failwith "report must be object"))
+
+let check_accept_snapshot_requires_exact_output () =
+  with_temp_dir (fun dir ->
+    let bad_sha = different_sha (sha256 expected_output) in
+    let code, report =
+      run_conformance
+        dir
+        (q1_template () |> replace_output_subspan_sha bad_sha)
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "bad snapshot output runner exits nonzero" (code = 1);
+    let result = first_result report in
+    let alias = failure_case_fields result "output_input_aliasing" in
+    check
+      "bad exact alias snapshot rejected"
+      (String.equal (string_value "status" alias) "rejected");
+    check
+      "bad exact alias snapshot mismatch"
+      (String.equal
+         (string_value "snapshot_output_status" alias)
+         "mismatch");
+    (match report with
+     | `Assoc fields ->
+       let gate = assoc_json "failure_case_gate" fields in
+       check
+         "bad snapshot failure gate rejected"
+         (String.equal (string_value "status" gate) "rejected");
+       check
+         "bad snapshot failure gate blocker"
+         (List.mem
+            "q1_failure_case_rejected_output_input_aliasing"
             (string_list "blockers" gate))
      | _ -> failwith "report must be object"))
 
@@ -841,6 +934,7 @@ let () =
   check_good_template_reports_bound_abi ();
   check_require_failure_cases_rejects_missing_q1_case ();
   check_require_failure_cases_rejects_wrong_q1_expectation ();
+  check_accept_snapshot_requires_exact_output ();
   check_stale_abi_is_visible_in_executable_report ();
   check_readiness_gate_rejects_stale_abi ();
   check_pinned_cross_platform_matrix_is_consumed ();
