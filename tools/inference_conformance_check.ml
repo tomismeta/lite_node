@@ -525,8 +525,13 @@ let failure_issues path opcode fields =
               in
               `Case
                 (case,
-                 field "mutations" failure_fields <> None,
-                 field "unchanged_spans" failure_fields <> None)
+                 string_field "expected" failure_fields <> None,
+                 (match list_field "executable_mutations" failure_fields with
+                  | Some (_ :: _) -> true
+                  | _ -> false),
+                 (match list_field "unchanged_spans" failure_fields with
+                  | Some (_ :: _) -> true
+                  | _ -> false))
             | _ -> `Bad)
           failures
       in
@@ -539,16 +544,30 @@ let failure_issues path opcode fields =
       let missing_mutations =
         List.filter_map
           (function
-            | `Case (case, false, _) -> Some case
+            | `Case (case, _, false, _) -> Some case
             | _ -> None)
           parsed
       in
       let missing_unchanged =
         List.filter_map
           (function
-            | `Case (case, _, false) -> Some case
+            | `Case (case, _, _, false) -> Some case
             | _ -> None)
           parsed
+      in
+      let missing_expected =
+        List.filter_map
+          (function
+            | `Case (case, false, _, _) -> Some case
+            | _ -> None)
+          parsed
+      in
+      let expected_issue =
+        if missing_expected = [] then []
+        else
+          [issue ~opcode path
+             ("failure cases lack expected outcome: "
+              ^ String.concat "," missing_expected)]
       in
       let mutation_issue =
         if missing_mutations = [] then []
@@ -564,7 +583,7 @@ let failure_issues path opcode fields =
              ("failure cases lack unchanged_spans: "
               ^ String.concat "," missing_unchanged)]
       in
-      bad @ mutation_issue @ unchanged_issue
+      bad @ expected_issue @ mutation_issue @ unchanged_issue
 
 let gated_delta_semantic_issues path opcode fields =
   if not (String.equal opcode "GATED_DELTA_RULE_FP") then []
