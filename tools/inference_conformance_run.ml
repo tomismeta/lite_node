@@ -82,6 +82,20 @@ let read_json path =
 let sha256 raw =
   Digestif.SHA256.(digest_string raw |> to_hex)
 
+let backend_type_string = function
+  | Sys.Native -> "native"
+  | Sys.Bytecode -> "bytecode"
+  | Sys.Other value -> "other:" ^ value
+
+let platform_json () =
+  `Assoc [
+    "ocaml_version", `String Sys.ocaml_version;
+    "os_type", `String Sys.os_type;
+    "word_size", `Int Sys.word_size;
+    "big_endian", `Bool Sys.big_endian;
+    "backend_type", `String (backend_type_string Sys.backend_type);
+  ]
+
 let field name fields =
   match List.filter (fun (key, _) -> String.equal key name) fields with
   | [(_, value)] -> Some value
@@ -405,12 +419,16 @@ let validator_readiness_gate
   let roots_ready =
     Profile.root_bindings_are_consensus_ready root_binding_counts
   in
+  let cross_platform_ready = false in
   let blockers =
     []
     |> add_blocker (not execution_accepted) "execution_rejected"
     |> add_blocker
          (not failure_cases_ready)
          "punitive_failure_cases_not_accepted"
+    |> add_blocker
+         (not cross_platform_ready)
+         "cross_platform_conformance_missing"
   in
   let blockers =
     blockers
@@ -443,6 +461,8 @@ let validator_readiness_gate
     `String (if profile_ready then "accepted" else "rejected");
     "profile_root_status",
     `String (if roots_ready then "accepted" else "rejected");
+    "cross_platform_status",
+    `String (if cross_platform_ready then "accepted" else "rejected");
     "blockers",
     `List (List.map (fun blocker -> `String blocker) blockers);
   ]
@@ -1536,6 +1556,7 @@ let run_p0_plus_pack path =
     "execution_status", `String execution_status;
     "diagnostic_only", `Bool true;
     "execution_mode", `String "p0_plus_fixture_pack_vm_execution";
+    "platform", platform_json ();
     "fixture_pack", `String path;
     "fixture_count", `Int (List.length results);
     "accepted_count", `Int (List.length (List.filter fst results));
@@ -1673,6 +1694,7 @@ let run_index path =
     "execution_status", `String execution_status;
     "diagnostic_only", `Bool true;
     "execution_mode", `String "positive_template_vm_execution";
+    "platform", platform_json ();
     "template_index", `String path;
     "template_count", `Int template_count;
     "failure_case_gate",

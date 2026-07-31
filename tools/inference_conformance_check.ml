@@ -75,6 +75,20 @@ let read_file path =
 let sha256 raw =
   Digestif.SHA256.(digest_string raw |> to_hex)
 
+let backend_type_string = function
+  | Sys.Native -> "native"
+  | Sys.Bytecode -> "bytecode"
+  | Sys.Other value -> "other:" ^ value
+
+let platform_json () =
+  `Assoc [
+    "ocaml_version", `String Sys.ocaml_version;
+    "os_type", `String Sys.os_type;
+    "word_size", `Int Sys.word_size;
+    "big_endian", `Bool Sys.big_endian;
+    "backend_type", `String (backend_type_string Sys.backend_type);
+  ]
+
 let field name fields =
   match List.filter (fun (key, _) -> String.equal key name) fields with
   | [(_, value)] -> Some value
@@ -334,11 +348,15 @@ let static_validator_readiness_gate
   let roots_ready =
     Profile.root_bindings_are_consensus_ready root_binding_counts
   in
+  let cross_platform_ready = false in
   let blockers =
     []
     |> add_blocker (not schema_accepted) "schema_rejected"
     |> add_blocker true "execution_not_run"
     |> add_blocker true "punitive_failure_cases_not_run"
+    |> add_blocker
+         (not cross_platform_ready)
+         "cross_platform_conformance_missing"
   in
   let blockers =
     blockers
@@ -358,6 +376,8 @@ let static_validator_readiness_gate
     `String (if profile_ready then "accepted" else "rejected");
     "profile_root_status",
     `String (if roots_ready then "accepted" else "rejected");
+    "cross_platform_status",
+    `String (if cross_platform_ready then "accepted" else "rejected");
     "blockers",
     `List (List.map (fun blocker -> `String blocker) blockers);
   ]
@@ -870,6 +890,7 @@ let producer_index_report index_path =
       "status", `String status;
       "schema_status", `String schema_status;
       "diagnostic_only", `Bool true;
+      "platform", platform_json ();
       "index_path", `String index_path;
       "template_count", `Int (List.length templates);
       "p0_opcodes",
@@ -993,6 +1014,7 @@ let () =
               "status", `String status;
               "schema_status", `String schema_status;
               "diagnostic_only", `Bool true;
+              "platform", platform_json ();
               "template_count", `Int 1;
               "profile_gate_count", `Int profile_gate_count;
               "classified_profile_gate_count",
@@ -1090,6 +1112,7 @@ let () =
         "status", `String status;
         "schema_status", `String schema_status;
         "diagnostic_only", `Bool true;
+        "platform", platform_json ();
         "template_count", `Int (List.length templates);
         "profile_gate_count", `Int profile_gate_count;
         "classified_profile_gate_count", `Int classified_profile_gate_count;

@@ -144,7 +144,9 @@ composes VM execution, punitive failure execution, consensus-ready profile
 status, and profile-root binding into one answer. It is expected to reject the
 current P0 artifacts even when positive execution and failure cases pass,
 because some P0 profiles are still local-only and the remaining
-consensus-candidate profiles still carry blocker codes.
+consensus-candidate profiles still carry blocker codes. It also rejects
+single-platform reports with `cross_platform_conformance_missing`; a local
+Linux runner result is not a validator portability matrix.
 
 The saved reports live beside the indexes as
 `litenode-failure-atomicity-report.cjson`.
@@ -248,8 +250,9 @@ Acceptance means only:
 Static checker reports include a diagnostic `validator_readiness_gate` too. It
 always rejects with `execution_not_run` and
 `punitive_failure_cases_not_run`, because the checker never executes VM math.
-That makes schema acceptance visibly different from validator readiness before
-any runner report is attached.
+It also carries `cross_platform_conformance_missing`. That makes schema
+acceptance visibly different from validator readiness before any runner report
+or multi-platform evidence is attached.
 
 Producer-index reports include diagnostic `profile_gates`, using a declared
 template profile when present and the opcode's current runtime profile when the
