@@ -908,6 +908,7 @@ let producer_index_report index_path =
       "status", `String status;
       "schema_status", `String schema_status;
       "diagnostic_only", `Bool true;
+      "validator_readiness_required", `Bool !require_validator_readiness;
       "platform", platform_json ();
       "index_path", `String index_path;
       "template_count", `Int (List.length templates);
@@ -1051,6 +1052,7 @@ let () =
               "status", `String status;
               "schema_status", `String schema_status;
               "diagnostic_only", `Bool true;
+              "validator_readiness_required", `Bool !require_validator_readiness;
               "platform", platform_json ();
               "template_count", `Int 1;
               "profile_gate_count", `Int profile_gate_count;
@@ -1152,6 +1154,7 @@ let () =
         "status", `String status;
         "schema_status", `String schema_status;
         "diagnostic_only", `Bool true;
+        "validator_readiness_required", `Bool !require_validator_readiness;
         "platform", platform_json ();
         "template_count", `Int (List.length templates);
         "profile_gate_count", `Int profile_gate_count;

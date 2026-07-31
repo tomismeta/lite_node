@@ -1573,6 +1573,7 @@ let run_p0_plus_pack path =
     "status", `String (if accepted then "accepted" else "rejected");
     "execution_status", `String execution_status;
     "diagnostic_only", `Bool true;
+    "validator_readiness_required", `Bool !require_validator_readiness;
     "execution_mode", `String "p0_plus_fixture_pack_vm_execution";
     "platform", platform_json ();
     "fixture_pack", `String path;
@@ -1755,6 +1756,7 @@ let run_index path =
     "status", `String status;
     "execution_status", `String execution_status;
     "diagnostic_only", `Bool true;
+    "validator_readiness_required", `Bool !require_validator_readiness;
     "execution_mode", `String "positive_template_vm_execution";
     "platform", platform_json ();
     "template_index", `String path;

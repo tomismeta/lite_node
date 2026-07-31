@@ -187,6 +187,10 @@ execution evidence from validator-ready inference math. Each matrix
 `validator_readiness_gate`, so aggregate matrix failures and per-platform
 runner failures can be inspected without reopening the original report files.
 
+Checker, runner, and matrix reports all expose top-level
+`validator_readiness_required` so consumers can tell whether a report was
+produced as a diagnostic artifact or as a hard readiness gate.
+
 The saved reports live beside the indexes as
 `litenode-failure-atomicity-report.cjson`.
 The checker requires each executable failure case to carry `case`, `expected`,
