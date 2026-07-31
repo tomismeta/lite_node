@@ -224,15 +224,16 @@ byte-offset / lower-effort / partial-aliasing cases.
 
 The runner also validates the shape of every required Q1 punitive mutation.
 The case name alone is not sufficient. For example, a
-`negative_byte_offset` row must actually mutate
+`negative_byte_offset` row must be a single mutation of
 `parameter_addresses_and_scalar_params.values.byte_offset` to a negative value;
-it cannot satisfy the required contract by mutating `k` or another scalar that
-happens to reject. Exact output/input aliasing may use either the direct
+it cannot satisfy the required contract by also mutating `k` or another scalar
+that happens to reject. Exact output/input aliasing may use either the direct
 `set_output_base_to_first_input_base` mutation or the same `*_plus` mutation
-with `offset_cells = 0`; partial aliasing must use a positive offset. Every
-failure row now reports `mutation_shape_status` and
-`mutation_shape_blockers`, and those blockers feed the Q1 failure-case
-contract gate.
+with `offset_cells = 0`; partial aliasing must use a positive offset inside
+the lhs span. The `k_not_multiple_of_128` case must use a positive
+non-multiple value, not a nonpositive shape failure. Every failure row now
+reports `mutation_shape_status` and `mutation_shape_blockers`, and those
+blockers feed the Q1 failure-case contract gate.
 
 The current VM-semantics root supersedes the earlier
 `5eddadb896095cbb74b716994cd08743052fd27be0f235e93ea089df9a5a51d1`
@@ -275,7 +276,12 @@ matrix also carries `result_signature_schema =
 octra.inference.conformance.result-signature.v2`; the runner rejects a pinned
 matrix whose signature schema is missing or stale. This prevents an older
 matrix from qualifying current Q1 evidence after the punitive failure signature
-changes. For a
+changes. Each matrix row must also carry the same signature schema and opcode
+scope, the row-derived platform and runner sets must each contain at least two
+distinct values, and the single row result signature must equal the current
+local runner result signature. A pinned matrix therefore proves this exact
+local Q1 result against independent rows rather than merely proving that some
+compatible-looking matrix exists for the same corpus roots. For a
 focused Q1 runner report with positive execution, counted failure cases, strict
 effort, bound profile roots, bound VM-semantics roots, and bound ABI
 declaration, an accepted and pinned matrix removes

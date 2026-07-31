@@ -13,6 +13,7 @@ Include at startup:
 *)
 
 module Template = Octra_vm.Inference_conformance_template
+module Signature = Octra_vm.Inference_conformance_signature
 
 let runner_reports = ref []
 let min_platforms = ref 2
@@ -20,7 +21,7 @@ let require_validator_readiness = ref false
 let requested_opcodes = ref []
 
 let result_signature_schema =
-  "octra.inference.conformance.result-signature.v2"
+  Signature.schema
 
 let fail message =
   prerr_endline message;
@@ -231,162 +232,6 @@ let platform_key platform =
       string_field "backend_type" platform;
     ]
 
-let subspan_signature = function
-  | `Assoc fields ->
-    `Assoc [
-      "name", `String (string_field "name" fields);
-      "length_f64_cells", `Int (int_field "length_f64_cells" fields);
-      "expected_sha256", `String (string_field "expected_sha256" fields);
-      "observed_sha256", `String (string_field "observed_sha256" fields);
-      "expected_root",
-      (match opt_string_field "expected_root" fields with
-       | None -> `Null
-       | Some root -> `String root);
-      "observed_root", `String (string_field "observed_root" fields);
-      "root_matched", `Bool (bool_field "root_matched" fields);
-      "matched", `Bool (bool_field "matched" fields);
-    ]
-  | _ -> fail "subspan must be an object"
-
-let failure_span_signature = function
-  | `Assoc fields ->
-    `Assoc [
-      "name", `String (string_field "name" fields);
-      "base_address", `Int (int_field "base_address" fields);
-      "length_f64_cells", `Int (int_field "length_f64_cells" fields);
-      "before_sha256", `String (string_field "before_sha256" fields);
-      "after_sha256", `String (string_field "after_sha256" fields);
-    ]
-  | _ -> fail "failure span must be an object"
-
-let finite_span_signature = function
-  | `Assoc fields ->
-    `Assoc [
-      "name", `String (string_field "name" fields);
-      "base_address", `Int (int_field "base_address" fields);
-      "length_f64_cells", `Int (int_field "length_f64_cells" fields);
-      "finite", `Bool (bool_field "finite" fields);
-    ]
-  | _ -> fail "finite span must be an object"
-
-let failure_snapshot_signature = function
-  | `Assoc fields ->
-    `Assoc [
-      "status", `String (string_field "status" fields);
-      "base_address", `Int (int_field "base_address" fields);
-      "length_f64_cells", `Int (int_field "length_f64_cells" fields);
-      "expected_length_f64_cells",
-      `Int (int_field "expected_length_f64_cells" fields);
-      "expected_sha256", `String (string_field "expected_sha256" fields);
-      "observed_sha256", `String (string_field "observed_sha256" fields);
-    ]
-  | _ -> fail "failure snapshot must be an object"
-
-let optional_failure_snapshot_signature fields =
-  match string_field "snapshot_output_status" fields with
-  | "not_required" -> `Assoc ["status", `String "not_required"]
-  | _ ->
-    (match field "snapshot_output" fields with
-     | Some value -> failure_snapshot_signature value
-     | None -> fail "missing snapshot_output")
-
-let failure_case_signature = function
-  | `Assoc fields ->
-    `Assoc [
-      "case", `String (string_field "case" fields);
-      "expected", `String (string_field "expected" fields);
-      "status", `String (string_field "status" fields);
-      "counted", `Bool (bool_field "counted" fields);
-      "observed", `String (string_field "observed" fields);
-      "ingress_rejection_authority",
-      `String (string_field "ingress_rejection_authority" fields);
-      "mutation_shape_status",
-      `String (string_field "mutation_shape_status" fields);
-      "mutation_shape_blockers",
-      `List
-        (List.map
-           (fun blocker -> `String blocker)
-           (string_list_field "mutation_shape_blockers" fields));
-      "observed_effort", `Int (int_field "observed_effort" fields);
-      "unchanged_status", `String (string_field "unchanged_status" fields);
-      "changed_status", `String (string_field "changed_status" fields);
-      "finite_status", `String (string_field "finite_status" fields);
-      "active_changed_status",
-      `String (string_field "active_changed_status" fields);
-      "active_finite_status",
-      `String (string_field "active_finite_status" fields);
-      "snapshot_output_status",
-      `String (string_field "snapshot_output_status" fields);
-      "snapshot_output", optional_failure_snapshot_signature fields;
-      "unchanged_spans",
-      `List
-        (List.map
-           failure_span_signature
-           (list_field "unchanged_spans" fields));
-      "finite_spans",
-      `List
-        (List.map
-           finite_span_signature
-           (list_field "finite_spans" fields));
-      "active_changed_spans",
-      `List
-        (List.map
-           failure_span_signature
-           (list_field "active_changed_spans" fields));
-      "active_finite_spans",
-      `List
-        (List.map
-           finite_span_signature
-           (list_field "active_finite_spans" fields));
-    ]
-  | _ -> fail "failure case must be an object"
-
-let result_signature = function
-  | `Assoc fields ->
-    `Assoc [
-      "opcode", `String (string_field "opcode" fields);
-      "profile_root_binding",
-      (match field "profile_root_binding" fields with
-       | Some (`Assoc _ as binding) -> binding
-       | _ -> fail "missing profile_root_binding");
-      "vm_semantics_binding",
-      (match field "vm_semantics_binding" fields with
-       | Some (`Assoc _ as binding) -> binding
-       | _ -> fail "missing vm_semantics_binding");
-      "abi_declaration_binding",
-      (match field "abi_declaration_binding" fields with
-       | Some (`Assoc _ as binding) -> binding
-       | _ -> fail "missing abi_declaration_binding");
-      "executable_abi_binding",
-      (match field "executable_abi_binding" fields with
-       | Some (`Assoc _ as binding) -> binding
-       | _ -> fail "missing executable_abi_binding");
-      "status", `String (string_field "status" fields);
-      "vm_run", `String (string_field "vm_run" fields);
-      "output_status", `String (string_field "output_status" fields);
-      "expected_effort", `Int (int_field "expected_effort" fields);
-      "observed_effort", `Int (int_field "observed_effort" fields);
-      "expected_opcode_effort",
-      (match field "expected_opcode_effort" fields with
-       | Some value -> value
-       | None -> fail "missing expected_opcode_effort");
-      "observed_opcode_effort",
-      `Int (int_field "observed_opcode_effort" fields);
-      "opcode_effort_match",
-      `Bool (bool_field "opcode_effort_match" fields);
-      "effort_match", `Bool (bool_field "effort_match" fields);
-      "strict_effort", `Bool (bool_field "strict_effort" fields);
-      "required_failure_case_contract",
-      json_field_or_null "required_failure_case_contract" fields;
-      "subspans", `List (List.map subspan_signature (list_field "subspans" fields));
-      "failure_cases",
-      `List
-        (list_field "failure_cases" fields
-         |> List.map failure_case_signature
-         |> List.sort compare);
-    ]
-  | _ -> fail "result must be an object"
-
 let result_opcode = function
   | `Assoc fields -> string_field "opcode" fields
   | _ -> fail "result must be an object"
@@ -474,12 +319,6 @@ let optional_string_list_field name fields =
   | Some `Null
   | None -> []
   | _ -> fail ("invalid list field: " ^ name)
-
-let signature_json results =
-  results
-  |> List.map result_signature
-  |> List.sort compare
-  |> fun values -> Yojson.Safe.to_string (`List values)
 
 let validator_readiness_summary fields =
   match opt_assoc_field "validator_readiness_gate" fields with
@@ -698,7 +537,7 @@ let report_summary path =
            (Option.is_none runner_executable_sha256)
            "missing_runner_executable_sha256"
     in
-    let signature = signature_json results in
+    let signature = Signature.signature_json results in
     let signature_sha256 = sha256 signature in
     let result_opcodes = unique (List.map result_opcode results) in
     let selected_opcodes =
@@ -736,6 +575,7 @@ let report_summary path =
       `List (List.map (fun value -> `String value) selected_opcodes);
       "result_opcodes",
       `List (List.map (fun value -> `String value) result_opcodes);
+      "result_signature_schema", `String Signature.schema;
       "execution_mode", `String execution_mode;
       "status",
       `String

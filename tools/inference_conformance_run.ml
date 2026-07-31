@@ -16,6 +16,7 @@ module VM = Octra_vm.Contract_vm
 module Abi = Octra_vm.Inference_session_abi
 module Fp64 = Octra_vm.Inference_fp64
 module Profile = Octra_vm.Inference_numerical_profile
+module Signature = Octra_vm.Inference_conformance_signature
 module Template = Octra_vm.Inference_conformance_template
 
 let template_index = ref None
@@ -32,7 +33,7 @@ let require_consensus_ready = ref false
 let require_validator_readiness = ref false
 
 let cross_platform_result_signature_schema =
-  "octra.inference.conformance.result-signature.v2"
+  Signature.schema
 
 let fail message =
   prerr_endline message;
@@ -656,16 +657,24 @@ let report_row_is_bound = function
     && (match opt_string_field "template_corpus_root" fields with
         | Some value -> not (String.equal value "")
         | None -> false)
+    && (match opt_string_field "result_signature_schema" fields with
+        | Some schema -> String.equal schema cross_platform_result_signature_schema
+        | None -> false)
   | _ -> false
 
 let report_row_string_field name = function
   | `Assoc fields -> opt_string_field name fields
   | _ -> None
 
+let report_row_string_list_field name = function
+  | `Assoc fields -> optional_string_list_field name fields
+  | _ -> []
+
 let cross_platform_evidence
     ~required_opcodes
     ~profile_catalog_root
-    ~template_corpus_root =
+    ~template_corpus_root
+    ~local_result_signature_sha256 =
   match !cross_platform_matrix with
   | None ->
     `Assoc [
@@ -684,6 +693,11 @@ let cross_platform_evidence
        | Some root -> `String root
        | None -> `Null);
       "matrix_template_corpus_roots", `List [];
+      "local_result_signature_sha256",
+      (match local_result_signature_sha256 with
+       | Some signature -> `String signature
+       | None -> `Null);
+      "local_result_signature_status", `String "missing";
       "blockers", `List [`String "missing_cross_platform_matrix"];
     ]
   | Some path ->
@@ -709,16 +723,33 @@ let cross_platform_evidence
        let observed_opcodes =
          string_list_field "result_opcodes" fields
        in
+       let report_rows = list_field "reports" fields in
+       let row_observed_opcodes =
+         report_rows
+         |> List.map (report_row_string_list_field "result_opcodes")
+         |> List.concat
+         |> unique
+       in
        let result_signature_schema_accepted =
          match opt_string_field "result_signature_schema" fields with
          | Some schema ->
            String.equal schema cross_platform_result_signature_schema
          | None -> false
        in
+       let row_result_signature_schema_accepted =
+         List.for_all
+           (function
+             | `Assoc row_fields ->
+               (match opt_string_field "result_signature_schema" row_fields with
+                | Some schema ->
+                  String.equal schema cross_platform_result_signature_schema
+                | None -> false)
+             | _ -> false)
+           report_rows
+       in
        let matrix_blockers =
          optional_string_list_field "blockers" fields
        in
-       let report_rows = list_field "reports" fields in
        let matrix_profile_catalog_roots =
          optional_string_list_field "profile_catalog_roots" fields
        in
@@ -768,6 +799,14 @@ let cross_platform_evidence
        let opcode_scope_accepted =
          opcodes_covered ~required_opcodes ~observed_opcodes
        in
+       let row_opcode_scope_accepted =
+         List.for_all
+           (fun row ->
+              opcodes_covered
+                ~required_opcodes
+                ~observed_opcodes:(report_row_string_list_field "result_opcodes" row))
+           report_rows
+       in
        let profile_catalog_accepted =
          match profile_catalog_root, matrix_profile_catalog_roots with
          | Some root, [matrix_root] -> String.equal root matrix_root
@@ -792,11 +831,23 @@ let cross_platform_evidence
        let row_runner_count_accepted =
          matrix_distinct_runner_count = List.length row_runner_executables
        in
+       let row_platform_minimum_accepted =
+         List.length row_platforms >= 2
+       in
+       let row_runner_minimum_accepted =
+         List.length row_runner_executables >= 2
+       in
        let row_signature_count_accepted =
          matrix_result_signature_count = List.length row_result_signatures
        in
        let row_signature_accepted =
          List.length row_result_signatures = 1
+       in
+       let local_result_signature_accepted =
+         match local_result_signature_sha256, row_result_signatures with
+         | Some local, [matrix] -> String.equal local matrix
+         | Some _, _ -> false
+         | None, _ -> false
        in
        let row_profile_catalog_accepted =
          row_profile_catalog_roots = matrix_profile_catalog_roots
@@ -821,8 +872,14 @@ let cross_platform_evidence
               (not opcode_scope_accepted)
               "matrix_opcode_scope_mismatch"
          |> add_blocker
+              (not row_opcode_scope_accepted)
+              "matrix_row_opcode_scope_mismatch"
+         |> add_blocker
               (not result_signature_schema_accepted)
               "matrix_result_signature_schema_mismatch"
+         |> add_blocker
+              (not row_result_signature_schema_accepted)
+              "matrix_row_result_signature_schema_mismatch"
          |> add_blocker
               (not profile_catalog_accepted)
               "matrix_profile_catalog_mismatch"
@@ -839,11 +896,20 @@ let cross_platform_evidence
               (not row_runner_count_accepted)
               "matrix_runner_executable_count_mismatch"
          |> add_blocker
+              (not row_platform_minimum_accepted)
+              "matrix_insufficient_distinct_platforms"
+         |> add_blocker
+              (not row_runner_minimum_accepted)
+              "matrix_insufficient_distinct_runner_executables"
+         |> add_blocker
               (not row_signature_count_accepted)
               "matrix_result_signature_count_mismatch"
          |> add_blocker
               (not row_signature_accepted)
               "matrix_result_signature_row_mismatch"
+         |> add_blocker
+              (not local_result_signature_accepted)
+              "matrix_local_result_signature_mismatch"
          |> add_blocker
               (not row_profile_catalog_accepted)
               "matrix_row_profile_catalog_mismatch"
@@ -866,6 +932,10 @@ let cross_platform_evidence
          `List (List.map (fun opcode -> `String opcode) required_opcodes);
          "covered_opcodes",
          `List (List.map (fun opcode -> `String opcode) observed_opcodes);
+         "row_covered_opcodes",
+         `List (List.map (fun opcode -> `String opcode) row_observed_opcodes);
+         "row_opcode_coverage_status",
+         `String (if row_opcode_scope_accepted then "accepted" else "rejected");
          "required_result_signature_schema",
          `String cross_platform_result_signature_schema;
          "matrix_result_signature_schema",
@@ -875,6 +945,9 @@ let cross_platform_evidence
          "result_signature_schema_status",
          `String
            (if result_signature_schema_accepted then "accepted" else "rejected");
+         "row_result_signature_schema_status",
+         `String
+           (if row_result_signature_schema_accepted then "accepted" else "rejected");
          "schema_status",
          `String (if schema_accepted then "accepted" else "rejected");
          "required_profile_catalog_root",
@@ -909,8 +982,26 @@ let cross_platform_evidence
          `Int (List.length row_platforms);
          "row_distinct_runner_executable_count",
          `Int (List.length row_runner_executables);
+         "row_distinct_platform_status",
+         `String
+           (if row_platform_minimum_accepted then "accepted" else "rejected");
+         "row_distinct_runner_executable_status",
+         `String
+           (if row_runner_minimum_accepted then "accepted" else "rejected");
          "row_result_signature_count",
          `Int (List.length row_result_signatures);
+         "row_result_signatures",
+         `List
+           (List.map
+              (fun signature -> `String signature)
+              row_result_signatures);
+         "local_result_signature_sha256",
+         (match local_result_signature_sha256 with
+          | Some signature -> `String signature
+          | None -> `Null);
+         "local_result_signature_status",
+         `String
+           (if local_result_signature_accepted then "accepted" else "rejected");
          "row_profile_catalog_roots",
          `List
            (List.map
@@ -925,8 +1016,11 @@ let cross_platform_evidence
          `String
            (if row_platform_count_accepted
                && row_runner_count_accepted
+               && row_platform_minimum_accepted
+               && row_runner_minimum_accepted
                && row_signature_count_accepted
                && row_signature_accepted
+               && local_result_signature_accepted
                && row_profile_catalog_accepted
                && row_template_corpus_accepted then
               "accepted"
@@ -1644,6 +1738,11 @@ let q1_required_owner_bytes values =
     Some (n * (k / 128) * 18)
   | _ -> None
 
+let q1_lhs_cell_count values =
+  match opt_int_field "m" values, opt_int_field "k" values with
+  | Some m, Some k when m > 0 && k > 0 -> Some (m * k)
+  | _ -> None
+
 let q1_mutates_scalar param predicate mutations =
   List.exists
     (fun mutation ->
@@ -1691,7 +1790,12 @@ let q1_nonfinite_fp16_scale_mutation mutations =
     mutations
 
 let q1_required_mutation_shape_blockers template values case mutations =
-  let matched =
+  let single_mutation =
+    match mutations with
+    | [_] -> true
+    | _ -> false
+  in
+  let shape_matched =
     match case with
     | "nonfinite_input_nan" ->
       List.exists
@@ -1723,17 +1827,20 @@ let q1_required_mutation_shape_blockers template values case mutations =
              | None -> false)))
         mutations
     | "partial_output_input_aliasing" ->
-      List.exists
-        (fun mutation ->
-           mutation_is "set_output_base_to_first_input_base_plus" mutation
-           && mutation_targets "output.base_address" mutation
-           &&
-           match mutation_int_value "offset_cells" mutation with
-           | Some value -> value > 0
-           | None -> false)
-        mutations
+      (match q1_lhs_cell_count values with
+       | Some lhs_cells ->
+         List.exists
+           (fun mutation ->
+              mutation_is "set_output_base_to_first_input_base_plus" mutation
+              && mutation_targets "output.base_address" mutation
+              &&
+              match mutation_int_value "offset_cells" mutation with
+              | Some value -> value > 0 && value < lhs_cells
+              | None -> false)
+           mutations
+       | None -> false)
     | "k_not_multiple_of_128" ->
-      q1_mutates_scalar "k" (fun value -> value <= 0 || value mod 128 <> 0) mutations
+      q1_mutates_scalar "k" (fun value -> value > 0 && value mod 128 <> 0) mutations
     | "bad_q1_owner_length" -> q1_truncates_raw "q1_owner" mutations
     | "negative_byte_offset" ->
       q1_mutates_scalar "byte_offset" (fun value -> value < 0) mutations
@@ -1768,6 +1875,22 @@ let q1_required_mutation_shape_blockers template values case mutations =
            | _ -> false)
         mutations
     | _ -> true
+  in
+  let matched =
+    match case with
+    | "nonfinite_input_nan"
+    | "nonfinite_input_infinity"
+    | "output_input_aliasing"
+    | "partial_output_input_aliasing"
+    | "k_not_multiple_of_128"
+    | "bad_q1_owner_length"
+    | "negative_byte_offset"
+    | "byte_offset_out_of_bounds"
+    | "byte_offset_truncated_span"
+    | "nonfinite_fp16_scale"
+    | "lower_effort_limit" ->
+      single_mutation && shape_matched
+    | _ -> shape_matched
   in
   if matched then []
   else ["q1_failure_case_mutation_mismatch_" ^ case]
@@ -3137,11 +3260,15 @@ let run_index path =
       (Profile.profile_catalog_root_json profile_gates)
   in
   let template_corpus_root = Some (template_corpus_root root_dir entries) in
+  let local_result_signature_sha256 =
+    Some (sha256 (Signature.signature_json (List.map snd results)))
+  in
   let cross_platform_evidence_json =
     cross_platform_evidence
       ~required_opcodes
       ~profile_catalog_root
       ~template_corpus_root
+      ~local_result_signature_sha256
   in
   let accepted =
     execution_accepted
@@ -3213,6 +3340,11 @@ let run_index path =
     "template_corpus_root",
     (match template_corpus_root with
      | Some root -> `String root
+     | None -> `Null);
+    "result_signature_schema", `String Signature.schema;
+    "result_signature_sha256",
+    (match local_result_signature_sha256 with
+     | Some signature -> `String signature
      | None -> `Null);
     "failure_case_gate",
     failure_case_gate

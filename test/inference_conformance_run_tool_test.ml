@@ -527,19 +527,28 @@ let check_q1_contract_visible gate =
       (List.length (list_value "expectations" contract) = 11)
   | _ -> failwith "expected one runner required failure-case contract"
 
-let bound_matrix_report_row ~profile_catalog_root ~template_corpus_root
+let bound_matrix_report_row
+    ~profile_catalog_root
+    ~template_corpus_root
+    ~result_signature_sha256
     platform_key runner_sha =
   `Assoc [
     "accepted", `Bool true;
     "runner_report_sha256", `String (sha256 platform_key);
-    "result_signature_sha256", `String (sha256 "shared-result");
+    "result_signature_sha256", `String result_signature_sha256;
+    "result_signature_schema",
+    `String "octra.inference.conformance.result-signature.v2";
+    "result_opcodes", `List [`String opcode];
     "platform_key", `String platform_key;
     "runner_executable_sha256", `String runner_sha;
     "profile_catalog_root", `String profile_catalog_root;
     "template_corpus_root", `String template_corpus_root;
   ]
 
-let accepted_matrix ~profile_catalog_root ~template_corpus_root =
+let accepted_matrix
+    ~profile_catalog_root
+    ~template_corpus_root
+    ~result_signature_sha256 =
   `Assoc [
     "status", `String "accepted";
     "schema", `String "octra.inference.conformance.matrix.v1";
@@ -558,11 +567,13 @@ let accepted_matrix ~profile_catalog_root ~template_corpus_root =
       bound_matrix_report_row
         ~profile_catalog_root
         ~template_corpus_root
+        ~result_signature_sha256
         "4.14.2|Unix|Darwin|1.0|arm64|64|false|native"
         (hex_root '1');
       bound_matrix_report_row
         ~profile_catalog_root
         ~template_corpus_root
+        ~result_signature_sha256
         "4.14.2|Unix|Linux|1.0|x86_64|64|false|native"
         (hex_root '2');
     ];
@@ -587,6 +598,25 @@ let replace_first_report_field name value = function
       match list_value "reports" fields with
       | [] -> []
       | first :: rest -> replace_assoc_field name value first :: rest
+    in
+    replace_assoc_field "reports" (`List reports) matrix
+  | _ -> failwith "matrix must be an object"
+
+let replace_report_field index name value = function
+  | `Assoc fields as matrix ->
+    let reports =
+      match list_value "reports" fields with
+      | reports ->
+        List.mapi
+          (fun report_index -> function
+             | `Assoc report_fields when report_index = index ->
+               `Assoc
+                 ((name, value)
+                  :: List.filter
+                       (fun (key, _) -> not (String.equal key name))
+                       report_fields)
+             | report -> report)
+          reports
     in
     replace_assoc_field "reports" (`List reports) matrix
   | _ -> failwith "matrix must be an object"
@@ -1016,6 +1046,90 @@ let check_require_failure_cases_rejects_wrong_q1_mutation_shape () =
             (string_list "blockers" gate))
      | _ -> failwith "report must be object"))
 
+let check_require_failure_cases_rejects_composite_q1_mutation_shape () =
+  with_temp_dir (fun dir ->
+    let failure_cases =
+      List.map
+        (replace_failure_mutations
+           "negative_byte_offset"
+           [
+             mutation
+               "set_scalar_param"
+               "parameter_addresses_and_scalar_params.values.byte_offset"
+               ["value", `Int (-1)];
+             mutation
+               "set_scalar_param"
+               "parameter_addresses_and_scalar_params.values.k"
+               ["value", `Int 127];
+           ])
+        (q1_failure_cases ())
+    in
+    let code, report =
+      run_conformance
+        dir
+        (q1_template ~failure_cases ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "composite Q1 mutation shape runner exits nonzero" (code = 1);
+    let result = first_result report in
+    let negative_offset = failure_case_fields result "negative_byte_offset" in
+    check
+      "composite Q1 mutation shape row rejected"
+      (String.equal
+         (string_value "mutation_shape_status" negative_offset)
+         "rejected");
+    check
+      "composite Q1 mutation shape row blocker"
+      (List.mem
+         "q1_failure_case_mutation_mismatch_negative_byte_offset"
+         (string_list "mutation_shape_blockers" negative_offset)))
+
+let check_require_failure_cases_rejects_exact_partial_alias_shape () =
+  with_temp_dir (fun dir ->
+    let failure_cases =
+      List.map
+        (replace_failure_mutations
+           "partial_output_input_aliasing"
+           [
+             mutation
+               "set_output_base_to_first_input_base_plus"
+               "output.base_address"
+               ["offset_cells", `Int 0];
+           ])
+        (q1_failure_cases ())
+    in
+    let code, report =
+      run_conformance
+        dir
+        (q1_template ~failure_cases ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "exact partial alias runner exits nonzero" (code = 1);
+    let result = first_result report in
+    let partial_alias =
+      failure_case_fields result "partial_output_input_aliasing"
+    in
+    check
+      "exact partial alias row rejected"
+      (String.equal
+         (string_value "mutation_shape_status" partial_alias)
+         "rejected");
+    check
+      "exact partial alias row blocker"
+      (List.mem
+         "q1_failure_case_mutation_mismatch_partial_output_input_aliasing"
+         (string_list "mutation_shape_blockers" partial_alias)))
+
 let check_accept_snapshot_requires_exact_output () =
   with_temp_dir (fun dir ->
     let bad_sha = different_sha (sha256 expected_output) in
@@ -1163,6 +1277,7 @@ let check_pinned_cross_platform_matrix_is_consumed () =
         accepted_matrix
           ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
           ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
+          ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
       in
       let matrix_path, matrix_sha = write_matrix dir matrix in
       let code, report =
@@ -1245,6 +1360,7 @@ let check_cross_platform_matrix_without_pin_rejects () =
         accepted_matrix
           ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
           ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
+          ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
       in
       let matrix_path, _ = write_matrix dir matrix in
       let code, report =
@@ -1299,6 +1415,7 @@ let check_cross_platform_matrix_sha_mismatch_rejects () =
         accepted_matrix
           ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
           ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
+          ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
       in
       let matrix_path, matrix_sha = write_matrix dir matrix in
       let code, report =
@@ -1355,6 +1472,7 @@ let check_cross_platform_matrix_signature_schema_mismatch_rejects () =
         accepted_matrix
           ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
           ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
+          ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
         |> replace_assoc_field
              "result_signature_schema"
              (`String "octra.inference.conformance.result-signature.v1")
@@ -1394,6 +1512,136 @@ let check_cross_platform_matrix_signature_schema_mismatch_rejects () =
        | _ -> failwith "report must be object")
     | _ -> failwith "seed report must be object")
 
+let check_cross_platform_matrix_row_envelope_mismatch_rejects () =
+  with_temp_dir (fun dir ->
+    let code, seed_report =
+      run_conformance
+        dir
+        (q1_template ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "matrix row envelope mismatch seed run exits zero" (code = 0);
+    match seed_report with
+    | `Assoc seed_fields ->
+      let matrix =
+        accepted_matrix
+          ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
+          ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
+        |> replace_report_field
+             0
+             "result_signature_schema"
+             (`String "octra.inference.conformance.result-signature.v1")
+        |> replace_report_field
+             1
+             "result_opcodes"
+             (`List [`String "RMSNORM_FP_EPS"])
+      in
+      let matrix_path, matrix_sha = write_matrix dir matrix in
+      let code, report =
+        run_conformance
+          dir
+          (q1_template ())
+          [
+            "--strict-effort";
+            "--include-failures";
+            "--require-failure-cases";
+            "--require-profile-roots-bound";
+            "--cross-platform-matrix";
+            Filename.quote matrix_path;
+            "--expected-cross-platform-matrix-sha256";
+            matrix_sha;
+            "--require-validator-readiness";
+          ]
+      in
+      check "matrix row envelope mismatch exits nonzero" (code = 1);
+      (match report with
+       | `Assoc fields ->
+         let readiness = assoc_json "validator_readiness_gate" fields in
+         let cross_platform = assoc_json "cross_platform_evidence" readiness in
+         check
+           "matrix row signature schema rejected"
+           (String.equal
+              (string_value "row_result_signature_schema_status" cross_platform)
+              "rejected");
+         check
+           "matrix row opcode rejected"
+           (String.equal
+              (string_value "row_opcode_coverage_status" cross_platform)
+              "rejected");
+         let blockers = string_list "blockers" cross_platform in
+         check
+           "matrix row signature schema blocker"
+           (List.mem "matrix_row_result_signature_schema_mismatch" blockers);
+         check
+           "matrix row opcode blocker"
+           (List.mem "matrix_row_opcode_scope_mismatch" blockers)
+       | _ -> failwith "report must be object")
+    | _ -> failwith "seed report must be object")
+
+let check_cross_platform_matrix_local_signature_mismatch_rejects () =
+  with_temp_dir (fun dir ->
+    let code, seed_report =
+      run_conformance
+        dir
+        (q1_template ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "matrix local signature mismatch seed run exits zero" (code = 0);
+    match seed_report with
+    | `Assoc seed_fields ->
+      let matrix =
+        accepted_matrix
+          ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
+          ~result_signature_sha256:
+            (different_sha (string_value "result_signature_sha256" seed_fields))
+      in
+      let matrix_path, matrix_sha = write_matrix dir matrix in
+      let code, report =
+        run_conformance
+          dir
+          (q1_template ())
+          [
+            "--strict-effort";
+            "--include-failures";
+            "--require-failure-cases";
+            "--require-profile-roots-bound";
+            "--cross-platform-matrix";
+            Filename.quote matrix_path;
+            "--expected-cross-platform-matrix-sha256";
+            matrix_sha;
+            "--require-validator-readiness";
+          ]
+      in
+      check "matrix local signature mismatch exits nonzero" (code = 1);
+      (match report with
+       | `Assoc fields ->
+         let readiness = assoc_json "validator_readiness_gate" fields in
+         let cross_platform = assoc_json "cross_platform_evidence" readiness in
+         check
+           "matrix local signature rejected"
+           (String.equal
+              (string_value "local_result_signature_status" cross_platform)
+              "rejected");
+         check
+           "matrix local signature blocker"
+           (List.mem
+              "matrix_local_result_signature_mismatch"
+              (string_list "blockers" cross_platform))
+       | _ -> failwith "report must be object")
+    | _ -> failwith "seed report must be object")
+
 let check_cross_platform_matrix_forged_runner_count_rejects () =
   with_temp_dir (fun dir ->
     let code, seed_report =
@@ -1414,6 +1662,7 @@ let check_cross_platform_matrix_forged_runner_count_rejects () =
         accepted_matrix
           ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
           ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
+          ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
         |> replace_assoc_field "distinct_runner_executable_count" (`Int 3)
       in
       let matrix_path, matrix_sha = write_matrix dir matrix in
@@ -1457,6 +1706,77 @@ let check_cross_platform_matrix_forged_runner_count_rejects () =
        | _ -> failwith "report must be object")
     | _ -> failwith "seed report must be object")
 
+let check_cross_platform_matrix_rejects_insufficient_row_diversity () =
+  with_temp_dir (fun dir ->
+    let code, seed_report =
+      run_conformance
+        dir
+        (q1_template ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "matrix row diversity seed run exits zero" (code = 0);
+    match seed_report with
+    | `Assoc seed_fields ->
+      let matrix =
+        accepted_matrix
+          ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
+          ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
+        |> replace_assoc_field "distinct_platform_count" (`Int 1)
+        |> replace_assoc_field "distinct_runner_executable_count" (`Int 1)
+        |> replace_report_field
+             1
+             "platform_key"
+             (`String "4.14.2|Unix|Darwin|1.0|arm64|64|false|native")
+        |> replace_report_field 1 "runner_executable_sha256" (`String (hex_root '1'))
+      in
+      let matrix_path, matrix_sha = write_matrix dir matrix in
+      let code, report =
+        run_conformance
+          dir
+          (q1_template ())
+          [
+            "--strict-effort";
+            "--include-failures";
+            "--require-failure-cases";
+            "--require-profile-roots-bound";
+            "--cross-platform-matrix";
+            Filename.quote matrix_path;
+            "--expected-cross-platform-matrix-sha256";
+            matrix_sha;
+            "--require-validator-readiness";
+          ]
+      in
+      check "matrix row diversity exits nonzero" (code = 1);
+      (match report with
+       | `Assoc fields ->
+         let readiness = assoc_json "validator_readiness_gate" fields in
+         let cross_platform = assoc_json "cross_platform_evidence" readiness in
+         check
+           "matrix row platform minimum rejected"
+           (String.equal
+              (string_value "row_distinct_platform_status" cross_platform)
+              "rejected");
+         check
+           "matrix row runner minimum rejected"
+           (String.equal
+              (string_value "row_distinct_runner_executable_status" cross_platform)
+              "rejected");
+         let blockers = string_list "blockers" cross_platform in
+         check
+           "matrix row platform minimum blocker"
+           (List.mem "matrix_insufficient_distinct_platforms" blockers);
+         check
+           "matrix row runner minimum blocker"
+           (List.mem "matrix_insufficient_distinct_runner_executables" blockers)
+       | _ -> failwith "report must be object")
+    | _ -> failwith "seed report must be object")
+
 let check_cross_platform_matrix_forged_row_root_rejects () =
   with_temp_dir (fun dir ->
     let code, seed_report =
@@ -1477,6 +1797,7 @@ let check_cross_platform_matrix_forged_row_root_rejects () =
         accepted_matrix
           ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
           ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
+          ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
         |> replace_first_report_field "profile_catalog_root" (`String (hex_root '9'))
       in
       let matrix_path, matrix_sha = write_matrix dir matrix in
@@ -1522,6 +1843,8 @@ let () =
   check_require_failure_cases_rejects_missing_q1_case ();
   check_require_failure_cases_rejects_wrong_q1_expectation ();
   check_require_failure_cases_rejects_wrong_q1_mutation_shape ();
+  check_require_failure_cases_rejects_composite_q1_mutation_shape ();
+  check_require_failure_cases_rejects_exact_partial_alias_shape ();
   check_accept_snapshot_requires_exact_output ();
   check_stale_abi_is_visible_in_executable_report ();
   check_readiness_gate_rejects_stale_abi ();
@@ -1530,5 +1853,8 @@ let () =
   check_cross_platform_matrix_without_pin_rejects ();
   check_cross_platform_matrix_sha_mismatch_rejects ();
   check_cross_platform_matrix_signature_schema_mismatch_rejects ();
+  check_cross_platform_matrix_row_envelope_mismatch_rejects ();
+  check_cross_platform_matrix_local_signature_mismatch_rejects ();
   check_cross_platform_matrix_forged_runner_count_rejects ();
+  check_cross_platform_matrix_rejects_insufficient_row_diversity ();
   check_cross_platform_matrix_forged_row_root_rejects ()
