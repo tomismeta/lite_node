@@ -159,6 +159,14 @@ let q1_failure_cases =
          "q1_owner[0..2]"
          ["value_hex_le", `String "007c"])
       (span "output" 10000 2);
+    failure_case
+      "lower_effort_limit"
+      "reject_before_write"
+      (mutation
+         "lower_effort_limit"
+         "effort"
+         ["value", `Int 199])
+      (span "output" 10000 2);
   ]
 
 let q1_template ?(session_abi_root = Abi.v1_root)
@@ -354,7 +362,7 @@ let check_q1_contract_visible report =
             "LINEAR_Q1_G128_FP");
        check
          "q1 contract expectation count"
-         (List.length (list_value "expectations" contract) = 7)
+         (List.length (list_value "expectations" contract) = 8)
      | _ -> failwith "expected one required failure-case contract")
   | _ -> failwith "report must be object"
 

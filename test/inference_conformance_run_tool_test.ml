@@ -230,6 +230,14 @@ let q1_failure_cases =
           "q1_owner[0..2]"
           ["value_hex_le", `String "007c"];
       ];
+    reject_case
+      "lower_effort_limit"
+      [
+        mutation
+          "lower_effort_limit"
+          "effort"
+          ["value", `Int 199];
+      ];
   ]
 
 let q1_template ?(session_abi_root = Abi.v1_root)
@@ -437,7 +445,7 @@ let check_q1_contract_visible gate =
          "LINEAR_Q1_G128_FP");
     check
       "runner q1 contract expectation count"
-      (List.length (list_value "expectations" contract) = 7)
+      (List.length (list_value "expectations" contract) = 8)
   | _ -> failwith "expected one runner required failure-case contract"
 
 let bound_matrix_report_row platform_key runner_sha =
@@ -543,13 +551,13 @@ let check_good_template_reports_bound_abi () =
     check "good program effort" (bool_value "program_effort_match" result);
     check "good opcode effort" (bool_value "opcode_effort_match" result);
     check "good failure cases included" (bool_value "failure_cases_included" result);
-    check "good failure case count" (int_value "failure_case_count" result = 7);
+    check "good failure case count" (int_value "failure_case_count" result = 8);
     check
       "good counted failure case count"
-      (int_value "counted_failure_case_count" result = 7);
+      (int_value "counted_failure_case_count" result = 8);
     check
       "good accepted counted failure case count"
-      (int_value "accepted_counted_failure_case_count" result = 7);
+      (int_value "accepted_counted_failure_case_count" result = 8);
     let exact_alias = failure_case_fields result "output_input_aliasing" in
     check
       "exact alias snapshot matched"

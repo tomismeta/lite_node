@@ -709,7 +709,7 @@ Failure/edge-case status:
 
 | Opcode | Declared cases | Counted cases | Counted cases accepted |
 | --- | ---: | ---: | ---: |
-| `LINEAR_Q1_G128_FP` | 7 | 7 | 7 |
+| `LINEAR_Q1_G128_FP` | 8 | 8 | 8 |
 | `RMSNORM_FP_EPS` | 7 | 7 | 7 |
 | `L2NORM_FP` | 7 | 7 | 7 |
 | `SOFTMAX_FP` | 7 | 7 | 7 |
@@ -735,6 +735,11 @@ The static checker also validates the alias mutation shape. Exact
 `output_input_aliasing` must declare an output-to-lhs alias mutation, and
 `partial_output_input_aliasing` must declare a nonzero partial output-to-lhs
 offset before the template can pass Q1 schema validation.
+
+`LINEAR_Q1_G128_FP` also requires a counted `lower_effort_limit` case. That
+case must lower the VM effort limit below the opcode base charge and prove
+`reject_before_write`, so effort failure is part of validator-readiness rather
+than only a positive-template accounting check.
 
 `finite_square_overflow` is now counted for `RMSNORM_FP_EPS` and `L2NORM_FP`
 under the current deterministic normalization profile: finite square/reduction

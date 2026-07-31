@@ -2380,6 +2380,7 @@ let check_q1_required_failure_expectations () =
        "k_not_multiple_of_128", "reject_before_write";
        "bad_q1_owner_length", "reject_before_write";
        "nonfinite_fp16_scale", "reject_before_write";
+       "lower_effort_limit", "reject_before_write";
      ]);
   check
     "q1 required failure expectations json"
@@ -2414,6 +2415,10 @@ let check_q1_required_failure_expectations () =
          ];
          `Assoc [
            "case", `String "nonfinite_fp16_scale";
+           "expected_prefix", `String "reject_before_write";
+         ];
+         `Assoc [
+           "case", `String "lower_effort_limit";
            "expected_prefix", `String "reject_before_write";
          ];
        ];
