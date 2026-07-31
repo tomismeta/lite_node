@@ -657,6 +657,12 @@ Like P0 execution reports, `execution_status` is the VM output result; use
 `validator_readiness_gate.status` for validator readiness. The explicit top-k
 boundary is:
 
+`inference_conformance_matrix.exe` intentionally rejects P0-plus reports as
+`p0_plus_matrix_not_supported` today. Cross-platform matrixing is currently
+defined for strict P0 runner reports with punitive failure/atomicity coverage
+and exact effort authority. P0-plus should gain matrix support only after its
+failure cases and effort semantics are promoted with the same discipline.
+
 LiteNode now reports `ARGMAX_FP` under a `deterministic-fp64-comparison`
 consensus-candidate profile. Its semantics are finite binary64 input reads,
 deterministic binary64 greater-than comparison, lowest-index tie selection,

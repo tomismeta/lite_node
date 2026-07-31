@@ -178,6 +178,12 @@ let validator_readiness_summary fields =
   | None ->
     "missing", ["missing_validator_readiness_gate"]
 
+let execution_mode_matrix_blocker = function
+  | "positive_template_vm_execution" -> None
+  | "p0_plus_fixture_pack_vm_execution" ->
+    Some "p0_plus_matrix_not_supported"
+  | _ -> Some "not_p0_runner_report"
+
 let report_summary path =
   let raw_report = read_file path in
   let report_sha256 = sha256 raw_report in
@@ -233,9 +239,10 @@ let report_summary path =
     in
     let blockers =
       []
-      |> add_if
-           (not (String.equal execution_mode "positive_template_vm_execution"))
-           "not_p0_runner_report"
+      |> (fun blockers ->
+          match execution_mode_matrix_blocker execution_mode with
+          | None -> blockers
+          | Some blocker -> blocker :: blockers)
       |> add_if (not (opt_status_is_accepted "status" fields)) "report_rejected"
       |> add_if
            (not (opt_status_is_accepted "execution_status" fields))
@@ -263,6 +270,7 @@ let report_summary path =
     signature,
     profile_catalog_root,
     validator_readiness_blockers,
+    blockers,
     `Assoc [
       "path", `String path;
       "runner_report_sha256", `String report_sha256;
@@ -322,28 +330,35 @@ let matrix_report paths =
   let summaries = List.map report_summary paths in
   let report_count = List.length summaries in
   let accepted_reports =
-    List.length (List.filter (fun (accepted, _, _, _, _, _) -> accepted) summaries)
+    List.length
+      (List.filter (fun (accepted, _, _, _, _, _, _) -> accepted) summaries)
   in
   let platforms =
-    unique (List.map (fun (_, platform, _, _, _, _) -> platform) summaries)
+    unique (List.map (fun (_, platform, _, _, _, _, _) -> platform) summaries)
   in
   let signatures =
-    unique (List.map (fun (_, _, signature, _, _, _) -> signature) summaries)
+    unique (List.map (fun (_, _, signature, _, _, _, _) -> signature) summaries)
   in
   let profile_catalog_roots =
     summaries
-    |> List.filter_map (fun (_, _, _, root, _, _) -> root)
+    |> List.filter_map (fun (_, _, _, root, _, _, _) -> root)
     |> unique
   in
   let missing_profile_catalog_root_count =
     List.length
       (List.filter
-         (fun (accepted, _, _, root, _, _) -> accepted && root = None)
+         (fun (accepted, _, _, root, _, _, _) -> accepted && root = None)
          summaries)
+  in
+  let per_report_matrix_blockers =
+    summaries
+    |> List.map (fun (_, _, _, _, _, blockers, _) -> blockers)
+    |> List.concat
+    |> unique
   in
   let per_report_validator_blockers =
     summaries
-    |> List.map (fun (_, _, _, _, blockers, _) -> blockers)
+    |> List.map (fun (_, _, _, _, blockers, _, _) -> blockers)
     |> List.concat
     |> without_cross_platform_blocker
     |> unique
@@ -384,7 +399,7 @@ let matrix_report paths =
          "profile_catalog_mismatch"
   in
   let validator_readiness_blockers =
-    unique (blockers @ per_report_validator_blockers)
+    unique (blockers @ per_report_matrix_blockers @ per_report_validator_blockers)
   in
   let validator_readiness_accepted =
     matrix_accepted && validator_readiness_blockers = []
@@ -451,7 +466,7 @@ let matrix_report paths =
     (match matrix_signature_sha256 with
      | None -> `Null
      | Some value -> `String value);
-    "reports", `List (List.map (fun (_, _, _, _, _, json) -> json) summaries);
+    "reports", `List (List.map (fun (_, _, _, _, _, _, json) -> json) summaries);
   ]
 
 let () =
