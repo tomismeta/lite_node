@@ -120,6 +120,12 @@
  (libraries octra_vm))
 
 (test
+ (name inference_conformance_check_tool_test)
+ (modules inference_conformance_check_tool_test)
+ (libraries octra_vm yojson unix)
+ (deps ../tools/inference_conformance_check.exe))
+
+(test
  (name inference_conformance_matrix_tool_test)
  (modules inference_conformance_matrix_tool_test)
  (libraries yojson unix)
