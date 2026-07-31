@@ -370,6 +370,7 @@ let report
     ?required_failure_contract_blockers
     ?include_required_contract_payload
     ?required_failure_contract_payload
+    ?(validator_readiness_blockers = ["cross_platform_conformance_missing"])
     ?failure
     system
     machine =
@@ -388,7 +389,7 @@ let report
     "validator_readiness_gate",
     `Assoc [
       "status", `String "rejected";
-      "blockers", `List [`String "cross_platform_conformance_missing"];
+      "blockers", `List (List.map (fun blocker -> `String blocker) validator_readiness_blockers);
     ];
     "results",
     `List [
@@ -851,6 +852,43 @@ let check_matrix_rejects_executable_abi_binding_mismatch () =
            (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_prioritizes_executable_abi_not_run () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~validator_readiness_blockers:["executable_abi_binding_not_run"]
+           "Linux"
+           "x86_64")
+    in
+    let code, json =
+      run_matrix ~args:["--require-validator-readiness"] [a; b]
+    in
+    check "executable ABI not-run readiness exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      let readiness_blockers =
+        string_list_value "validator_readiness_blockers" fields
+      in
+      check
+        "executable ABI not-run validator blocker"
+        (List.mem "executable_abi_binding_not_run" readiness_blockers);
+      check
+        "executable ABI not-run next blocker"
+        (String.equal
+           (string_value "next_validator_readiness_blocker" fields)
+           "executable_abi_binding_not_run")
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_profile_root_binding_mismatch () =
   with_temp_dir (fun dir ->
     let a =
@@ -1259,5 +1297,6 @@ let () =
   check_matrix_rejects_empty_results ();
   check_matrix_rejects_abi_declaration_binding_mismatch ();
   check_matrix_rejects_executable_abi_binding_mismatch ();
+  check_matrix_prioritizes_executable_abi_not_run ();
   check_matrix_rejects_vm_semantics_binding_mismatch ();
   check_matrix_rejects_same_platform ()

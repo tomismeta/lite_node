@@ -152,7 +152,9 @@ let next_readiness_blocker blockers =
       "unbound_abi_declaration_binding";
       "abi_declaration_binding_mismatch";
       "abi_declaration_binding_rejected";
+      "executable_abi_binding_not_proven";
       "executable_abi_binding_mismatch";
+      "executable_abi_binding_not_run";
       "consensus_candidate_profile_gates";
       "unbound_profile_roots";
       "profile_root_binding_mismatch";
