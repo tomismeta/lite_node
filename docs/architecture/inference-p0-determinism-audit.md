@@ -95,6 +95,57 @@ tools/inference_conformance_run.exe \
   --template-index <p0-vm-execution-templates.cjson>
 ```
 
+Focused primitive work should use the same complete P0 index and let LiteNode
+select the opcode under review:
+
+```text
+tools/inference_conformance_check.exe \
+  --template-index <p0-vm-execution-templates.cjson> \
+  --opcode LINEAR_Q1_G128_FP
+
+tools/inference_conformance_run.exe \
+  --template-index <p0-vm-execution-templates.cjson> \
+  --opcode LINEAR_Q1_G128_FP \
+  --strict-effort \
+  --include-failures \
+  --require-failure-cases \
+  --require-profile-roots-bound \
+  --require-consensus-candidate
+```
+
+This scoped mode is for hardening one P0 primitive without asking the producer
+to split artifacts. Reports include `selected_opcodes`, the original
+`source_template_count`, and the filtered `template_count` so downstream
+consumers can distinguish focused evidence from full-P0 evidence.
+
+For `LINEAR_Q1_G128_FP`, the focused gate currently proves the local execution
+shape when the template binds the LiteNode profile root:
+
+```text
+selected_opcodes: [LINEAR_Q1_G128_FP]
+template_count: 1
+profile_root_binding_gate: accepted
+consensus_candidate_gate: accepted
+execution_status: accepted
+strict_effort: accepted
+failure_case_gate: accepted
+validator_readiness_gate: rejected
+```
+
+That rejection is intentional. The next validator-readiness blockers are not
+packet shape, admission, output root derivation, or local failure atomicity. The
+remaining blockers are:
+
+```text
+consensus_candidate_profile_gates
+cross_platform_conformance_missing
+```
+
+In other words, the Q1 path has a scoped LiteNode gate now, but promotion from
+consensus-candidate to validator-ready still requires independent
+cross-platform oracle qualification and explicit consensus promotion of the
+profile.
+
 The first accepted producer indexes are:
 
 ```text

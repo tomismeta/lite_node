@@ -15,9 +15,11 @@ Include at startup:
 module VM = Octra_vm.Contract_vm
 module Fp64 = Octra_vm.Inference_fp64
 module Profile = Octra_vm.Inference_numerical_profile
+module Template = Octra_vm.Inference_conformance_template
 
 let template_index = ref None
 let p0_plus_pack = ref None
+let requested_opcodes = ref []
 let strict_effort = ref false
 let include_failures = ref false
 let require_failure_cases = ref false
@@ -37,6 +39,9 @@ let args = [
   "--p0-plus-pack",
   Arg.String (fun value -> p0_plus_pack := Some value),
   "producer P0-plus fixture pack json";
+  "--opcode",
+  Arg.String (fun value -> requested_opcodes := value :: !requested_opcodes),
+  "limit template-index execution to one P0 opcode; may be repeated";
   "--strict-effort",
   Arg.Set strict_effort,
   "fail when observed VM effort differs from expected_effort";
@@ -62,6 +67,7 @@ let args = [
 
 let usage =
   "inference_conformance_run --template-index <path> [--strict-effort] \
+   [--opcode <opcode> ...] \
    [--include-failures] [--require-failure-cases] \
    [--require-profile-roots-bound] \
    [--require-consensus-candidate] [--require-consensus-ready] \
@@ -69,6 +75,21 @@ let usage =
    or inference_conformance_run --p0-plus-pack <path> \
    [--require-profile-roots-bound] [--require-consensus-candidate] \
    [--require-consensus-ready] [--require-validator-readiness]"
+
+let selected_opcodes () =
+  List.rev !requested_opcodes |> List.sort_uniq String.compare
+
+let opcode_selected opcode =
+  match selected_opcodes () with
+  | [] -> true
+  | opcodes -> List.exists (String.equal opcode) opcodes
+
+let validate_selected_opcodes () =
+  List.iter
+    (fun opcode ->
+       if not (List.exists (String.equal opcode) Template.p0_opcodes) then
+         fail ("unsupported P0 opcode filter: " ^ opcode))
+    (selected_opcodes ())
 
 let read_file path =
   let input = open_in_bin path in
@@ -1642,12 +1663,26 @@ let run_index path =
     | `Assoc fields -> fields
     | _ -> fail (path ^ ": index must be an object")
   in
-  let entries =
+  let all_entries =
     list_field "templates" index
     |> List.map (function
       | `Assoc fields -> fields
       | _ -> fail "template index entries must be objects")
   in
+  let entries =
+    List.filter
+      (fun fields -> opcode_selected (string_field "opcode" fields))
+      all_entries
+  in
+  List.iter
+    (fun opcode ->
+       if
+         not
+           (List.exists
+              (fun fields -> String.equal (string_field "opcode" fields) opcode)
+              entries)
+       then fail ("missing selected P0 template: " ^ opcode))
+    (selected_opcodes ());
   let results = List.map (execute_template root_dir) entries in
   let execution_accepted = List.for_all fst results in
   let execution_status =
@@ -1760,6 +1795,9 @@ let run_index path =
     "execution_mode", `String "positive_template_vm_execution";
     "platform", platform_json ();
     "template_index", `String path;
+    "selected_opcodes",
+    `List (List.map (fun opcode -> `String opcode) (selected_opcodes ()));
+    "source_template_count", `Int (List.length all_entries);
     "template_count", `Int template_count;
     "failure_case_gate",
     failure_case_gate
@@ -1830,8 +1868,11 @@ let run_index path =
 
 let () =
   Arg.parse args (fun value -> fail ("unexpected argument: " ^ value)) usage;
+  validate_selected_opcodes ();
   if !require_failure_cases && !p0_plus_pack <> None then
     fail "--require-failure-cases is only supported with --template-index";
+  if selected_opcodes () <> [] && !p0_plus_pack <> None then
+    fail "--opcode is supported only with --template-index";
   let report =
     match !template_index, !p0_plus_pack with
     | Some _, Some _ -> fail "choose only one input mode"

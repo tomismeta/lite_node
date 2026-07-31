@@ -18,6 +18,7 @@ module Profile = Octra_vm.Inference_numerical_profile
 let template_path = ref None
 let template_dir = ref None
 let template_index = ref None
+let requested_opcodes = ref []
 let require_profile_roots_bound = ref false
 let require_consensus_candidate = ref false
 let require_consensus_ready = ref false
@@ -37,6 +38,9 @@ let args = [
   "--template-index",
   Arg.String (fun value -> template_index := Some value),
   "producer template index json";
+  "--opcode",
+  Arg.String (fun value -> requested_opcodes := value :: !requested_opcodes),
+  "limit template-index checks to one P0 opcode; may be repeated";
   "--require-profile-roots-bound",
   Arg.Set require_profile_roots_bound,
   "reject reports whose numerical_profile_root values do not match LiteNode profile roots";
@@ -59,8 +63,29 @@ let usage =
    [--require-profile-roots-bound] [--require-consensus-candidate] \
    [--require-consensus-ready] [--require-validator-readiness]\n\
    or inference_conformance_check --template-index <path> \
+   [--opcode <opcode> ...] \
    [--require-profile-roots-bound] [--require-consensus-candidate] \
    [--require-consensus-ready] [--require-validator-readiness]"
+
+let selected_opcodes () =
+  List.rev !requested_opcodes |> List.sort_uniq String.compare
+
+let opcode_selected opcode =
+  match selected_opcodes () with
+  | [] -> true
+  | opcodes -> List.exists (String.equal opcode) opcodes
+
+let p0_scope_opcodes () =
+  match selected_opcodes () with
+  | [] -> Template.p0_opcodes
+  | opcodes -> opcodes
+
+let validate_selected_opcodes () =
+  List.iter
+    (fun opcode ->
+       if not (List.exists (String.equal opcode) Template.p0_opcodes) then
+         fail ("unsupported P0 opcode filter: " ^ opcode))
+    (selected_opcodes ())
 
 let read_json path =
   try Yojson.Safe.from_file path with
@@ -455,11 +480,12 @@ let issues_for_program_effects path opcode fields =
           values
       | None -> []
     in
-    ["memory_read"; "memory_write"; "storage_read"]
-    |> List.filter
-         (fun effect -> not (List.exists (String.equal effect) effects))
-    |> List.map (fun effect ->
-      issue ~opcode path ("missing program effect: " ^ effect))
+    List.filter
+      (fun effect_name ->
+         not (List.exists (String.equal effect_name) effects))
+      ["memory_read"; "memory_write"; "storage_read"]
+    |> List.map (fun effect_name ->
+      issue ~opcode path ("missing program effect: " ^ effect_name))
 
 let source_path_issues path opcode fields =
   match list_field "input_memory_ranges" fields with
@@ -800,10 +826,20 @@ let producer_index_report index_path =
   let index = read_json index_path in
   match index with
   | `Assoc fields ->
-    let templates =
+    let all_templates =
       match list_field "templates" fields with
       | Some values -> values
       | None -> fail (index_path ^ ": missing templates")
+    in
+    let templates =
+      List.filter
+        (function
+          | `Assoc entry_fields ->
+            (match string_field "opcode" entry_fields with
+             | Some opcode -> opcode_selected opcode
+             | None -> selected_opcodes () = [])
+          | _ -> selected_opcodes () = [])
+        all_templates
     in
     let entries =
       List.map
@@ -854,9 +890,7 @@ let producer_index_report index_path =
     let profile_gate_count =
       List.length (List.filter profile_gate_present profile_gates)
     in
-    let unprofiled_template_count =
-      List.length templates - profile_gate_count
-    in
+    let unprofiled_template_count = List.length templates - profile_gate_count in
     let profile_status_counts = profile_status_counts profile_gates in
     let profile_root_binding_counts =
       profile_root_binding_status_counts profile_gates
@@ -868,9 +902,9 @@ let producer_index_report index_path =
       Profile.classified_gate_count profile_status_counts
     in
     let missing =
-      Template.p0_opcodes
-      |> List.filter
-           (fun opcode -> not (List.exists (String.equal opcode) opcodes))
+      List.filter
+        (fun opcode -> not (List.exists (String.equal opcode) opcodes))
+        (p0_scope_opcodes ())
       |> List.map (fun opcode -> issue ~opcode index_path "missing P0 template")
     in
     let seen = Hashtbl.create 8 in
@@ -911,9 +945,12 @@ let producer_index_report index_path =
       "validator_readiness_required", `Bool !require_validator_readiness;
       "platform", platform_json ();
       "index_path", `String index_path;
+      "selected_opcodes",
+      `List (List.map (fun opcode -> `String opcode) (selected_opcodes ()));
+      "source_template_count", `Int (List.length all_templates);
       "template_count", `Int (List.length templates);
       "p0_opcodes",
-      `List (List.map (fun opcode -> `String opcode) Template.p0_opcodes);
+      `List (List.map (fun opcode -> `String opcode) (p0_scope_opcodes ()));
       "profile_gates", `List profile_gates;
       "profile_gate_count", `Int profile_gate_count;
       "classified_profile_gate_count", `Int classified_profile_gate_count;
@@ -991,6 +1028,7 @@ let print_report_and_exit report =
 
 let () =
   Arg.parse args (fun arg -> fail ("unexpected argument: " ^ arg)) usage;
+  validate_selected_opcodes ();
   let modes =
     List.filter_map
       Fun.id
@@ -1012,6 +1050,8 @@ let () =
         | Some "p0_litenode_vm_execution_template_index" ->
           print_report_and_exit (producer_index_report path)
         | _ ->
+          if selected_opcodes () <> [] then
+            fail "--opcode is supported only with --template-index";
           let checked = check_template path in
           let template_json = Template.to_json checked.template in
           let profile_gate_count =
@@ -1104,6 +1144,8 @@ let () =
             ]))
      | _ -> fail (path ^ ": template must be an object"))
   | [`Dir dir] ->
+    if selected_opcodes () <> [] then
+      fail "--opcode is supported only with --template-index";
     let templates = List.map check_template (template_files dir) in
     if templates = [] then fail ("no templates in " ^ dir);
     let missing = missing_p0 templates in
