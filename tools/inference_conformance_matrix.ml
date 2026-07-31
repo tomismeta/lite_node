@@ -252,6 +252,16 @@ let failure_span_signature = function
     ]
   | _ -> fail "failure span must be an object"
 
+let finite_span_signature = function
+  | `Assoc fields ->
+    `Assoc [
+      "name", `String (string_field "name" fields);
+      "base_address", `Int (int_field "base_address" fields);
+      "length_f64_cells", `Int (int_field "length_f64_cells" fields);
+      "finite", `Bool (bool_field "finite" fields);
+    ]
+  | _ -> fail "finite span must be an object"
+
 let failure_snapshot_signature = function
   | `Assoc fields ->
     `Assoc [
@@ -297,11 +307,21 @@ let failure_case_signature = function
         (List.map
            failure_span_signature
            (list_field "unchanged_spans" fields));
+      "finite_spans",
+      `List
+        (List.map
+           finite_span_signature
+           (list_field "finite_spans" fields));
       "active_changed_spans",
       `List
         (List.map
            failure_span_signature
            (list_field "active_changed_spans" fields));
+      "active_finite_spans",
+      `List
+        (List.map
+           finite_span_signature
+           (list_field "active_finite_spans" fields));
     ]
   | _ -> fail "failure case must be an object"
 

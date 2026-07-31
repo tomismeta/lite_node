@@ -111,6 +111,8 @@ let failure_case
     ?(expected = "reject_before_write")
     ?(observed = "vm_rejected")
     ?(observed_effort = 200)
+    ?(finite_spans = `List [])
+    ?(active_finite_spans = `List [])
     ?snapshot_sha
     () =
   let snapshot_output_status =
@@ -157,9 +159,17 @@ let failure_case
         "unchanged", `Bool true;
       ];
     ];
-    "finite_spans", `List [];
+    "finite_spans", finite_spans;
     "active_changed_spans", `List [];
-    "active_finite_spans", `List [];
+    "active_finite_spans", active_finite_spans;
+  ]
+
+let finite_span ?(finite = true) name base cells =
+  `Assoc [
+    "name", `String name;
+    "base_address", `Int base;
+    "length_f64_cells", `Int cells;
+    "finite", `Bool finite;
   ]
 
 let result
@@ -652,6 +662,46 @@ let check_matrix_rejects_failure_snapshot_mismatch () =
         (List.mem "result_mismatch_across_platforms" (blockers fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_failure_finite_span_mismatch () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report
+           ~runner_sha:(hex_root '1')
+           ~failure:
+             (failure_case
+                ~finite_spans:(`List [finite_span "output" 10000 6])
+                ~active_finite_spans:(`List [finite_span "active_output" 10000 6])
+                ())
+           "Darwin"
+           "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~failure:
+             (failure_case
+                ~finite_spans:(`List [finite_span ~finite:false "output" 10000 6])
+                ~active_finite_spans:
+                  (`List [finite_span ~finite:false "active_output" 10000 6])
+                ())
+           "Linux"
+           "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "finite span mismatch matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "finite span mismatch blocker"
+        (List.mem "result_mismatch_across_platforms" (blockers fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_opcode_effort_mismatch () =
   with_temp_dir (fun dir ->
     let a =
@@ -1083,6 +1133,7 @@ let () =
   check_matrix_rejects_corpus_mismatch ();
   check_matrix_rejects_failure_case_mismatch ();
   check_matrix_rejects_failure_snapshot_mismatch ();
+  check_matrix_rejects_failure_finite_span_mismatch ();
   check_matrix_rejects_opcode_effort_mismatch ();
   check_matrix_rejects_profile_root_binding_mismatch ();
   check_matrix_rejects_profile_root_result_mismatch_with_gate_accepted ();

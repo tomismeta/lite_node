@@ -751,7 +751,10 @@ The direct runner now treats `accept_from_snapshot` as an exact output contract,
 not merely a "changed and finite" observation. For exact and partial Q1 aliasing
 cases, the active aliased output span must hash to the declared expected output
 bytes, and the cross-platform matrix signs that `snapshot_output` evidence in
-the result signature.
+the result signature. The matrix also signs the concrete finite-span and
+active-finite-span observations emitted by the runner, so a report cannot keep
+the same aggregate finite status while changing the span-level evidence that
+proved it.
 
 The static checker also validates the alias mutation shape. Exact
 `output_input_aliasing` must declare an output-to-lhs alias mutation, and
