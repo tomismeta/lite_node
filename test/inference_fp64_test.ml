@@ -111,6 +111,10 @@ let check_arithmetic_edges () =
     (Fp64.add 0L Int64.min_int)
     0L;
   expect_bits
+    "fp64 add exact nonzero cancellation returns positive zero"
+    (Fp64.add 0x3ff0000000000000L 0xbff0000000000000L)
+    0L;
+  expect_bits
     "fp64 negative zero plus negative zero"
     (Fp64.add Int64.min_int Int64.min_int)
     Int64.min_int;
@@ -142,6 +146,14 @@ let check_arithmetic_edges () =
     "fp64 mul underflow tie to even"
     (Fp64.mul 1L 0x3fe0000000000000L)
     0L;
+  expect_bits
+    "fp64 mul min normal to subnormal"
+    (Fp64.mul 0x0010000000000000L 0x3fe0000000000000L)
+    0x0008000000000000L;
+  expect_bits
+    "fp64 mul signed zero"
+    (Fp64.mul Int64.min_int 0x3ff0000000000000L)
+    Int64.min_int;
   expect_bits
     "fp64 mul finite"
     (Fp64.mul 0x3ff8000000000000L 0x4000000000000000L)
