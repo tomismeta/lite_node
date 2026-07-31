@@ -877,7 +877,58 @@ let check_inference_profile_surface_coverage () =
        "p0 profile catalog root"
        (String.equal
           (string_value "profile_catalog_root" fields)
-          "fc66b78119a7057e99a50c84c41861c094efa3a479199a3cfb773a9e029c4e2e")
+          "3577fa7a42bbc1e9f2389b2f4f91b1f3c4f8a2f056fd2fba3a43826fe72e4032");
+     (match assoc_value "profile_readiness_worklist" fields with
+      | `List rows ->
+        check "p0 readiness worklist count" (List.length rows = 5);
+        let row opcode =
+          List.find_opt
+            (function
+              | `Assoc row_fields ->
+                String.equal (string_value "opcode" row_fields) opcode
+              | _ -> false)
+            rows
+        in
+        (match row "SOFTMAX_FP" with
+         | Some (`Assoc row_fields) ->
+           check
+             "softmax readiness scope"
+             (String.equal
+                (string_value "validator_readiness_scope" row_fields)
+                "profile_catalog_static");
+           check
+             "softmax readiness rejected"
+             (String.equal
+                (string_value "validator_readiness_status" row_fields)
+                "rejected");
+           check
+             "softmax readiness includes host exp"
+             (List.mem
+                "host_fp_exp"
+                (string_list_value "validator_readiness_blockers" row_fields));
+           check
+             "softmax readiness includes missing execution"
+             (List.mem
+                "execution_not_proven"
+                (string_list_value "validator_readiness_blockers" row_fields));
+           (match assoc_value "consensus_blocker_classes" row_fields with
+            | `List blocker_classes ->
+              check
+                "softmax blocker classes present"
+                (List.exists
+                   (function
+                     | `Assoc class_fields ->
+                       String.equal
+                         (string_value "blocker_code" class_fields)
+                         "host_fp_exp"
+                       && String.equal
+                            (string_value "blocker_class" class_fields)
+                            "host_native_math"
+                     | _ -> false)
+                   blocker_classes)
+            | _ -> failwith "softmax blocker classes must be a list")
+         | _ -> failwith "missing SOFTMAX_FP readiness row")
+      | _ -> failwith "p0 profile readiness worklist must be a list")
    | _ -> failwith "p0 profile catalog must be object");
   (match Profile.current_runtime_profile_catalog_json ~opcodes:surface_opcodes with
    | `Assoc fields ->
@@ -886,7 +937,11 @@ let check_inference_profile_surface_coverage () =
        "runtime profile catalog root"
        (String.equal
           (string_value "profile_catalog_root" fields)
-          "82fc51bc9191f2a050b7be5f47d8ef873502838bc86938c6ca890ec7aa7b6a2f")
+          "d9ba136d7472c4ce36bf8b69e0d664c0b318251c1f79257f242f2e66e9241c3f");
+     (match assoc_value "profile_readiness_worklist" fields with
+      | `List rows ->
+        check "runtime readiness worklist count" (List.length rows = 17)
+      | _ -> failwith "runtime profile readiness worklist must be a list")
    | _ -> failwith "runtime profile catalog must be object");
   let gates =
     List.map
@@ -959,8 +1014,8 @@ let check_inference_profile_surface_coverage () =
     (match Profile.profile_catalog_root_json gates with
      | `String root ->
        String.equal
-         root
-         "82fc51bc9191f2a050b7be5f47d8ef873502838bc86938c6ca890ec7aa7b6a2f"
+       root
+         "d9ba136d7472c4ce36bf8b69e0d664c0b318251c1f79257f242f2e66e9241c3f"
      | _ -> false);
   check
     "empty profile catalog root"

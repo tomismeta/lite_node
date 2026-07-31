@@ -672,6 +672,107 @@ let consensus_blocker_class_counts_json values =
   |> List.map blocker_class_count_json
   |> fun entries -> `List entries
 
+let static_evidence_blockers = [
+  "execution_not_proven";
+  "failure_cases_not_proven";
+  "effort_not_proven";
+  "profile_root_binding_not_proven";
+  "cross_platform_not_proven";
+]
+
+let profile_gate_readiness_blockers fields =
+  let profile_blockers =
+    match string_field "consensus_status" fields with
+    | Some "consensus_ready" -> []
+    | Some "consensus_candidate" -> ["consensus_candidate_profile_gate"]
+    | Some "local_only" -> ["local_only_profile_gate"]
+    | Some _ -> ["unknown_profile_gate"]
+    | None -> ["unknown_profile_gate"]
+  in
+  profile_blockers
+  @ string_list_field "consensus_blocker_codes" fields
+  @ static_evidence_blockers
+  |> List.sort_uniq String.compare
+
+let consensus_blocker_classes_json fields =
+  string_list_field "consensus_blocker_codes" fields
+  |> List.map (fun blocker ->
+    `Assoc [
+      "blocker_code", `String blocker;
+      "blocker_class", `String (blocker_class blocker);
+    ])
+  |> fun entries -> `List entries
+
+let profile_readiness_worklist_entry_json = function
+  | `Assoc fields ->
+    let blockers = profile_gate_readiness_blockers fields in
+    Some
+      (`Assoc [
+        "opcode",
+        `String
+          (match string_field "opcode" fields with
+           | Some value -> value
+           | None -> "unknown");
+        "name",
+        `String
+          (match string_field "name" fields with
+           | Some value -> value
+           | None -> "unknown");
+        "profile_source",
+        `String
+          (match string_field "profile_source" fields with
+           | Some value -> value
+           | None -> "current_runtime_profile");
+        "consensus_status",
+        `String
+          (match string_field "consensus_status" fields with
+           | Some value -> value
+           | None -> "unknown");
+        "profile_root",
+        optional_root_json (string_field "profile_root" fields);
+        "validator_readiness_scope",
+        `String "profile_catalog_static";
+        "validator_readiness_status",
+        `String (if blockers = [] then "accepted" else "rejected");
+        "validator_readiness_blockers",
+        `List (List.map (fun blocker -> `String blocker) blockers);
+        "consensus_blocker_codes",
+        `List
+          (List.map
+             (fun blocker -> `String blocker)
+             (string_list_field "consensus_blocker_codes" fields));
+        "consensus_blocker_classes",
+        consensus_blocker_classes_json fields;
+        "consensus_obligations",
+        `List
+          (List.map
+             (fun obligation -> `String obligation)
+             (string_list_field "consensus_obligations" fields));
+        "evidence_required",
+        `List
+          (List.map
+             (fun blocker -> `String blocker)
+             static_evidence_blockers);
+      ])
+  | _ -> None
+
+let profile_readiness_worklist_json gates =
+  gates
+  |> List.filter_map profile_readiness_worklist_entry_json
+  |> List.sort
+       (fun left right ->
+          match left, right with
+          | `Assoc left_fields, `Assoc right_fields ->
+            String.compare
+              (match string_field "opcode" left_fields with
+               | Some value -> value
+               | None -> "")
+              (match string_field "opcode" right_fields with
+               | Some value -> value
+               | None -> "")
+          | _ -> 0)
+  |> fun entries -> `List entries
+
 let error_message = function
   | Unknown_profile profile -> "unknown numerical profile: " ^ profile
   | Unsupported_opcode_profile { opcode; profile; expected } ->
@@ -1988,6 +2089,9 @@ let current_runtime_profile_catalog_json ~opcodes =
       "profile_consensus_status_counts", status_counts_json status_counts;
       "profile_root_catalog", root_catalog;
       "consensus_blocker_catalog", blocker_catalog;
+      "consensus_blocker_class_counts",
+      consensus_blocker_class_counts_json gates;
+      "profile_readiness_worklist", profile_readiness_worklist_json gates;
     ]
   in
   match report with

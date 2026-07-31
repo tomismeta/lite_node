@@ -422,6 +422,13 @@ That standalone catalog is the intended source for producer-side
 root, consensus status, blocker catalog, and a diagnostic
 `profile_catalog_root`. The catalog root identifies the emitted catalog; it is
 not a substitute for binding each template's per-opcode numerical profile root.
+It also includes `profile_readiness_worklist`, a per-opcode static readiness
+table for planning before a fixture run exists. Each row carries the opcode,
+profile root, consensus status, consensus obligations, blocker codes,
+blocker classes, and diagnostic validator-readiness blockers. Because this is a
+catalog-only report, those rows intentionally include evidence blockers such as
+`execution_not_proven`, `failure_cases_not_proven`, `effort_not_proven`,
+`profile_root_binding_not_proven`, and `cross_platform_not_proven`.
 Each `profile_root_binding_catalog` row also carries
 `validator_readiness_status`, `validator_readiness_blockers`, and
 `consensus_blocker_codes`. That row is the compact per-primitive answer to:
