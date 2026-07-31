@@ -32,11 +32,21 @@ let usage =
   "inference_conformance_matrix --runner-report <path> \
    [--runner-report <path> ...] [--min-platforms <n>]"
 
-let read_json path =
-  try Yojson.Safe.from_file path with
-  | Sys_error message -> fail message
+let read_file path =
+  let input = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr input)
+    (fun () ->
+       let len = in_channel_length input in
+       really_input_string input len)
+
+let parse_json path raw =
+  try Yojson.Safe.from_string raw with
   | Yojson.Json_error message ->
     fail ("invalid json " ^ path ^ ": " ^ message)
+
+let sha256 raw =
+  Digestif.SHA256.(digest_string raw |> to_hex)
 
 let field name fields =
   match List.filter (fun (key, _) -> String.equal key name) fields with
@@ -137,7 +147,9 @@ let signature_json results =
   |> fun values -> Yojson.Safe.to_string (`List values)
 
 let report_summary path =
-  match read_json path with
+  let raw_report = read_file path in
+  let report_sha256 = sha256 raw_report in
+  match parse_json path raw_report with
   | `Assoc fields ->
     let platform = assoc_field "platform" fields in
     let execution_mode =
@@ -206,11 +218,15 @@ let report_summary path =
       |> add_if (not output_matched) "output_mismatch"
       |> add_if (not effort_matched) "effort_mismatch"
     in
+    let signature = signature_json results in
+    let signature_sha256 = sha256 signature in
     accepted,
     platform_key platform,
-    signature_json results,
+    signature,
     `Assoc [
       "path", `String path;
+      "runner_report_sha256", `String report_sha256;
+      "result_signature_sha256", `String signature_sha256;
       "accepted", `Bool accepted;
       "platform", `Assoc platform;
       "platform_key", `String (platform_key platform);
@@ -255,6 +271,14 @@ let matrix_report paths =
   let signatures =
     unique (List.map (fun (_, _, signature, _) -> signature) summaries)
   in
+  let matrix_signature =
+    signatures
+    |> List.sort String.compare
+    |> String.concat "\n"
+  in
+  let matrix_signature_sha256 =
+    if signatures = [] then None else Some (sha256 matrix_signature)
+  in
   let matrix_accepted =
     report_count > 0
     && accepted_reports = report_count
@@ -287,6 +311,10 @@ let matrix_report paths =
     "blockers", `List (List.map (fun blocker -> `String blocker) blockers);
     "platform_keys", `List (List.map (fun value -> `String value) platforms);
     "result_signature_count", `Int (List.length signatures);
+    "matrix_signature_sha256",
+    (match matrix_signature_sha256 with
+     | None -> `Null
+     | Some value -> `String value);
     "reports", `List (List.map (fun (_, _, _, json) -> json) summaries);
   ]
 

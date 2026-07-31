@@ -21,4 +21,4 @@
 (executable
  (name inference_conformance_matrix)
  (modules inference_conformance_matrix)
- (libraries yojson))
+ (libraries yojson digestif digestif.c))
