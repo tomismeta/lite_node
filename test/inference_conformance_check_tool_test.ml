@@ -205,6 +205,19 @@ let replace_assoc_field name value = function
        :: List.filter (fun (key, _) -> not (String.equal key name)) fields)
   | _ -> failwith "template must be object"
 
+let replace_failure_expected case expected = function
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (key, value) ->
+            if String.equal key "expected"
+               && String.equal (string_value "case" fields) case then
+              key, `String expected
+            else
+              key, value)
+         fields)
+  | value -> value
+
 let index_json =
   `Assoc [
     "type", `String "p0_litenode_vm_execution_template_index";
@@ -349,9 +362,34 @@ let check_rejects_missing_q1_failure_case () =
          "nonfinite_fp16_scale failure case is required for Q1 validator readiness"
          (report_issues report)))
 
+let check_rejects_wrong_q1_failure_expectation () =
+  with_temp_dir (fun dir ->
+    let failures =
+      List.map
+        (replace_failure_expected
+           "nonfinite_fp16_scale"
+           "accept_from_snapshot_wrong")
+        q1_failure_cases
+    in
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "expected_failure_atomicity_behavior"
+              (`List failures))
+    in
+    check "wrong Q1 failure expectation exits nonzero" (code = 1);
+    check
+      "wrong Q1 failure expectation issue"
+      (List.mem
+         "nonfinite_fp16_scale must declare reject_before_write"
+         (report_issues report)))
+
 let () =
   check_accepts_bound_abi_declaration ();
   check_rejects_stale_session_abi_root ();
   check_rejects_narrow_output_unit ();
   check_rejects_r1_output_count_drift ();
-  check_rejects_missing_q1_failure_case ()
+  check_rejects_missing_q1_failure_case ();
+  check_rejects_wrong_q1_failure_expectation ()

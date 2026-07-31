@@ -780,7 +780,7 @@ let failure_issues path opcode fields =
             | _ -> None)
           parsed
       in
-      let q1_alias_issues =
+      let q1_required_case_issues =
         if not (String.equal opcode "LINEAR_Q1_G128_FP") then []
         else
           let expected_for case =
@@ -791,41 +791,23 @@ let failure_issues path opcode fields =
                 | _ -> None)
               parsed
           in
-          ["output_input_aliasing"; "partial_output_input_aliasing"]
-          |> List.filter_map (fun case ->
+          [
+            "nonfinite_input_nan", "reject_before_write";
+            "nonfinite_input_infinity", "reject_before_write";
+            "output_input_aliasing", "accept_from_snapshot";
+            "partial_output_input_aliasing", "accept_from_snapshot";
+            "k_not_multiple_of_128", "reject_before_write";
+            "bad_q1_owner_length", "reject_before_write";
+            "nonfinite_fp16_scale", "reject_before_write";
+          ]
+          |> List.filter_map (fun (case, expected_prefix) ->
             match expected_for case with
-            | Some expected when starts_with "accept_from_snapshot" expected -> None
+            | Some expected when starts_with expected_prefix expected -> None
             | Some _ ->
               Some
                 (issue ~opcode path
-                   (case ^ " must declare accept_from_snapshot"))
+                   (case ^ " must declare " ^ expected_prefix))
             | None ->
-              Some
-                (issue ~opcode path
-                   (case ^ " failure case is required for Q1 snapshot aliasing")))
-      in
-      let q1_required_case_issues =
-        if not (String.equal opcode "LINEAR_Q1_G128_FP") then []
-        else
-          let has_case case =
-            List.exists
-              (function
-                | `Case (actual, _, _, _) -> String.equal actual case
-                | _ -> false)
-              parsed
-          in
-          [
-            "nonfinite_input_nan";
-            "nonfinite_input_infinity";
-            "output_input_aliasing";
-            "partial_output_input_aliasing";
-            "k_not_multiple_of_128";
-            "bad_q1_owner_length";
-            "nonfinite_fp16_scale";
-          ]
-          |> List.filter_map (fun case ->
-            if has_case case then None
-            else
               Some
                 (issue ~opcode path
                    (case
@@ -852,7 +834,7 @@ let failure_issues path opcode fields =
              ("failure cases lack unchanged_spans: "
               ^ String.concat "," missing_unchanged)]
       in
-      bad @ expected_issue @ mutation_issue @ unchanged_issue @ q1_alias_issues
+      bad @ expected_issue @ mutation_issue @ unchanged_issue
       @ q1_required_case_issues
 
 let gated_delta_semantic_issues path opcode fields =
