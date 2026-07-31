@@ -169,24 +169,25 @@ let q1_failure_cases =
       (span "output" 10000 2);
   ]
 
-let lhs_input_range ?(encoding = "f64le") () =
+let lhs_input_range ?(encoding = "f64le") ?(source_bytes = 1024)
+    ?(length_f64_cells = 128) () =
   `Assoc [
     "name", `String "lhs";
     "source",
     `Assoc [
       "path", `String "fixtures/input.bin";
-      "bytes", `Int 4096;
+      "bytes", `Int source_bytes;
       "sha256", `String (hex_root '1');
     ];
     "range_binding", `Assoc ["encoding", `String encoding];
     "vm_memory",
     `Assoc [
       "base_address", `Int 2000;
-      "length_f64_cells", `Int 512;
+      "length_f64_cells", `Int length_f64_cells;
     ];
   ]
 
-let q1_owner_input_range ?(encoding = "tensor.q1-g128")
+let q1_owner_input_range ?(encoding = "tensor.q1-g128") ?(source_bytes = 36)
     ?(include_f64_length = false) () =
   let vm_memory =
     if include_f64_length then
@@ -199,7 +200,7 @@ let q1_owner_input_range ?(encoding = "tensor.q1-g128")
     "source",
     `Assoc [
       "path", `String "fixtures/q1-owner.bin";
-      "bytes", `Int 18;
+      "bytes", `Int source_bytes;
       "sha256", `String (hex_root '3');
     ];
     "range_binding", `Assoc ["encoding", `String encoding];
@@ -212,7 +213,7 @@ let q1_input_ranges ?(q1_owner_encoding = "tensor.q1-g128") () =
     q1_owner_input_range ~encoding:q1_owner_encoding ();
   ]
 
-let q1_parameter_block ?(include_registers = true) ?(k = 128)
+let q1_parameter_block ?(include_registers = true) ?(k = 128) ?(n = 2)
     ?(byte_offset = 0) () =
   let registers =
     if include_registers then
@@ -241,7 +242,7 @@ let q1_parameter_block ?(include_registers = true) ?(k = 128)
          "byte_offset", `Int byte_offset;
          "m", `Int 1;
          "k", `Int k;
-         "n", `Int 1;
+         "n", `Int n;
        ];
      ])
 
@@ -544,6 +545,79 @@ let check_rejects_q1_owner_f64_cell_length () =
          "LINEAR_Q1_G128_FP q1_owner input must be raw bytes"
          (report_issues report)))
 
+let check_rejects_q1_lhs_layout_mismatch () =
+  with_temp_dir (fun dir ->
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "input_memory_ranges"
+              (`List [
+                lhs_input_range ~source_bytes:4096 ~length_f64_cells:512 ();
+                q1_owner_input_range ();
+              ]))
+    in
+    check "q1 lhs layout mismatch exits nonzero" (code = 1);
+    let issues = report_issues report in
+    check
+      "q1 lhs bytes mismatch issue"
+      (List.mem
+         "LINEAR_Q1_G128_FP lhs source bytes mismatch: expected 1024 actual 4096"
+         issues);
+    check
+      "q1 lhs cells mismatch issue"
+      (List.mem
+         "LINEAR_Q1_G128_FP lhs length_f64_cells mismatch: expected 128 actual 512"
+         issues))
+
+let check_rejects_q1_owner_byte_span_too_short () =
+  with_temp_dir (fun dir ->
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "input_memory_ranges"
+              (`List [
+                lhs_input_range ();
+                q1_owner_input_range ~source_bytes:18 ();
+              ])
+         |> replace_assoc_field
+              "parameter_addresses_and_scalar_params"
+              (q1_parameter_block ~n:2 ()))
+    in
+    check "short q1 owner span exits nonzero" (code = 1);
+    check
+      "short q1 owner span issue"
+      (List.mem
+         "LINEAR_Q1_G128_FP q1_owner source bytes too short: required 36 actual 18"
+         (report_issues report)))
+
+let check_rejects_q1_expected_output_manifest_size () =
+  with_temp_dir (fun dir ->
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "expected_output_byte_manifests"
+              (`List [
+                `Assoc [
+                  "name", `String "expected";
+                  "path", `String "fixtures/expected.bin";
+                  "bytes", `Int 8;
+                  "sha256", `String (hex_root '2');
+                ];
+              ]))
+    in
+    check "q1 expected manifest size exits nonzero" (code = 1);
+    check
+      "q1 expected manifest size issue"
+      (List.mem
+         "LINEAR_Q1_G128_FP expected output manifest bytes mismatch: expected 16 actual 8"
+         (report_issues report)))
+
 let check_rejects_q1_missing_register_metadata () =
   with_temp_dir (fun dir ->
     let code, report =
@@ -765,6 +839,9 @@ let () =
   check_rejects_missing_q1_owner_input_range ();
   check_rejects_q1_owner_f64le_range ();
   check_rejects_q1_owner_f64_cell_length ();
+  check_rejects_q1_lhs_layout_mismatch ();
+  check_rejects_q1_owner_byte_span_too_short ();
+  check_rejects_q1_expected_output_manifest_size ();
   check_rejects_q1_missing_register_metadata ();
   check_rejects_q1_bad_k_shape ();
   check_rejects_missing_q1_failure_case ();

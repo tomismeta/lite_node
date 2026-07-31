@@ -1214,6 +1214,11 @@ let checked_mul left right =
   else if left <> 0 && right > max_int / left then None
   else Some (left * right)
 
+let checked_add left right =
+  if left < 0 || right < 0 then None
+  else if right > max_int - left then None
+  else Some (left + right)
+
 let q1_expected_effort_issues path opcode fields =
   if not (String.equal opcode "LINEAR_Q1_G128_FP") then []
   else
@@ -1255,6 +1260,16 @@ let range_named name ranges =
 let range_encoding range_fields =
   match assoc_field "range_binding" range_fields with
   | Some binding_fields -> string_field "encoding" binding_fields
+  | None -> None
+
+let range_source_bytes range_fields =
+  match assoc_field "source" range_fields with
+  | Some source_fields -> int_field "bytes" source_fields
+  | None -> None
+
+let range_f64_cells range_fields =
+  match assoc_field "vm_memory" range_fields with
+  | Some vm_fields -> int_field "length_f64_cells" vm_fields
   | None -> None
 
 let q1_input_range_issues path opcode fields =
@@ -1333,6 +1348,9 @@ let q1_parameter_issues path opcode fields =
             match int_field "m" values, int_field "k" values, int_field "n" values with
             | Some m, Some k, Some n when m <= 0 || k <= 0 || n <= 0 ->
               [issue ~opcode path "LINEAR_Q1_G128_FP m/k/n must be positive"]
+            | Some m, Some k, Some n
+              when m > 32768 || k > 32768 || n > 32768 ->
+              [issue ~opcode path "LINEAR_Q1_G128_FP m/k/n must be <= 32768"]
             | Some _, Some k, Some _ when k mod 128 <> 0 ->
               [issue ~opcode path
                  "LINEAR_Q1_G128_FP k must be a multiple of 128"]
@@ -1348,6 +1366,137 @@ let q1_parameter_issues path opcode fields =
           required @ shape @ offset
       in
       register_issues @ value_issues
+
+let sum_manifest_bytes manifests =
+  let rec loop acc = function
+    | [] -> Some acc
+    | `Assoc manifest_fields :: rest ->
+      (match int_field "bytes" manifest_fields with
+       | Some bytes ->
+         (match checked_add acc bytes with
+          | Some next -> loop next rest
+          | None -> None)
+       | None -> None)
+    | _ -> None
+  in
+  loop 0 manifests
+
+let q1_relational_layout_issues path opcode fields =
+  if not (String.equal opcode "LINEAR_Q1_G128_FP") then []
+  else
+    match list_field "input_memory_ranges" fields,
+          assoc_field "parameter_addresses_and_scalar_params" fields with
+    | Some ranges, Some params ->
+      (match range_named "q1_owner" ranges, assoc_field "values" params with
+       | Some q1_owner, Some values ->
+         (match range_named "lhs" ranges,
+                int_field "byte_offset" values,
+                int_field "m" values,
+                int_field "k" values,
+                int_field "n" values with
+          | Some lhs, Some byte_offset, Some m, Some k, Some n
+            when byte_offset >= 0 && m > 0 && k > 0 && n > 0
+                 && k mod 128 = 0 ->
+            let block_bytes = 18 in
+            let blocks_per_output = k / 128 in
+            let lhs_cells = checked_mul m k in
+            let output_cells = checked_mul m n in
+            let q1_blocks = checked_mul n blocks_per_output in
+            let q1_bytes =
+              Option.bind q1_blocks (fun blocks -> checked_mul blocks block_bytes)
+            in
+            let output_bytes =
+              Option.bind output_cells (fun cells -> checked_mul cells 8)
+            in
+            let lhs_issues =
+              match lhs_cells with
+              | Some cells ->
+                let bytes_expected = checked_mul cells 8 in
+                let source_issue =
+                  match bytes_expected, range_source_bytes lhs with
+                  | Some expected, Some actual when expected = actual -> []
+                  | Some expected, Some actual ->
+                    [issue ~opcode path
+                       (Printf.sprintf
+                          "LINEAR_Q1_G128_FP lhs source bytes mismatch: expected %d actual %d"
+                          expected
+                          actual)]
+                  | _ -> []
+                in
+                let length_issue =
+                  match range_f64_cells lhs with
+                  | Some actual when actual = cells -> []
+                  | Some actual ->
+                    [issue ~opcode path
+                       (Printf.sprintf
+                          "LINEAR_Q1_G128_FP lhs length_f64_cells mismatch: expected %d actual %d"
+                          cells
+                          actual)]
+                  | None -> []
+                in
+                source_issue @ length_issue
+              | None ->
+                [issue ~opcode path "LINEAR_Q1_G128_FP lhs layout overflow"]
+            in
+            let q1_issues =
+              match q1_bytes, range_source_bytes q1_owner with
+              | Some byte_count, Some source_bytes ->
+                (match checked_add byte_offset byte_count with
+                 | Some required when source_bytes >= required -> []
+                 | Some required ->
+                   [issue ~opcode path
+                      (Printf.sprintf
+                         "LINEAR_Q1_G128_FP q1_owner source bytes too short: required %d actual %d"
+                         required
+                         source_bytes)]
+                 | None ->
+                   [issue ~opcode path
+                      "LINEAR_Q1_G128_FP q1_owner byte span overflow"])
+              | None, _ ->
+                [issue ~opcode path
+                   "LINEAR_Q1_G128_FP q1_owner byte span overflow"]
+              | _, None -> []
+            in
+            let output_issues =
+              match output_cells with
+              | Some cells ->
+                let output_length_issue =
+                  match assoc_field "output" fields with
+                  | Some output_fields ->
+                    (match int_field "length_f64_cells" output_fields with
+                     | Some actual when actual = cells -> []
+                     | Some actual ->
+                       [issue ~opcode path
+                          (Printf.sprintf
+                             "LINEAR_Q1_G128_FP output length_f64_cells mismatch: expected %d actual %d"
+                             cells
+                             actual)]
+                     | None -> [])
+                  | None -> []
+                in
+                let manifest_issue =
+                  match list_field "expected_output_byte_manifests" fields,
+                        output_bytes with
+                  | Some manifests, Some expected ->
+                    (match sum_manifest_bytes manifests with
+                     | Some actual when actual = expected -> []
+                     | Some actual ->
+                       [issue ~opcode path
+                          (Printf.sprintf
+                             "LINEAR_Q1_G128_FP expected output manifest bytes mismatch: expected %d actual %d"
+                             expected
+                             actual)]
+                     | None -> [])
+                  | _ -> []
+                in
+                output_length_issue @ manifest_issue
+              | None ->
+                [issue ~opcode path "LINEAR_Q1_G128_FP output layout overflow"]
+            in
+            lhs_issues @ q1_issues @ output_issues
+          | _ -> [])
+       | _ -> [])
+    | _ -> []
 
 let producer_template_issues path opcode primitive json =
   match json with
@@ -1386,6 +1535,7 @@ let producer_template_issues path opcode primitive json =
     @ q1_expected_effort_issues path opcode fields
     @ q1_input_range_issues path opcode fields
     @ q1_parameter_issues path opcode fields
+    @ q1_relational_layout_issues path opcode fields
     @ profile_issues path opcode fields
     @ issues_for_program_effects path opcode fields
     @ source_path_issues path opcode fields

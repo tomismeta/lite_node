@@ -750,8 +750,12 @@ runner execution. `LINEAR_Q1_G128_FP` templates must bind an `lhs` range as
 for `dst`, `lhs`, `q1_owner`, `byte_offset`, `m`, `k`, and `n`, and declare
 integer values for `dst`, `lhs`, `byte_offset`, `m`, `k`, and `n`. Dimensions
 must be positive, `k` must be a multiple of 128, and `byte_offset` must be
-nonnegative. This keeps producer drift out of the validator-readiness gate
-without adding model-family knowledge to LiteNode.
+nonnegative. The declared `lhs` source must be exactly `m * k * 8` bytes with
+`m * k` f64 cells, the declared `q1_owner` byte source must cover
+`byte_offset + n * (k / 128) * 18` bytes, and the declared output must be
+`m * n` f64 cells with exactly `m * n * 8` expected-output manifest bytes. This
+keeps producer drift out of the validator-readiness gate without adding
+model-family knowledge to LiteNode.
 
 `LINEAR_Q1_G128_FP` also requires a counted `lower_effort_limit` case. That
 case must lower the VM effort limit below the opcode base charge and prove
