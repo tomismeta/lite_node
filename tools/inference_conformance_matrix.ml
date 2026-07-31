@@ -14,6 +14,7 @@ Include at startup:
 
 let runner_reports = ref []
 let min_platforms = ref 2
+let require_validator_readiness = ref false
 
 let fail message =
   prerr_endline message;
@@ -26,11 +27,15 @@ let args = [
   "--min-platforms",
   Arg.Set_int min_platforms,
   "minimum distinct platform observations required for matrix acceptance";
+  "--require-validator-readiness",
+  Arg.Set require_validator_readiness,
+  "exit nonzero unless the matrix also proves validator readiness";
 ]
 
 let usage =
   "inference_conformance_matrix --runner-report <path> \
-   [--runner-report <path> ...] [--min-platforms <n>]"
+   [--runner-report <path> ...] [--min-platforms <n>] \
+   [--require-validator-readiness]"
 
 let read_file path =
   let input = open_in_bin path in
@@ -394,6 +399,7 @@ let matrix_report paths =
     "distinct_platform_count", `Int (List.length platforms);
     "cross_platform_status",
     `String (if matrix_accepted then "accepted" else "rejected");
+    "validator_readiness_required", `Bool !require_validator_readiness;
     "blockers", `List (List.map (fun blocker -> `String blocker) blockers);
     "validator_readiness_status",
     `String (if validator_readiness_accepted then "accepted" else "rejected");
@@ -420,9 +426,22 @@ let () =
   let paths = List.rev !runner_reports in
   let report = matrix_report paths in
   print_endline (Yojson.Safe.pretty_to_string report);
-  match report with
-  | `Assoc fields ->
-    (match field "status" fields with
-     | Some (`String "accepted") -> ()
-     | _ -> exit 1)
-  | _ -> exit 1
+  let accepted =
+    match report with
+    | `Assoc fields ->
+      let matrix_accepted =
+        match field "status" fields with
+        | Some (`String "accepted") -> true
+        | _ -> false
+      in
+      let validator_readiness_accepted =
+        (not !require_validator_readiness)
+        ||
+        match field "validator_readiness_status" fields with
+        | Some (`String "accepted") -> true
+        | _ -> false
+      in
+      matrix_accepted && validator_readiness_accepted
+    | _ -> false
+  in
+  if not accepted then exit 1

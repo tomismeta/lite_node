@@ -156,6 +156,12 @@ tools/inference_conformance_matrix.exe \
   --runner-report <macos-report.cjson>
 ```
 
+Use `--require-validator-readiness` when the matrix is acting as a release or
+admission gate. Without that flag, the command exits successfully when the
+cross-platform matrix itself is accepted, even if the lifted
+`validator_readiness_status` is still rejected by consensus-profile or
+profile-root blockers.
+
 The matrix verifier consumes executed `inference_conformance_run` reports, not
 schema-checker reports. It requires accepted local execution, strict effort,
 accepted punitive failure cases, distinct platform observations, and identical
