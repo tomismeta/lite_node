@@ -749,6 +749,8 @@ let producer_index_report index_path =
       Profile.profile_root_catalog_json profile_gates;
       "consensus_blocker_catalog",
       Profile.consensus_blocker_catalog_json profile_gates;
+      "consensus_blocker_class_counts",
+      Profile.consensus_blocker_class_counts_json profile_gates;
       "profile_root_binding_status_counts",
       Profile.root_binding_counts_json profile_root_binding_counts;
       "profile_root_binding_classification_counts",
@@ -839,6 +841,8 @@ let () =
               Profile.profile_root_catalog_json [template_json];
               "consensus_blocker_catalog",
               Profile.consensus_blocker_catalog_json [template_json];
+              "consensus_blocker_class_counts",
+              Profile.consensus_blocker_class_counts_json [template_json];
               "profile_root_binding_status_counts",
               Profile.root_binding_counts_json profile_root_binding_counts;
               "profile_root_binding_classification_counts",
@@ -905,6 +909,8 @@ let () =
         Profile.profile_root_catalog_json template_jsons;
         "consensus_blocker_catalog",
         Profile.consensus_blocker_catalog_json template_jsons;
+        "consensus_blocker_class_counts",
+        Profile.consensus_blocker_class_counts_json template_jsons;
         "profile_root_binding_status_counts",
         Profile.root_binding_counts_json root_binding_counts;
         "profile_root_binding_classification_counts",
