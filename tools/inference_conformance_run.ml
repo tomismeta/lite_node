@@ -24,6 +24,7 @@ let require_failure_cases = ref false
 let require_profile_roots_bound = ref false
 let require_consensus_candidate = ref false
 let require_consensus_ready = ref false
+let require_validator_readiness = ref false
 
 let fail message =
   prerr_endline message;
@@ -54,16 +55,20 @@ let args = [
   "--require-consensus-ready",
   Arg.Set require_consensus_ready,
   "reject reports whose profile gates are not all consensus_ready";
+  "--require-validator-readiness",
+  Arg.Set require_validator_readiness,
+  "exit nonzero unless the report also proves validator readiness";
 ]
 
 let usage =
   "inference_conformance_run --template-index <path> [--strict-effort] \
    [--include-failures] [--require-failure-cases] \
    [--require-profile-roots-bound] \
-   [--require-consensus-candidate] [--require-consensus-ready]\n\
+   [--require-consensus-candidate] [--require-consensus-ready] \
+   [--require-validator-readiness]\n\
    or inference_conformance_run --p0-plus-pack <path> \
    [--require-profile-roots-bound] [--require-consensus-candidate] \
-   [--require-consensus-ready]"
+   [--require-consensus-ready] [--require-validator-readiness]"
 
 let read_file path =
   let input = open_in_bin path in
@@ -394,6 +399,7 @@ let failure_cases_required_pass
     ~accepted_counted_failure_case_count
 
 let validator_readiness_gate
+    ~required
     ~execution_accepted
     ~strict_effort_status
     ~effort_status
@@ -459,6 +465,7 @@ let validator_readiness_gate
   in
   `Assoc [
     "diagnostic_only", `Bool true;
+    "required", `Bool required;
     "status",
     `String (if ready then "accepted" else "rejected");
     "execution_status",
@@ -1598,6 +1605,7 @@ let run_p0_plus_pack path =
       root_binding_counts;
     "validator_readiness_gate",
     validator_readiness_gate
+      ~required:!require_validator_readiness
       ~execution_accepted
       ~strict_effort_status:"not_supported"
       ~effort_status:"not_supported"
@@ -1783,6 +1791,7 @@ let run_index path =
       root_binding_counts;
     "validator_readiness_gate",
     validator_readiness_gate
+      ~required:!require_validator_readiness
       ~execution_accepted
       ~strict_effort_status:
         (if strict_effort_ready then "accepted" else "rejected")
@@ -1828,10 +1837,26 @@ let () =
     | Some path, None -> run_index path
     | None, Some path -> run_p0_plus_pack path
   in
-    print_endline (Yojson.Safe.pretty_to_string report);
-    (match report with
-     | `Assoc fields ->
-       (match field "status" fields with
-        | Some (`String "accepted") -> ()
-        | _ -> exit 1)
-     | _ -> exit 1)
+  print_endline (Yojson.Safe.pretty_to_string report);
+  let accepted =
+    match report with
+    | `Assoc fields ->
+      let report_accepted =
+        match field "status" fields with
+        | Some (`String "accepted") -> true
+        | _ -> false
+      in
+      let validator_readiness_accepted =
+        (not !require_validator_readiness)
+        ||
+        match field "validator_readiness_gate" fields with
+        | Some (`Assoc gate_fields) ->
+          (match field "status" gate_fields with
+           | Some (`String "accepted") -> true
+           | _ -> false)
+        | _ -> false
+      in
+      report_accepted && validator_readiness_accepted
+    | _ -> false
+  in
+  if not accepted then exit 1

@@ -149,6 +149,11 @@ blocker codes. It also rejects reports without `--strict-effort` and
 single-platform reports with `cross_platform_conformance_missing`; a local
 Linux runner result is not a validator portability matrix.
 
+Use `--require-validator-readiness` on `inference_conformance_run.exe` when the
+runner itself is acting as a release or admission gate. Without that flag, the
+runner can exit successfully for useful local execution evidence while the
+nested `validator_readiness_gate.status` remains `rejected`.
+
 Cross-platform evidence is aggregated separately:
 
 ```text
