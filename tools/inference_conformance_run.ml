@@ -495,6 +495,7 @@ let next_readiness_blocker blockers =
       "uncounted_failure_cases";
       "punitive_failure_cases_not_accepted";
       "punitive_failure_cases_not_run";
+      "required_failure_case_contract_rejected";
       "vm_semantics_root_binding_not_proven";
       "unbound_vm_semantics_roots";
       "vm_semantics_binding_mismatch";
@@ -997,6 +998,9 @@ let validator_readiness_gate
     |> add_blocker
          (not failure_cases_ready)
          "punitive_failure_cases_not_accepted"
+    |> add_blocker
+         (required_failure_case_contract_blockers <> [])
+         "required_failure_case_contract_rejected"
     |> add_blocker
          (not vm_semantics_ready)
          "vm_semantics_root_binding_not_proven"

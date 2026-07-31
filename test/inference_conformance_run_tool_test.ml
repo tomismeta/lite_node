@@ -790,6 +790,10 @@ let check_require_failure_cases_rejects_missing_q1_case () =
             "q1_failure_case_missing_nonfinite_fp16_scale"
             (string_list "blockers" gate));
        let readiness = assoc_json "validator_readiness_gate" fields in
+       let readiness_blockers = string_list "blockers" readiness in
+       check
+         "missing Q1 failure readiness generic blocker"
+         (List.mem "required_failure_case_contract_rejected" readiness_blockers);
        check
          "missing Q1 failure next blocker"
          (String.equal
