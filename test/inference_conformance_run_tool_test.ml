@@ -677,6 +677,18 @@ let check_good_template_reports_bound_abi () =
      | `Assoc fields ->
        check_q1_contract_visible (assoc_json "failure_case_gate" fields)
      | _ -> failwith "report must be object");
+    let result_contract = assoc_json "required_failure_case_contract" result in
+    (match assoc_value "contract" result_contract with
+     | `Assoc contract_fields ->
+       check
+         "good result Q1 contract opcode"
+         (String.equal
+            (string_value "opcode" contract_fields)
+            "LINEAR_Q1_G128_FP");
+       check
+         "good result Q1 contract expectation count"
+         (List.length (list_value "expectations" contract_fields) = 11)
+     | _ -> failwith "expected result Q1 failure-case contract");
     check
       "good failure gate accepted"
       (String.equal (gate_status "failure_case_gate" report) "accepted");

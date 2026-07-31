@@ -1965,6 +1965,12 @@ let required_failure_case_contract opcode failure_results =
     in
     (if blockers = [] then "accepted" else "rejected"), blockers
 
+let required_failure_case_contract_payload opcode =
+  if String.equal opcode "LINEAR_Q1_G128_FP" then
+    Template.q1_required_failure_expectations_json
+  else
+    `Null
+
 let execute_template root_dir entry =
   let opcode = string_field "opcode" entry in
   let primitive = opt_string_field "primitive" entry in
@@ -2090,6 +2096,7 @@ let execute_template root_dir entry =
     "required_failure_case_contract",
     `Assoc [
       "status", `String required_failure_case_contract_status;
+      "contract", required_failure_case_contract_payload opcode;
       "blockers",
       `List
         (List.map

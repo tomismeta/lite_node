@@ -172,6 +172,18 @@ let finite_span ?(finite = true) name base cells =
     "finite", `Bool finite;
   ]
 
+let q1_required_failure_contract_json =
+  `Assoc [
+    "opcode", `String "LINEAR_Q1_G128_FP";
+    "expectations",
+    `List [
+      `Assoc [
+        "case", `String "nonfinite_fp16_scale";
+        "expected_prefix", `String "reject_before_write";
+      ];
+    ];
+  ]
+
 let result
     ?(opcode = "LINEAR_Q1_G128_FP")
     ?(observed_opcode_effort = 200)
@@ -182,6 +194,7 @@ let result
     ?(executable_abi_status = "matched")
     ?(required_failure_contract_status = "accepted")
     ?required_failure_contract_blockers
+    ?(include_required_contract_payload = true)
     ?(failure = failure_case ())
     () =
   let required_failure_contract_blockers =
@@ -195,6 +208,27 @@ let result
         []
       else
         ["q1_failure_case_missing_nonfinite_fp16_scale"]
+  in
+  let required_failure_contract_fields =
+    [
+      "status", `String required_failure_contract_status;
+      "blockers",
+      `List
+        (List.map
+           (fun blocker -> `String blocker)
+           required_failure_contract_blockers);
+    ]
+  in
+  let required_failure_contract_fields =
+    if include_required_contract_payload then
+      ("contract",
+       (if String.equal opcode "LINEAR_Q1_G128_FP" then
+          q1_required_failure_contract_json
+        else
+          `Null))
+      :: required_failure_contract_fields
+    else
+      required_failure_contract_fields
   in
   `Assoc [
     "opcode", `String opcode;
@@ -282,14 +316,7 @@ let result
     "effort_match", `Bool true;
     "strict_effort", `Bool true;
     "required_failure_case_contract",
-    `Assoc [
-      "status", `String required_failure_contract_status;
-      "blockers",
-      `List
-        (List.map
-           (fun blocker -> `String blocker)
-           required_failure_contract_blockers);
-    ];
+    `Assoc required_failure_contract_fields;
     "subspans",
     `List [
       `Assoc [
@@ -321,6 +348,7 @@ let report
     ?(executable_abi_status = "matched")
     ?(required_failure_contract_status = "accepted")
     ?required_failure_contract_blockers
+    ?include_required_contract_payload
     ?failure
     system
     machine =
@@ -353,6 +381,7 @@ let report
         ~executable_abi_status
         ~required_failure_contract_status
         ?required_failure_contract_blockers
+        ?include_required_contract_payload
         ?failure
         ();
     ];
@@ -937,6 +966,35 @@ let check_matrix_rejects_missing_failure_contract_with_gate_accepted () =
            readiness_blockers)
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_q1_failure_contract_missing_payload () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~include_required_contract_payload:false
+           "Linux"
+           "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "missing Q1 failure contract payload exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "missing Q1 failure contract payload blocker"
+        (List.mem
+           "required_failure_case_contract_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_q1_failure_contract_accepted_with_blockers () =
   with_temp_dir (fun dir ->
     let a =
@@ -1139,6 +1197,7 @@ let () =
   check_matrix_rejects_profile_root_result_mismatch_with_gate_accepted ();
   check_matrix_rejects_failure_contract_result_mismatch_with_gate_accepted ();
   check_matrix_rejects_missing_failure_contract_with_gate_accepted ();
+  check_matrix_rejects_q1_failure_contract_missing_payload ();
   check_matrix_rejects_q1_failure_contract_accepted_with_blockers ();
   check_matrix_rejects_q1_failure_contract_not_applicable ();
   check_matrix_accepts_non_q1_failure_contract_not_applicable ();

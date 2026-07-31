@@ -754,7 +754,10 @@ bytes, and the cross-platform matrix signs that `snapshot_output` evidence in
 the result signature. The matrix also signs the concrete finite-span and
 active-finite-span observations emitted by the runner, so a report cannot keep
 the same aggregate finite status while changing the span-level evidence that
-proved it.
+proved it. Each Q1 result row also carries the required failure-case contract
+payload itself, and the matrix rejects accepted Q1 contract rows that omit that
+payload. This binds cross-platform equivalence to the actual punitive contract,
+not only to a pass/fail status string.
 
 The static checker also validates the alias mutation shape. Exact
 `output_input_aliasing` must declare an output-to-lhs alias mutation, and

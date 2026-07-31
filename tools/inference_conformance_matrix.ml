@@ -378,6 +378,21 @@ let result_opcode = function
 let opcode_requires_failure_case_contract opcode =
   String.equal opcode "LINEAR_Q1_G128_FP"
 
+let required_failure_case_contract_bound opcode fields =
+  if not (opcode_requires_failure_case_contract opcode) then
+    true
+  else
+    match field "contract" fields with
+    | Some (`Assoc contract_fields) ->
+      String.equal
+        (string_field "opcode" contract_fields)
+        opcode
+      &&
+      (match field "expectations" contract_fields with
+       | Some (`List (_ :: _)) -> true
+       | _ -> false)
+    | _ -> false
+
 let required_failure_case_contract_accepted fields =
   let opcode = string_field "opcode" fields in
   match opt_assoc_field "required_failure_case_contract" fields with
@@ -388,7 +403,9 @@ let required_failure_case_contract_accepted fields =
       | _ -> false
     in
     (match opt_string_field "status" contract_fields with
-     | Some "accepted" -> blockers_empty
+     | Some "accepted" ->
+       blockers_empty
+       && required_failure_case_contract_bound opcode contract_fields
      | Some "not_applicable" ->
        (not (opcode_requires_failure_case_contract opcode)) && blockers_empty
      | _ -> false)
