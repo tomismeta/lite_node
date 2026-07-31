@@ -83,11 +83,14 @@ let current_vm_semantics_root () =
   | Some root -> root
   | None -> failwith "missing Q1 VM semantics root"
 
+let mutation name target fields =
+  `Assoc (["mutation", `String name; "target", `String target] @ fields)
+
 let failure_case case expected mutation unchanged =
   `Assoc [
     "case", `String case;
     "expected", `String expected;
-    "executable_mutations", `List [`String mutation];
+    "executable_mutations", `List [mutation];
     "unchanged_spans", `List [`String unchanged];
   ]
 
@@ -96,37 +99,58 @@ let q1_failure_cases =
     failure_case
       "nonfinite_input_nan"
       "reject_before_write"
-      "lhs[0]=nan"
+      (mutation
+         "replace_first_f64_input_cell"
+         "lhs"
+         ["value_bits", `Intlit "9221120237041090560"])
       "output";
     failure_case
       "nonfinite_input_infinity"
       "reject_before_write"
-      "lhs[0]=infinity"
+      (mutation
+         "replace_first_f64_input_cell"
+         "lhs"
+         ["value_bits", `Intlit "9218868437227405312"])
       "output";
     failure_case
       "output_input_aliasing"
       "accept_from_snapshot_exact"
-      "dst=lhs"
+      (mutation
+         "set_output_base_to_first_input_base"
+         "output.base_address"
+         [])
       "lhs";
     failure_case
       "partial_output_input_aliasing"
       "accept_from_snapshot_partial"
-      "dst=lhs+1"
+      (mutation
+         "set_output_base_to_first_input_base_plus"
+         "output.base_address"
+         ["offset_cells", `Int 1])
       "lhs_prefix";
     failure_case
       "k_not_multiple_of_128"
       "reject_before_write"
-      "k=127"
+      (mutation
+         "set_scalar_param"
+         "parameter_addresses_and_scalar_params.values.k"
+         ["value", `Int 127])
       "output";
     failure_case
       "bad_q1_owner_length"
       "reject_before_write"
-      "q1_owner_truncate=1"
+      (mutation
+         "truncate_input_manifest"
+         "q1_owner"
+         ["truncate_bytes", `Int 1])
       "output";
     failure_case
       "nonfinite_fp16_scale"
       "reject_before_write"
-      "q1_scale=inf"
+      (mutation
+         "replace_q1_scale_bits"
+         "q1_owner[0..2]"
+         ["value_hex_le", `String "007c"])
       "output";
   ]
 
@@ -225,7 +249,7 @@ let replace_failure_mutations case mutations = function
          (fun (key, value) ->
             if String.equal key "executable_mutations"
                && String.equal (string_value "case" fields) case then
-              key, `List (List.map (fun value -> `String value) mutations)
+              key, `List mutations
             else
               key, value)
          fields)
@@ -423,7 +447,14 @@ let check_rejects_q1_exact_alias_without_alias_mutation () =
   with_temp_dir (fun dir ->
     let failures =
       List.map
-        (replace_failure_mutations "output_input_aliasing" ["lhs[0]=nan"])
+        (replace_failure_mutations
+           "output_input_aliasing"
+           [
+             mutation
+               "replace_first_f64_input_cell"
+               "lhs"
+               ["value_bits", `Intlit "9221120237041090560"];
+           ])
         q1_failure_cases
     in
     let code, report =
@@ -445,7 +476,14 @@ let check_rejects_q1_partial_alias_without_partial_mutation () =
   with_temp_dir (fun dir ->
     let failures =
       List.map
-        (replace_failure_mutations "partial_output_input_aliasing" ["dst=lhs"])
+        (replace_failure_mutations
+           "partial_output_input_aliasing"
+           [
+             mutation
+               "set_output_base_to_first_input_base"
+               "output.base_address"
+               [];
+           ])
         q1_failure_cases
     in
     let code, report =
@@ -463,6 +501,28 @@ let check_rejects_q1_partial_alias_without_partial_mutation () =
          "partial_output_input_aliasing must declare partial output/lhs alias mutation"
          (report_issues report)))
 
+let check_rejects_string_executable_mutation () =
+  with_temp_dir (fun dir ->
+    let failures =
+      List.map
+        (replace_failure_mutations "nonfinite_input_nan" [`String "lhs[0]=nan"])
+        q1_failure_cases
+    in
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "expected_failure_atomicity_behavior"
+              (`List failures))
+    in
+    check "string mutation exits nonzero" (code = 1);
+    check
+      "string mutation issue"
+      (List.mem
+         "failure case executable_mutations entries must be objects: nonfinite_input_nan"
+         (report_issues report)))
+
 let () =
   check_accepts_bound_abi_declaration ();
   check_rejects_stale_session_abi_root ();
@@ -471,4 +531,5 @@ let () =
   check_rejects_missing_q1_failure_case ();
   check_rejects_wrong_q1_failure_expectation ();
   check_rejects_q1_exact_alias_without_alias_mutation ();
-  check_rejects_q1_partial_alias_without_partial_mutation ()
+  check_rejects_q1_partial_alias_without_partial_mutation ();
+  check_rejects_string_executable_mutation ()

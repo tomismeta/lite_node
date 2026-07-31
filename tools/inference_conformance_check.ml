@@ -149,8 +149,59 @@ let assoc_field name fields =
   | _ -> None
 
 let mutation_name = function
-  | `String value -> Some value
   | `Assoc fields -> string_field "mutation" fields
+  | _ -> None
+
+let intlike_field name fields =
+  match field name fields with
+  | Some (`Int _)
+  | Some (`Intlit _) -> true
+  | _ -> false
+
+let nonempty_string_list_field name fields =
+  match field name fields with
+  | Some (`List (_ :: _ as values)) ->
+    List.for_all (function `String _ -> true | _ -> false) values
+  | _ -> false
+
+let supported_executable_mutation = function
+  | "replace_first_f64_input_cell"
+  | "replace_all_score_cells"
+  | "replace_scores_with_large_finite_values"
+  | "set_count_to_zero"
+  | "set_epsilon_bits"
+  | "set_scalar_param"
+  | "set_state_dst_to_output_base"
+  | "set_output_base_to_first_input_base"
+  | "set_output_base_to_first_input_base_plus"
+  | "replace_q1_scale_bits"
+  | "truncate_input_manifest"
+  | "lower_effort_limit" -> true
+  | _ -> false
+
+let mutation_required_param_missing name fields =
+  match name with
+  | "replace_first_f64_input_cell"
+  | "replace_all_score_cells"
+  | "set_epsilon_bits" ->
+    if intlike_field "value_bits" fields then None else Some "value_bits"
+  | "replace_scores_with_large_finite_values" ->
+    if nonempty_string_list_field "values_decimal" fields then None
+    else Some "values_decimal"
+  | "set_scalar_param"
+  | "lower_effort_limit" ->
+    if int_field "value" fields <> None then None else Some "value"
+  | "set_output_base_to_first_input_base_plus" ->
+    if int_field "offset_cells" fields <> None then None else Some "offset_cells"
+  | "replace_q1_scale_bits" ->
+    if string_field "value_hex_le" fields <> None then None
+    else Some "value_hex_le"
+  | "truncate_input_manifest" ->
+    if int_field "truncate_bytes" fields <> None then None
+    else Some "truncate_bytes"
+  | "set_count_to_zero"
+  | "set_state_dst_to_output_base"
+  | "set_output_base_to_first_input_base" -> None
   | _ -> None
 
 let mutation_targets_output = function
@@ -168,7 +219,6 @@ let mutation_offset_cells = function
 
 let exact_q1_alias_mutation mutation =
   match mutation_name mutation with
-  | Some "dst=lhs" -> true
   | Some "set_output_base_to_first_input_base" ->
     mutation_targets_output mutation
   | Some "set_output_base_to_first_input_base_plus" ->
@@ -178,13 +228,6 @@ let exact_q1_alias_mutation mutation =
 
 let partial_q1_alias_mutation mutation =
   match mutation_name mutation with
-  | Some value when starts_with "dst=lhs+" value ->
-    (match String.split_on_char '+' value |> List.rev with
-     | offset :: _ ->
-       (match int_of_string_opt offset with
-        | Some value -> value > 0
-        | None -> false)
-     | [] -> false)
   | Some "set_output_base_to_first_input_base_plus" ->
     mutation_targets_output mutation
     && Option.value ~default:0 (mutation_offset_cells mutation) > 0
@@ -879,6 +922,50 @@ let failure_issues path opcode fields =
             | _ -> None)
           parsed
       in
+      let executable_mutation_issues =
+        parsed
+        |> List.concat_map (function
+          | `Case (case, _, mutations, _, _) ->
+            mutations
+            |> List.concat_map (function
+              | `Assoc mutation_fields ->
+                let name_issues =
+                  match string_field "mutation" mutation_fields with
+                  | Some name when supported_executable_mutation name ->
+                    (match mutation_required_param_missing name mutation_fields with
+                     | Some param ->
+                       [issue ~opcode path
+                          ("failure case mutation "
+                           ^ name
+                           ^ " missing "
+                           ^ param
+                           ^ ": "
+                           ^ case)]
+                     | None -> [])
+                  | Some name ->
+                    [issue ~opcode path
+                       ("unsupported executable mutation "
+                        ^ name
+                        ^ ": "
+                        ^ case)]
+                  | None ->
+                    [issue ~opcode path
+                       ("failure case mutation missing mutation: " ^ case)]
+                in
+                let target_issues =
+                  match string_field "target" mutation_fields with
+                  | Some _ -> []
+                  | None ->
+                    [issue ~opcode path
+                       ("failure case mutation missing target: " ^ case)]
+                in
+                name_issues @ target_issues
+              | _ ->
+                [issue ~opcode path
+                   ("failure case executable_mutations entries must be objects: "
+                    ^ case)])
+          | _ -> [])
+      in
       let q1_required_case_issues =
         if not (String.equal opcode "LINEAR_Q1_G128_FP") then []
         else
@@ -959,7 +1046,8 @@ let failure_issues path opcode fields =
               ^ String.concat "," missing_unchanged)]
       in
       bad @ expected_issue @ mutation_issue @ unchanged_issue
-      @ q1_required_case_issues @ q1_alias_shape_issues
+      @ executable_mutation_issues @ q1_required_case_issues
+      @ q1_alias_shape_issues
 
 let gated_delta_semantic_issues path opcode fields =
   if not (String.equal opcode "GATED_DELTA_RULE_FP") then []

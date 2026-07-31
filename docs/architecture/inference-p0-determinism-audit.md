@@ -388,8 +388,10 @@ The saved reports live beside the indexes as
 `litenode-failure-atomicity-report.cjson`.
 The checker requires each executable failure case to carry `case`, `expected`,
 a nonempty `executable_mutations` list, and a nonempty `unchanged_spans` list.
-Human-readable mutation prose may exist beside it, but it is not enough for
-LiteNode conformance.
+`executable_mutations` entries must be runnable objects with a supported
+`mutation`, a `target`, and any required mutation parameters. Human-readable
+mutation prose may exist beside it, but it is not enough for LiteNode
+conformance.
 
 The effort-authority artifact emits exact `Contract_vm` effort for this corpus,
 so `--strict-effort` passes there. Earlier template artifacts remain useful
