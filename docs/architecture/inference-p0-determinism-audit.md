@@ -771,6 +771,12 @@ case must lower the VM effort limit below the opcode base charge and prove
 `reject_before_write`, so effort failure is part of validator-readiness rather
 than only a positive-template accounting check.
 
+The local runner suite also includes a nonzero dynamic-effort Q1 vector. The
+canonical tiny vector still proves the base `200 + STOP` accounting, while the
+larger `k = 512` vector proves `expected_opcode_effort = 201` and total program
+effort `202`, with `lower_effort_limit = expected_opcode_effort - 1` reaching
+VM execution and rejecting before output writeback.
+
 `finite_square_overflow` is now counted for `RMSNORM_FP_EPS` and `L2NORM_FP`
 under the current deterministic normalization profile: finite square/reduction
 overflow must reject before output writeback.

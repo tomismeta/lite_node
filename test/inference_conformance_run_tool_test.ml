@@ -127,11 +127,17 @@ let f64_bytes values =
 let q1_owner =
   "\000\060" ^ String.make 16 '\255'
 
-let input =
-  f64_bytes (List.init 128 (fun _ -> 1.0))
+let q1_owner_for ~k ~n =
+  let blocks = n * (k / 128) in
+  String.concat "" (List.init blocks (fun _ -> q1_owner))
 
-let expected_output =
-  f64_bytes [128.0]
+let input_for ~m ~k =
+  f64_bytes (List.init (m * k) (fun _ -> 1.0))
+
+let expected_output_for ~m ~k ~n =
+  f64_bytes (List.init (m * n) (fun _ -> float_of_int k))
+
+let expected_output = expected_output_for ~m:1 ~k:128 ~n:1
 
 let manifest name path raw =
   `Assoc [
@@ -158,15 +164,15 @@ let source path raw =
 let mutation name target fields =
   `Assoc (["mutation", `String name; "target", `String target] @ fields)
 
-let reject_case name mutations =
+let reject_case ?(output_cells = 1) name mutations =
   `Assoc [
     "case", `String name;
     "expected", `String "reject_before_write";
     "executable_mutations", `List mutations;
-    "unchanged_spans", `List [span "expected" 10000 1];
+    "unchanged_spans", `List [span "expected" 10000 output_cells];
   ]
 
-let accept_snapshot_case name expected offset =
+let accept_snapshot_case ?(output_cells = 1) name expected offset =
   `Assoc [
     "case", `String name;
     "expected", `String expected;
@@ -177,12 +183,13 @@ let accept_snapshot_case name expected offset =
         "output.base_address"
         ["offset_cells", `Int offset];
     ];
-    "unchanged_spans", `List [span name (2000 + offset) 1];
+    "unchanged_spans", `List [span name (2000 + offset) output_cells];
   ]
 
-let q1_failure_cases =
+let q1_failure_cases ?(output_cells = 1) ?(lower_effort = 199) () =
   [
     reject_case
+      ~output_cells
       "nonfinite_input_nan"
       [
         mutation
@@ -191,6 +198,7 @@ let q1_failure_cases =
           ["value_bits", `Intlit "9221120237041090560"];
       ];
     reject_case
+      ~output_cells
       "nonfinite_input_infinity"
       [
         mutation
@@ -199,14 +207,17 @@ let q1_failure_cases =
           ["value_bits", `Intlit "9218868437227405312"];
       ];
     accept_snapshot_case
+      ~output_cells
       "output_input_aliasing"
       "accept_from_snapshot_exact"
       0;
     accept_snapshot_case
+      ~output_cells
       "partial_output_input_aliasing"
       "accept_from_snapshot_partial"
       1;
     reject_case
+      ~output_cells
       "k_not_multiple_of_128"
       [
         mutation
@@ -215,6 +226,7 @@ let q1_failure_cases =
           ["value", `Int 127];
       ];
     reject_case
+      ~output_cells
       "bad_q1_owner_length"
       [
         mutation
@@ -223,6 +235,7 @@ let q1_failure_cases =
           ["truncate_bytes", `Int 1];
       ];
     reject_case
+      ~output_cells
       "nonfinite_fp16_scale"
       [
         mutation
@@ -231,18 +244,32 @@ let q1_failure_cases =
           ["value_hex_le", `String "007c"];
       ];
     reject_case
+      ~output_cells
       "lower_effort_limit"
       [
         mutation
           "lower_effort_limit"
           "effort"
-          ["value", `Int 199];
+          ["value", `Int lower_effort];
       ];
   ]
 
 let q1_template ?(session_abi_root = Abi.v1_root)
-    ?(failure_cases = q1_failure_cases)
-    ?(output_count_unit = "cells") ?(r1 = 1) () =
+    ?(m = 1) ?(k = 128) ?(n = 1) ?expected_effort
+    ?failure_cases ?(output_count_unit = "cells") ?(r1 = 1) () =
+  let input = input_for ~m ~k in
+  let q1_owner = q1_owner_for ~k ~n in
+  let expected_output = expected_output_for ~m ~k ~n in
+  let expected_effort =
+    match expected_effort with
+    | Some value -> value
+    | None -> 200 + ((m * n * k) / 512) + 1
+  in
+  let failure_cases =
+    match failure_cases with
+    | Some cases -> cases
+    | None -> q1_failure_cases ~output_cells:(m * n) ()
+  in
   `Assoc [
     "type", `String "p0_litenode_vm_execution_template";
     "schema", `String "octra.inference.p0.vm-template.v1";
@@ -251,7 +278,7 @@ let q1_template ?(session_abi_root = Abi.v1_root)
     "profile", `String (current_profile ());
     "vm_semantics_root", `String (current_vm_semantics_root ());
     "numerical_profile_root", `String (current_profile_root ());
-    "expected_effort", `Int 201;
+    "expected_effort", `Int expected_effort;
     "program_effect_requirements",
     `Assoc [
       "program_effects",
@@ -270,7 +297,7 @@ let q1_template ?(session_abi_root = Abi.v1_root)
         "vm_memory",
         `Assoc [
           "base_address", `Int 2000;
-          "length_f64_cells", `Int 128;
+          "length_f64_cells", `Int (m * k);
         ];
       ];
       `Assoc [
@@ -303,9 +330,9 @@ let q1_template ?(session_abi_root = Abi.v1_root)
         "dst", `Int 10000;
         "lhs", `Int 2000;
         "byte_offset", `Int 0;
-        "m", `Int 1;
-        "k", `Int 128;
-        "n", `Int 1;
+        "m", `Int m;
+        "k", `Int k;
+        "n", `Int n;
       ];
     ];
     "abi",
@@ -321,14 +348,14 @@ let q1_template ?(session_abi_root = Abi.v1_root)
     "output",
     `Assoc [
       "base_address", `Int 10000;
-      "length_f64_cells", `Int 1;
+      "length_f64_cells", `Int (m * n);
       "abi_registers", `Assoc ["r0", `Int 10000; "r1", `Int r1];
       "subspans",
       `List [
         `Assoc [
           "name", `String "expected";
           "base_address", `Int 10000;
-          "length_f64_cells", `Int 1;
+          "length_f64_cells", `Int (m * n);
           "sha256", `String (sha256 expected_output);
           "root", `String (sha256 expected_output);
         ];
@@ -385,9 +412,21 @@ let with_temp_dir f =
 let write_fixture dir template =
   let fixtures = Filename.concat dir "fixtures" in
   if not (Sys.file_exists fixtures) then Unix.mkdir fixtures 0o700;
-  write_file (Filename.concat fixtures "lhs.f64le.bin") input;
-  write_file (Filename.concat fixtures "q1-owner.bin") q1_owner;
-  write_file (Filename.concat fixtures "expected.f64le.bin") expected_output;
+  let fields =
+    match template with
+    | `Assoc fields -> fields
+    | _ -> failwith "template must be object"
+  in
+  let params = assoc_json "parameter_addresses_and_scalar_params" fields in
+  let values = assoc_json "values" params in
+  let m = int_value "m" values in
+  let k = int_value "k" values in
+  let n = int_value "n" values in
+  write_file (Filename.concat fixtures "lhs.f64le.bin") (input_for ~m ~k);
+  write_file (Filename.concat fixtures "q1-owner.bin") (q1_owner_for ~k ~n);
+  write_file
+    (Filename.concat fixtures "expected.f64le.bin")
+    (expected_output_for ~m ~k ~n);
   write_json (Filename.concat dir "q1.cjson") template;
   write_json (Filename.concat dir "index.cjson") index_json
 
@@ -615,6 +654,39 @@ let check_good_template_reports_bound_abi () =
       "good ABI gate accepted"
       (String.equal (gate_status "abi_declaration_binding_gate" report) "accepted"))
 
+let check_dynamic_q1_effort_vector () =
+  with_temp_dir (fun dir ->
+    let failure_cases = q1_failure_cases ~lower_effort:200 () in
+    let code, report =
+      run_conformance
+        dir
+        (q1_template ~k:512 ~failure_cases ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "dynamic Q1 effort runner exits zero" (code = 0);
+    let result = first_result report in
+    check
+      "dynamic Q1 expected program effort"
+      (int_value "expected_effort" result = 202);
+    check
+      "dynamic Q1 observed program effort"
+      (int_value "observed_effort" result = 202);
+    check
+      "dynamic Q1 expected opcode effort"
+      (int_value "expected_opcode_effort" result = 201);
+    check
+      "dynamic Q1 observed opcode effort"
+      (int_value "observed_opcode_effort" result = 201);
+    let lower_effort = failure_case_fields result "lower_effort_limit" in
+    check
+      "dynamic Q1 lower effort reaches VM"
+      (String.equal (string_value "observed" lower_effort) "vm_rejected"))
+
 let check_require_failure_cases_rejects_missing_q1_case () =
   with_temp_dir (fun dir ->
     let failure_cases =
@@ -626,7 +698,7 @@ let check_require_failure_cases_rejects_missing_q1_case () =
                  (string_value "case" fields)
                  "nonfinite_fp16_scale")
           | _ -> true)
-        q1_failure_cases
+        (q1_failure_cases ())
     in
     let code, report =
       run_conformance
@@ -666,7 +738,7 @@ let check_require_failure_cases_rejects_wrong_q1_expectation () =
         (replace_failure_expected
            "nonfinite_fp16_scale"
            "accept_from_snapshot_wrong")
-        q1_failure_cases
+        (q1_failure_cases ())
     in
     let code, report =
       run_conformance
@@ -963,6 +1035,7 @@ let check_cross_platform_matrix_sha_mismatch_rejects () =
 
 let () =
   check_good_template_reports_bound_abi ();
+  check_dynamic_q1_effort_vector ();
   check_require_failure_cases_rejects_missing_q1_case ();
   check_require_failure_cases_rejects_wrong_q1_expectation ();
   check_accept_snapshot_requires_exact_output ();
