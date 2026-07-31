@@ -65,15 +65,15 @@ let tool_path () =
   | Some path -> path
   | None -> failwith "missing inference_conformance_matrix.exe"
 
-let run_matrix reports =
+let run_matrix ?(args = []) reports =
   let command =
     String.concat
       " "
-      (Filename.quote (tool_path ())
-       :: List.concat
-            (List.map
-               (fun path -> ["--runner-report"; Filename.quote path])
-               reports))
+      ((Filename.quote (tool_path ()) :: args)
+       @ List.concat
+           (List.map
+              (fun path -> ["--runner-report"; Filename.quote path])
+              reports))
   in
   let input = Unix.open_process_in command in
   let raw = read_all input in
@@ -376,6 +376,83 @@ let check_matrix_accepts_bound_reports () =
       check
         "matrix carries runner hashes"
         (List.length (string_list_value "runner_executable_sha256s" fields) = 2)
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_accepts_required_opcode_reports () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Linux" "x86_64")
+    in
+    let code, json =
+      run_matrix ~args:["--opcode"; "LINEAR_Q1_G128_FP"] [a; b]
+    in
+    check "required opcode matrix exits zero" (code = 0);
+    match json with
+    | `Assoc fields ->
+      check "required opcode matrix accepted"
+        (String.equal (string_value "status" fields) "accepted");
+      check
+        "required opcode coverage accepted"
+        (String.equal
+           (string_value "opcode_coverage_status" fields)
+           "accepted");
+      check
+        "required opcode recorded"
+        (string_list_value "required_opcodes" fields = ["LINEAR_Q1_G128_FP"])
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_missing_required_opcode () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report
+           ~runner_sha:(hex_root '1')
+           ~opcode:"RMSNORM_FP_EPS"
+           ~required_failure_contract_status:"not_applicable"
+           "Darwin"
+           "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~opcode:"RMSNORM_FP_EPS"
+           ~required_failure_contract_status:"not_applicable"
+           "Linux"
+           "x86_64")
+    in
+    let code, json =
+      run_matrix ~args:["--opcode"; "LINEAR_Q1_G128_FP"] [a; b]
+    in
+    check "missing required opcode matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "missing required opcode coverage rejected"
+        (String.equal
+           (string_value "opcode_coverage_status" fields)
+           "rejected");
+      check
+        "missing required opcode blocker"
+        (List.mem "required_opcode_missing" (blockers fields));
+      check
+        "missing required opcode next blocker"
+        (String.equal
+           (string_value "next_validator_readiness_blocker" fields)
+           "required_opcode_missing")
     | _ -> failwith "matrix output must be object")
 
 let check_matrix_rejects_missing_runner_hash () =
@@ -850,6 +927,8 @@ let check_matrix_rejects_same_platform () =
 
 let () =
   check_matrix_accepts_bound_reports ();
+  check_matrix_accepts_required_opcode_reports ();
+  check_matrix_rejects_missing_required_opcode ();
   check_matrix_rejects_missing_runner_hash ();
   check_matrix_rejects_corpus_mismatch ();
   check_matrix_rejects_failure_case_mismatch ();

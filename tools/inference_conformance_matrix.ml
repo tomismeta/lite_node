@@ -15,6 +15,7 @@ Include at startup:
 let runner_reports = ref []
 let min_platforms = ref 2
 let require_validator_readiness = ref false
+let requested_opcodes = ref []
 
 let fail message =
   prerr_endline message;
@@ -27,6 +28,9 @@ let args = [
   "--min-platforms",
   Arg.Set_int min_platforms,
   "minimum distinct platform observations required for matrix acceptance";
+  "--opcode",
+  Arg.String (fun value -> requested_opcodes := value :: !requested_opcodes),
+  "require cross-platform evidence to cover one opcode; may be repeated";
   "--require-validator-readiness",
   Arg.Set require_validator_readiness,
   "exit nonzero unless the matrix also proves validator readiness";
@@ -35,7 +39,7 @@ let args = [
 let usage =
   "inference_conformance_matrix --runner-report <path> \
    [--runner-report <path> ...] [--min-platforms <n>] \
-   [--require-validator-readiness]"
+   [--opcode <opcode> ...] [--require-validator-readiness]"
 
 let read_file path =
   let input = open_in_bin path in
@@ -152,6 +156,7 @@ let next_readiness_blocker blockers =
       "profile_root_binding_rejected";
       "cross_platform_conformance_missing";
       "missing_cross_platform_matrix";
+      "required_opcode_missing";
       "insufficient_distinct_platforms";
       "result_mismatch_across_platforms";
     ]
@@ -185,6 +190,9 @@ let opt_string_from_assoc name fields =
 
 let unique values =
   List.sort_uniq String.compare values
+
+let required_opcodes () =
+  List.rev !requested_opcodes |> unique
 
 type report_summary = {
   accepted : bool;
@@ -722,6 +730,12 @@ let matrix_report paths =
     |> List.concat
     |> unique
   in
+  let required_opcodes = required_opcodes () in
+  let opcode_coverage_ready =
+    List.for_all
+      (fun opcode -> List.exists (String.equal opcode) result_opcodes)
+      required_opcodes
+  in
   let matrix_signature =
     signatures
     |> List.sort String.compare
@@ -739,6 +753,7 @@ let matrix_report paths =
     && List.length profile_catalog_roots = 1
     && missing_template_corpus_root_count = 0
     && List.length template_corpus_roots = 1
+    && opcode_coverage_ready
   in
   let blockers =
     []
@@ -764,6 +779,9 @@ let matrix_report paths =
     |> add_if
          (List.length template_corpus_roots > 1)
          "template_corpus_mismatch"
+    |> add_if
+         (not opcode_coverage_ready)
+         "required_opcode_missing"
   in
   let validator_readiness_blockers =
     unique (blockers @ per_report_matrix_blockers @ per_report_validator_blockers)
@@ -802,6 +820,8 @@ let matrix_report paths =
            "accepted"
          else
            "rejected");
+      "opcode_coverage_status",
+      `String (if opcode_coverage_ready then "accepted" else "rejected");
       "cross_platform_status",
       `String (if matrix_accepted then "accepted" else "rejected");
       "next_blocker", next_blocker_json validator_readiness_blockers;
@@ -839,6 +859,10 @@ let matrix_report paths =
     `List (List.map (fun value -> `String value) runner_executable_sha256s);
     "selected_opcodes",
     `List (List.map (fun value -> `String value) selected_opcodes);
+    "required_opcodes",
+    `List (List.map (fun value -> `String value) required_opcodes);
+    "opcode_coverage_status",
+    `String (if opcode_coverage_ready then "accepted" else "rejected");
     "result_opcodes",
     `List (List.map (fun value -> `String value) result_opcodes);
     "result_signature_count", `Int (List.length signatures);
