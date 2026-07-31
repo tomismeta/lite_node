@@ -148,6 +148,20 @@ consensus-candidate profiles still carry blocker codes. It also rejects
 single-platform reports with `cross_platform_conformance_missing`; a local
 Linux runner result is not a validator portability matrix.
 
+Cross-platform evidence is aggregated separately:
+
+```text
+tools/inference_conformance_matrix.exe \
+  --runner-report <linux-report.cjson> \
+  --runner-report <macos-report.cjson>
+```
+
+The matrix verifier consumes executed `inference_conformance_run` reports, not
+schema-checker reports. It requires accepted local execution, strict effort,
+accepted punitive failure cases, distinct platform observations, and identical
+per-opcode output/effort signatures. A single repeated VPS report is still
+rejected as `insufficient_distinct_platforms`.
+
 The saved reports live beside the indexes as
 `litenode-failure-atomicity-report.cjson`.
 The checker requires each executable failure case to carry `case`, `expected`,
