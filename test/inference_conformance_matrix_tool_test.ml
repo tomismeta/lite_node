@@ -139,7 +139,7 @@ let failure_case ?(observed = "vm_rejected") ?(observed_effort = 200) () =
 let result
     ?(observed_opcode_effort = 200)
     ?(opcode_effort_match = true)
-    ?(abi_status = "matched")
+    ?(abi_declaration_status = "matched")
     ?(failure = failure_case ())
     () =
   `Assoc [
@@ -151,23 +151,25 @@ let result
       "vm_semantics_root", `String (hex_root '5');
       "litenode_vm_semantics_root", `String (hex_root '5');
     ];
-    "abi_binding",
+    "abi_declaration_binding",
     `Assoc [
-      "status", `String abi_status;
+      "status", `String abi_declaration_status;
       "classification",
-      `String (if String.equal abi_status "matched" then "none" else "abi_mismatch");
+      `String (if String.equal abi_declaration_status "matched" then "none" else "abi_mismatch");
       "session_abi_root", `String (hex_root '6');
+      "litenode_session_abi_root", `String (hex_root '6');
+      "evidence_scope", `String "template_declaration";
       "entrypoint", `String "advance";
       "label", `Int 100;
       "output_base_register", `String "r0";
       "output_count_register", `String "r1";
-      "output_count_unit", `String "f64_cells";
+      "output_count_unit", `String "cells";
       "request_input_root_cell", `Int 1000;
       "r0", `Int 10000;
       "r1", `Int 6;
       "blockers",
       `List
-        (if String.equal abi_status "matched" then
+        (if String.equal abi_declaration_status "matched" then
            []
          else
            [`String "r1_output_count_mismatch"]);
@@ -201,7 +203,7 @@ let report
     ?(corpus = hex_root 'd')
     ?observed_opcode_effort
     ?opcode_effort_match
-    ?(abi_status = "matched")
+    ?(abi_declaration_status = "matched")
     ?(abi_gate_status = "accepted")
     ?failure
     system
@@ -217,7 +219,7 @@ let report
     "failure_case_gate", `Assoc ["status", `String "accepted"];
     "profile_root_binding_gate", `Assoc ["status", `String "accepted"];
     "vm_semantics_binding_gate", `Assoc ["status", `String "accepted"];
-    "abi_binding_gate", `Assoc ["status", `String abi_gate_status];
+    "abi_declaration_binding_gate", `Assoc ["status", `String abi_gate_status];
     "validator_readiness_gate",
     `Assoc [
       "status", `String "rejected";
@@ -228,7 +230,7 @@ let report
       result
         ?observed_opcode_effort
         ?opcode_effort_match
-        ~abi_status
+        ~abi_declaration_status
         ?failure
         ();
     ];
@@ -393,7 +395,7 @@ let check_matrix_rejects_opcode_effort_mismatch () =
            (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
-let check_matrix_rejects_abi_binding_mismatch () =
+let check_matrix_rejects_abi_declaration_binding_mismatch () =
   with_temp_dir (fun dir ->
     let a =
       write_report
@@ -407,7 +409,7 @@ let check_matrix_rejects_abi_binding_mismatch () =
         "b.cjson"
         (report
            ~runner_sha:(hex_root '2')
-           ~abi_status:"unbound"
+           ~abi_declaration_status:"unbound"
            ~abi_gate_status:"rejected"
            "Linux"
            "x86_64")
@@ -422,7 +424,7 @@ let check_matrix_rejects_abi_binding_mismatch () =
       check
         "abi mismatch validator blocker"
         (List.mem
-           "abi_binding_rejected"
+           "abi_declaration_binding_rejected"
            (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
@@ -455,5 +457,5 @@ let () =
   check_matrix_rejects_corpus_mismatch ();
   check_matrix_rejects_failure_case_mismatch ();
   check_matrix_rejects_opcode_effort_mismatch ();
-  check_matrix_rejects_abi_binding_mismatch ();
+  check_matrix_rejects_abi_declaration_binding_mismatch ();
   check_matrix_rejects_same_platform ()

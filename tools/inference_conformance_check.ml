@@ -306,29 +306,29 @@ let vm_semantics_binding_gate_json counts =
          (vm_semantics_root_blockers counts));
   ]
 
-let abi_binding_value = function
+let abi_declaration_binding_value = function
   | `Assoc fields ->
-    (match List.assoc_opt "abi_binding" fields with
+    (match List.assoc_opt "abi_declaration_binding" fields with
      | Some (`Assoc _ as binding) -> Some binding
      | _ -> Some Profile.unavailable_root_binding_json)
   | _ -> None
 
-let abi_binding_status_counts values =
+let abi_declaration_binding_status_counts values =
   values
-  |> List.filter_map abi_binding_value
+  |> List.filter_map abi_declaration_binding_value
   |> Profile.root_binding_counts_of_json
 
-let abi_binding_blockers counts =
+let abi_declaration_binding_blockers counts =
   let add_if condition value values =
     if condition then value :: values else values
   in
   let total = counts.Profile.matched + counts.unbound + counts.unavailable in
   []
-  |> add_if (total = 0) "no_abi_binding"
-  |> add_if (counts.unavailable > 0) "unavailable_abi_binding"
-  |> add_if (counts.unbound > 0) "unbound_abi_binding"
+  |> add_if (total = 0) "no_abi_declaration_binding"
+  |> add_if (counts.unavailable > 0) "unavailable_abi_declaration_binding"
+  |> add_if (counts.unbound > 0) "unbound_abi_declaration_binding"
 
-let abi_binding_gate_json counts =
+let abi_declaration_binding_gate_json counts =
   let ready = Profile.root_bindings_are_consensus_ready counts in
   `Assoc [
     "status", `String (if ready then "accepted" else "rejected");
@@ -336,7 +336,7 @@ let abi_binding_gate_json counts =
     `List
       (List.map
          (fun blocker -> `String blocker)
-         (abi_binding_blockers counts));
+         (abi_declaration_binding_blockers counts));
   ]
 
 let consensus_candidate_gate
@@ -450,7 +450,7 @@ let static_validator_readiness_gate
     ~unprofiled_count
     ~root_binding_counts
     ~vm_semantics_binding_counts
-    ~abi_binding_counts
+    ~abi_declaration_binding_counts
     status_counts =
   let schema_accepted = String.equal schema_status "accepted" in
   let profile_ready =
@@ -466,7 +466,7 @@ let static_validator_readiness_gate
     Profile.root_bindings_are_consensus_ready vm_semantics_binding_counts
   in
   let abi_ready =
-    Profile.root_bindings_are_consensus_ready abi_binding_counts
+    Profile.root_bindings_are_consensus_ready abi_declaration_binding_counts
   in
   let cross_platform_ready = false in
   let ready =
@@ -491,7 +491,7 @@ let static_validator_readiness_gate
          "vm_semantics_root_binding_not_proven"
     |> add_blocker
          (not abi_ready)
-         "abi_binding_not_proven"
+         "abi_declaration_binding_not_proven"
     |> add_blocker
          (not cross_platform_ready)
          "cross_platform_conformance_missing"
@@ -504,7 +504,7 @@ let static_validator_readiness_gate
         status_counts
     @ Profile.root_binding_blockers root_binding_counts
     @ vm_semantics_root_blockers vm_semantics_binding_counts
-    @ abi_binding_blockers abi_binding_counts
+    @ abi_declaration_binding_blockers abi_declaration_binding_counts
   in
   `Assoc [
     "diagnostic_only", `Bool true;
@@ -523,9 +523,9 @@ let static_validator_readiness_gate
     `String (if vm_semantics_ready then "accepted" else "rejected");
     "vm_semantics_binding_gate",
     vm_semantics_binding_gate_json vm_semantics_binding_counts;
-    "abi_status",
+    "abi_declaration_status",
     `String (if abi_ready then "accepted" else "rejected");
-    "abi_binding_gate", abi_binding_gate_json abi_binding_counts;
+    "abi_declaration_binding_gate", abi_declaration_binding_gate_json abi_declaration_binding_counts;
     "cross_platform_status",
     `String (if cross_platform_ready then "accepted" else "rejected");
     "blockers",
@@ -858,7 +858,7 @@ let json_int_opt = function
   | Some value -> `Int value
   | None -> `Null
 
-let abi_binding_json fields =
+let abi_declaration_binding_json fields =
   let add_if condition blocker blockers =
     if condition then blocker :: blockers else blockers
   in
@@ -871,6 +871,7 @@ let abi_binding_json fields =
     let output_count_register = string_field "output_count_register" abi in
     let output_count_unit = string_field "output_count_unit" abi in
     let request_input_root_cell = int_field "request_input_root_cell" abi in
+    let session_abi_root = string_field "session_abi_root" abi in
     let output_base = int_field "base_address" output in
     let output_count = int_field "length_f64_cells" output in
     let r0 =
@@ -907,9 +908,14 @@ let abi_binding_json fields =
            "output_count_register_mismatch"
       |> add_if
            (match output_count_unit with
-            | Some value -> not (String.equal value "f64_cells")
+            | Some value -> not (String.equal value "cells")
             | None -> true)
            "output_count_unit_mismatch"
+      |> add_if
+           (match session_abi_root with
+            | Some value -> not (String.equal value Abi.v1_root)
+            | None -> true)
+           "session_abi_root_mismatch"
       |> add_if
            (match request_input_root_cell with
             | Some value -> value <> Abi.input_root_cell
@@ -929,8 +935,10 @@ let abi_binding_json fields =
     `Assoc [
       "status", `String (if blockers = [] then "matched" else "unbound");
       "classification",
-      `String (if blockers = [] then "none" else "abi_mismatch");
-      "session_abi_root", `String Abi.v1_root;
+      `String (if blockers = [] then "none" else "abi_declaration_mismatch");
+      "evidence_scope", `String "template_declaration";
+      "session_abi_root", json_string_opt session_abi_root;
+      "litenode_session_abi_root", `String Abi.v1_root;
       "entrypoint", json_string_opt entrypoint;
       "label", json_int_opt label;
       "output_base_register", json_string_opt output_base_register;
@@ -944,13 +952,15 @@ let abi_binding_json fields =
   | _ ->
     `Assoc [
       "status", `String "unavailable";
-      "classification", `String "abi_unavailable";
-      "session_abi_root", `String Abi.v1_root;
+      "classification", `String "abi_declaration_unavailable";
+      "evidence_scope", `String "template_declaration";
+      "session_abi_root", `Null;
+      "litenode_session_abi_root", `String Abi.v1_root;
       "blockers", `List [`String "missing_abi_or_output"];
     ]
 
 let abi_issues path opcode fields =
-  match abi_binding_json fields with
+  match abi_declaration_binding_json fields with
   | `Assoc binding_fields ->
     (match string_field "status" binding_fields with
      | Some "matched" -> []
@@ -960,11 +970,11 @@ let abi_issues path opcode fields =
           List.map
             (function
               | `String blocker ->
-                issue ~opcode path ("ABI binding rejected: " ^ blocker)
-              | _ -> issue ~opcode path "ABI binding has invalid blocker")
+                issue ~opcode path ("ABI declaration binding rejected: " ^ blocker)
+              | _ -> issue ~opcode path "ABI declaration binding has invalid blocker")
             blockers
-        | None -> [issue ~opcode path "ABI binding rejected"]))
-  | _ -> [issue ~opcode path "ABI binding rejected"]
+        | None -> [issue ~opcode path "ABI declaration binding rejected"]))
+  | _ -> [issue ~opcode path "ABI declaration binding rejected"]
 
 let profile_gate_result opcode fields =
   let add_source source = function
@@ -1012,7 +1022,7 @@ let profile_gate_entry path opcode fields =
         Template.vm_semantics_binding_json ~opcode ~vm_semantics_root
       | None -> `Null
     in
-    let abi_binding = abi_binding_json fields in
+    let abi_declaration_binding = abi_declaration_binding_json fields in
     Some
       (`Assoc [
         "path", `String path;
@@ -1020,7 +1030,7 @@ let profile_gate_entry path opcode fields =
         "profile_gate", profile_gate;
         "profile_root_binding", profile_root_binding;
         "vm_semantics_binding", vm_semantics_binding;
-        "abi_binding", abi_binding;
+        "abi_declaration_binding", abi_declaration_binding;
       ])
   | Error _ -> None
 
@@ -1158,8 +1168,8 @@ let producer_index_report index_path =
     let vm_semantics_binding_counts =
       vm_semantics_binding_status_counts profile_gates
     in
-    let abi_binding_counts =
-      abi_binding_status_counts profile_gates
+    let abi_declaration_binding_counts =
+      abi_declaration_binding_status_counts profile_gates
     in
     let profile_root_binding_classification_counts =
       profile_root_binding_classification_counts profile_gates
@@ -1194,7 +1204,7 @@ let producer_index_report index_path =
         ~unprofiled_count:unprofiled_template_count
         ~root_binding_counts:profile_root_binding_counts
         ~vm_semantics_binding_counts
-        ~abi_binding_counts
+        ~abi_declaration_binding_counts
         profile_status_counts
     in
     let status =
@@ -1260,9 +1270,9 @@ let producer_index_report index_path =
       Profile.root_binding_counts_json vm_semantics_binding_counts;
       "vm_semantics_binding_gate",
       vm_semantics_binding_gate_json vm_semantics_binding_counts;
-      "abi_binding_status_counts",
-      Profile.root_binding_counts_json abi_binding_counts;
-      "abi_binding_gate", abi_binding_gate_json abi_binding_counts;
+      "abi_declaration_binding_status_counts",
+      Profile.root_binding_counts_json abi_declaration_binding_counts;
+      "abi_declaration_binding_gate", abi_declaration_binding_gate_json abi_declaration_binding_counts;
       "validator_readiness_gate", validator_readiness_gate_json;
       "consensus_candidate_gate",
       consensus_candidate_gate
@@ -1344,8 +1354,8 @@ let () =
           let vm_semantics_binding_counts =
             vm_semantics_binding_status_counts [template_json]
           in
-          let abi_binding_counts =
-            abi_binding_status_counts [template_json]
+          let abi_declaration_binding_counts =
+            abi_declaration_binding_status_counts [template_json]
           in
           let profile_root_binding_classification_counts =
             profile_root_binding_classification_counts [template_json]
@@ -1362,7 +1372,7 @@ let () =
               ~unprofiled_count:(1 - profile_gate_count)
               ~root_binding_counts:profile_root_binding_counts
               ~vm_semantics_binding_counts
-              ~abi_binding_counts
+              ~abi_declaration_binding_counts
               profile_status_counts
           in
           let status =
@@ -1424,9 +1434,9 @@ let () =
               Profile.root_binding_counts_json vm_semantics_binding_counts;
               "vm_semantics_binding_gate",
               vm_semantics_binding_gate_json vm_semantics_binding_counts;
-              "abi_binding_status_counts",
-              Profile.root_binding_counts_json abi_binding_counts;
-              "abi_binding_gate", abi_binding_gate_json abi_binding_counts;
+              "abi_declaration_binding_status_counts",
+              Profile.root_binding_counts_json abi_declaration_binding_counts;
+              "abi_declaration_binding_gate", abi_declaration_binding_gate_json abi_declaration_binding_counts;
               "validator_readiness_gate", validator_readiness_gate_json;
               "consensus_candidate_gate",
               consensus_candidate_gate
@@ -1467,8 +1477,8 @@ let () =
     let vm_semantics_binding_counts =
       vm_semantics_binding_status_counts template_jsons
     in
-    let abi_binding_counts =
-      abi_binding_status_counts template_jsons
+    let abi_declaration_binding_counts =
+      abi_declaration_binding_status_counts template_jsons
     in
     let root_binding_classification_counts =
       profile_root_binding_classification_counts template_jsons
@@ -1486,7 +1496,7 @@ let () =
         ~unprofiled_count
         ~root_binding_counts
         ~vm_semantics_binding_counts
-        ~abi_binding_counts
+        ~abi_declaration_binding_counts
         status_counts
     in
     let status =
@@ -1547,9 +1557,9 @@ let () =
         Profile.root_binding_counts_json vm_semantics_binding_counts;
         "vm_semantics_binding_gate",
         vm_semantics_binding_gate_json vm_semantics_binding_counts;
-        "abi_binding_status_counts",
-        Profile.root_binding_counts_json abi_binding_counts;
-        "abi_binding_gate", abi_binding_gate_json abi_binding_counts;
+        "abi_declaration_binding_status_counts",
+        Profile.root_binding_counts_json abi_declaration_binding_counts;
+        "abi_declaration_binding_gate", abi_declaration_binding_gate_json abi_declaration_binding_counts;
         "validator_readiness_gate", validator_readiness_gate_json;
         "consensus_candidate_gate",
         consensus_candidate_gate
