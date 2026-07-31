@@ -141,14 +141,39 @@ packet shape, admission, output root derivation, or local failure atomicity. The
 remaining blockers without an attached matrix are:
 
 ```text
+unbound_profile_roots, when the producer artifact was emitted against an older
+  numerical profile root
 consensus_candidate_profile_gates
 cross_platform_conformance_missing
 ```
 
 In other words, the Q1 path has a scoped LiteNode gate now, but promotion from
-consensus-candidate to validator-ready still requires independent
-cross-platform oracle qualification and explicit consensus promotion of the
-profile.
+consensus-candidate to validator-ready still requires a producer artifact bound
+to the current LiteNode profile root, independent cross-platform oracle
+qualification, and explicit consensus promotion of the profile.
+
+Current focused Q1 checkpoint on 2026-07-31, using the immutable
+effort-authority P0 index against the current LiteNode runner:
+
+```text
+selected_opcodes: [LINEAR_Q1_G128_FP]
+template_count: 1
+execution_status: accepted
+strict_effort: accepted, 201 == 201
+failure_case_gate: accepted, 7/7 counted cases accepted
+profile_root_binding_gate: rejected
+template numerical_profile_root: 66be1b09b91d4e339ffaa16bda41bc87b18141b3506bbfe698448e2e401eb245
+current LiteNode profile_root: d6ff86c8d50f24ba3313a73b03e4348cc8ba8c76e8759ada6cdb3b81c731b835
+validator_readiness_gate: rejected
+blockers: unbound_profile_roots, consensus_candidate_profile_gates,
+  cross_platform_conformance_missing
+```
+
+That means the immediate producer action is narrow: re-emit the P0 template
+index with the current `deterministic-q1-g128-fp64-linear` profile root. Once
+the focused runner reports `profile_root_binding_gate: accepted`, the same
+template corpus should be run on at least two independent platforms and consumed
+through `inference_conformance_matrix.exe`.
 
 When a real accepted matrix report is supplied with `--cross-platform-matrix`,
 the runner consumes it as the cross-platform evidence slot for the selected
