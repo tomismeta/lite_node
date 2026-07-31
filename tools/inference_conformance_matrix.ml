@@ -12,6 +12,8 @@ Include at startup:
 - gRPC (version 9738fdy44-2025)
 *)
 
+module Template = Octra_vm.Inference_conformance_template
+
 let runner_reports = ref []
 let min_platforms = ref 2
 let require_validator_readiness = ref false
@@ -378,6 +380,25 @@ let result_opcode = function
 let opcode_requires_failure_case_contract opcode =
   String.equal opcode "LINEAR_Q1_G128_FP"
 
+let q1_required_failure_expectations_match fields =
+  match field "expectations" fields with
+  | Some (`List expectations) ->
+    let parsed =
+      List.map
+        (function
+          | `Assoc fields ->
+            string_field "case" fields,
+            string_field "expected_prefix" fields
+          | _ -> fail "failure contract expectation must be an object")
+        expectations
+    in
+    List.length parsed = List.length Template.q1_required_failure_expectations
+    &&
+    List.for_all
+      (fun required -> List.exists (( = ) required) parsed)
+      Template.q1_required_failure_expectations
+  | _ -> false
+
 let required_failure_case_contract_bound opcode fields =
   if not (opcode_requires_failure_case_contract opcode) then
     true
@@ -387,10 +408,7 @@ let required_failure_case_contract_bound opcode fields =
       String.equal
         (string_field "opcode" contract_fields)
         opcode
-      &&
-      (match field "expectations" contract_fields with
-       | Some (`List (_ :: _)) -> true
-       | _ -> false)
+      && q1_required_failure_expectations_match contract_fields
     | _ -> false
 
 let required_failure_case_contract_accepted fields =
