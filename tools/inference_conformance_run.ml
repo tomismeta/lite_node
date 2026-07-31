@@ -737,6 +737,8 @@ let failure_case_gate
     "counted_failure_case_count", `Int counted_failure_case_count;
     "accepted_counted_failure_case_count",
     `Int accepted_counted_failure_case_count;
+    "required_failure_case_contracts",
+    `List [Template.q1_required_failure_expectations_json];
     "blockers",
     `List (List.map (fun blocker -> `String blocker) blockers);
   ]

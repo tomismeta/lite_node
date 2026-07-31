@@ -1134,6 +1134,8 @@ let producer_index_report index_path =
       "template_count", `Int (List.length templates);
       "p0_opcodes",
       `List (List.map (fun opcode -> `String opcode) (p0_scope_opcodes ()));
+      "required_failure_case_contracts",
+      `List [Template.q1_required_failure_expectations_json];
       "profile_gates", `List profile_gates;
       "profile_gate_count", `Int profile_gate_count;
       "classified_profile_gate_count", `Int classified_profile_gate_count;

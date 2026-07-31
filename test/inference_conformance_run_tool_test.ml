@@ -427,6 +427,19 @@ let string_list name fields =
     | `String value -> value
     | _ -> failwith ("json field must be a string list: " ^ name))
 
+let check_q1_contract_visible gate =
+  match list_value "required_failure_case_contracts" gate with
+  | [`Assoc contract] ->
+    check
+      "runner q1 contract opcode"
+      (String.equal
+         (string_value "opcode" contract)
+         "LINEAR_Q1_G128_FP");
+    check
+      "runner q1 contract expectation count"
+      (List.length (list_value "expectations" contract) = 7)
+  | _ -> failwith "expected one runner required failure-case contract"
+
 let bound_matrix_report_row platform_key runner_sha =
   `Assoc [
     "accepted", `Bool true;
@@ -496,6 +509,10 @@ let check_good_template_reports_bound_abi () =
     check
       "good accepted counted failure case count"
       (int_value "accepted_counted_failure_case_count" result = 7);
+    (match report with
+     | `Assoc fields ->
+       check_q1_contract_visible (assoc_json "failure_case_gate" fields)
+     | _ -> failwith "report must be object");
     check
       "good failure gate accepted"
       (String.equal (gate_status "failure_case_gate" report) "accepted");

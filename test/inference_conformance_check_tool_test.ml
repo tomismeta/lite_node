@@ -285,10 +285,27 @@ let report_gate name = function
      | _ -> failwith ("gate must be object: " ^ name))
   | _ -> failwith "report must be object"
 
+let check_q1_contract_visible report =
+  match report with
+  | `Assoc fields ->
+    (match list_value "required_failure_case_contracts" fields with
+     | [`Assoc contract] ->
+       check
+         "q1 contract opcode"
+         (String.equal
+            (string_value "opcode" contract)
+            "LINEAR_Q1_G128_FP");
+       check
+         "q1 contract expectation count"
+         (List.length (list_value "expectations" contract) = 7)
+     | _ -> failwith "expected one required failure-case contract")
+  | _ -> failwith "report must be object"
+
 let check_accepts_bound_abi_declaration () =
   with_temp_dir (fun dir ->
     let code, report = run_check dir (q1_template ()) in
     check "accepted ABI declaration exits zero" (code = 0);
+    check_q1_contract_visible report;
     match report_gate "abi_declaration_binding_gate" report with
     | fields ->
       check

@@ -2380,6 +2380,43 @@ let check_q1_required_failure_expectations () =
        "k_not_multiple_of_128", "reject_before_write";
        "bad_q1_owner_length", "reject_before_write";
        "nonfinite_fp16_scale", "reject_before_write";
+     ]);
+  check
+    "q1 required failure expectations json"
+    (Template.q1_required_failure_expectations_json
+     = `Assoc [
+       "opcode", `String "LINEAR_Q1_G128_FP";
+       "expectations",
+       `List [
+         `Assoc [
+           "case", `String "nonfinite_input_nan";
+           "expected_prefix", `String "reject_before_write";
+         ];
+         `Assoc [
+           "case", `String "nonfinite_input_infinity";
+           "expected_prefix", `String "reject_before_write";
+         ];
+         `Assoc [
+           "case", `String "output_input_aliasing";
+           "expected_prefix", `String "accept_from_snapshot";
+         ];
+         `Assoc [
+           "case", `String "partial_output_input_aliasing";
+           "expected_prefix", `String "accept_from_snapshot";
+         ];
+         `Assoc [
+           "case", `String "k_not_multiple_of_128";
+           "expected_prefix", `String "reject_before_write";
+         ];
+         `Assoc [
+           "case", `String "bad_q1_owner_length";
+           "expected_prefix", `String "reject_before_write";
+         ];
+         `Assoc [
+           "case", `String "nonfinite_fp16_scale";
+           "expected_prefix", `String "reject_before_write";
+         ];
+       ];
      ])
 
 let () =

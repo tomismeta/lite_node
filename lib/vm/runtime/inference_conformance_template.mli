@@ -74,6 +74,7 @@ val to_json : t -> Yojson.Safe.t
 val error_message : error -> string
 val p0_opcodes : string list
 val q1_required_failure_expectations : (string * string) list
+val q1_required_failure_expectations_json : Yojson.Safe.t
 val vm_semantics_contract_json : opcode:string -> Yojson.Safe.t option
 val vm_semantics_root_for_opcode : opcode:string -> string option
 val vm_semantics_binding_json :

@@ -125,6 +125,20 @@ let q1_required_failure_expectations =
     "nonfinite_fp16_scale", "reject_before_write";
   ]
 
+let q1_required_failure_expectations_json =
+  `Assoc [
+    "opcode", `String "LINEAR_Q1_G128_FP";
+    "expectations",
+    `List
+      (List.map
+         (fun (case, expected_prefix) ->
+            `Assoc [
+              "case", `String case;
+              "expected_prefix", `String expected_prefix;
+            ])
+         q1_required_failure_expectations);
+  ]
+
 let sha256 raw =
   Digestif.SHA256.(digest_string raw |> to_hex)
 
