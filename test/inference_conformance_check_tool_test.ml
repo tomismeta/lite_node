@@ -83,6 +83,53 @@ let current_vm_semantics_root () =
   | Some root -> root
   | None -> failwith "missing Q1 VM semantics root"
 
+let failure_case case expected mutation unchanged =
+  `Assoc [
+    "case", `String case;
+    "expected", `String expected;
+    "executable_mutations", `List [`String mutation];
+    "unchanged_spans", `List [`String unchanged];
+  ]
+
+let q1_failure_cases =
+  [
+    failure_case
+      "nonfinite_input_nan"
+      "reject_before_write"
+      "lhs[0]=nan"
+      "output";
+    failure_case
+      "nonfinite_input_infinity"
+      "reject_before_write"
+      "lhs[0]=infinity"
+      "output";
+    failure_case
+      "output_input_aliasing"
+      "accept_from_snapshot_exact"
+      "dst=lhs"
+      "lhs";
+    failure_case
+      "partial_output_input_aliasing"
+      "accept_from_snapshot_partial"
+      "dst=lhs+1"
+      "lhs_prefix";
+    failure_case
+      "k_not_multiple_of_128"
+      "reject_before_write"
+      "k=127"
+      "output";
+    failure_case
+      "bad_q1_owner_length"
+      "reject_before_write"
+      "q1_owner_truncate=1"
+      "output";
+    failure_case
+      "nonfinite_fp16_scale"
+      "reject_before_write"
+      "q1_scale=inf"
+      "output";
+  ]
+
 let q1_template ?(session_abi_root = Abi.v1_root)
     ?(output_count_unit = "cells") ?(r1 = 2) () =
   `Assoc [
@@ -148,21 +195,15 @@ let q1_template ?(session_abi_root = Abi.v1_root)
       "subspans", `List [];
     ];
     "expected_failure_atomicity_behavior",
-    `List [
-      `Assoc [
-        "case", `String "output_input_aliasing";
-        "expected", `String "accept_from_snapshot_exact";
-        "executable_mutations", `List [`String "dst=lhs"];
-        "unchanged_spans", `List [`String "lhs"];
-      ];
-      `Assoc [
-        "case", `String "partial_output_input_aliasing";
-        "expected", `String "accept_from_snapshot_partial";
-        "executable_mutations", `List [`String "dst=lhs+1"];
-        "unchanged_spans", `List [`String "lhs_prefix"];
-      ];
-    ];
+    `List q1_failure_cases;
   ]
+
+let replace_assoc_field name value = function
+  | `Assoc fields ->
+    `Assoc
+      ((name, value)
+       :: List.filter (fun (key, _) -> not (String.equal key name)) fields)
+  | _ -> failwith "template must be object"
 
 let index_json =
   `Assoc [
@@ -280,8 +321,37 @@ let check_rejects_r1_output_count_drift () =
          "ABI declaration binding rejected: r1_output_count_mismatch"
          (report_issues report)))
 
+let check_rejects_missing_q1_failure_case () =
+  with_temp_dir (fun dir ->
+    let failures =
+      List.filter
+        (function
+          | `Assoc fields ->
+            not
+              (String.equal
+                 (string_value "case" fields)
+                 "nonfinite_fp16_scale")
+          | _ -> true)
+        q1_failure_cases
+    in
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "expected_failure_atomicity_behavior"
+              (`List failures))
+    in
+    check "missing Q1 failure case exits nonzero" (code = 1);
+    check
+      "missing Q1 failure case issue"
+      (List.mem
+         "nonfinite_fp16_scale failure case is required for Q1 validator readiness"
+         (report_issues report)))
+
 let () =
   check_accepts_bound_abi_declaration ();
   check_rejects_stale_session_abi_root ();
   check_rejects_narrow_output_unit ();
-  check_rejects_r1_output_count_drift ()
+  check_rejects_r1_output_count_drift ();
+  check_rejects_missing_q1_failure_case ()

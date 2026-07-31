@@ -804,6 +804,33 @@ let failure_issues path opcode fields =
                 (issue ~opcode path
                    (case ^ " failure case is required for Q1 snapshot aliasing")))
       in
+      let q1_required_case_issues =
+        if not (String.equal opcode "LINEAR_Q1_G128_FP") then []
+        else
+          let has_case case =
+            List.exists
+              (function
+                | `Case (actual, _, _, _) -> String.equal actual case
+                | _ -> false)
+              parsed
+          in
+          [
+            "nonfinite_input_nan";
+            "nonfinite_input_infinity";
+            "output_input_aliasing";
+            "partial_output_input_aliasing";
+            "k_not_multiple_of_128";
+            "bad_q1_owner_length";
+            "nonfinite_fp16_scale";
+          ]
+          |> List.filter_map (fun case ->
+            if has_case case then None
+            else
+              Some
+                (issue ~opcode path
+                   (case
+                    ^ " failure case is required for Q1 validator readiness")))
+      in
       let expected_issue =
         if missing_expected = [] then []
         else
@@ -826,6 +853,7 @@ let failure_issues path opcode fields =
               ^ String.concat "," missing_unchanged)]
       in
       bad @ expected_issue @ mutation_issue @ unchanged_issue @ q1_alias_issues
+      @ q1_required_case_issues
 
 let gated_delta_semantic_issues path opcode fields =
   if not (String.equal opcode "GATED_DELTA_RULE_FP") then []
