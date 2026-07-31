@@ -19,6 +19,8 @@ module Template = Octra_vm.Inference_conformance_template
 
 let template_index = ref None
 let p0_plus_pack = ref None
+let cross_platform_matrix = ref None
+let expected_cross_platform_matrix_sha256 = ref None
 let requested_opcodes = ref []
 let strict_effort = ref false
 let include_failures = ref false
@@ -39,6 +41,12 @@ let args = [
   "--p0-plus-pack",
   Arg.String (fun value -> p0_plus_pack := Some value),
   "producer P0-plus fixture pack json";
+  "--cross-platform-matrix",
+  Arg.String (fun value -> cross_platform_matrix := Some value),
+  "accepted inference_conformance_matrix report json";
+  "--expected-cross-platform-matrix-sha256",
+  Arg.String (fun value -> expected_cross_platform_matrix_sha256 := Some value),
+  "expected SHA-256 of --cross-platform-matrix";
   "--opcode",
   Arg.String (fun value -> requested_opcodes := value :: !requested_opcodes),
   "limit template-index execution to one P0 opcode; may be repeated";
@@ -71,10 +79,14 @@ let usage =
    [--include-failures] [--require-failure-cases] \
    [--require-profile-roots-bound] \
    [--require-consensus-candidate] [--require-consensus-ready] \
+   [--cross-platform-matrix <path>] \
+   [--expected-cross-platform-matrix-sha256 <sha256>] \
    [--require-validator-readiness]\n\
    or inference_conformance_run --p0-plus-pack <path> \
    [--require-profile-roots-bound] [--require-consensus-candidate] \
-   [--require-consensus-ready] [--require-validator-readiness]"
+   [--require-consensus-ready] [--cross-platform-matrix <path>] \
+   [--expected-cross-platform-matrix-sha256 <sha256>] \
+   [--require-validator-readiness]"
 
 let selected_opcodes () =
   List.rev !requested_opcodes |> List.sort_uniq String.compare
@@ -159,6 +171,25 @@ let list_field name fields =
   | Some (`List values) -> values
   | _ -> fail ("missing list field: " ^ name)
 
+let string_list_field name fields =
+  List.map
+    (function
+      | `String value -> value
+      | _ -> fail ("invalid string list field: " ^ name))
+    (list_field name fields)
+
+let optional_string_list_field name fields =
+  match field name fields with
+  | Some (`List values) ->
+    List.map
+      (function
+        | `String value -> value
+        | _ -> fail ("invalid string list field: " ^ name))
+      values
+  | Some `Null
+  | None -> []
+  | _ -> fail ("invalid list field: " ^ name)
+
 let opt_string_field name fields =
   match field name fields with
   | Some (`String value) -> Some value
@@ -176,6 +207,11 @@ let bool_field name fields =
   match field name fields with
   | Some (`Bool value) -> value
   | _ -> fail ("missing bool field: " ^ name)
+
+let opt_bool_field name fields =
+  match field name fields with
+  | Some (`Bool value) -> Some value
+  | _ -> None
 
 let profile_gate_json opcode fields =
   let add_source source = function
@@ -354,6 +390,188 @@ let gate_status_accepted = function
 let required_gate_passes ~required gate =
   (not required) || gate_status_accepted gate
 
+let opcodes_covered ~required_opcodes ~observed_opcodes =
+  List.for_all
+    (fun opcode -> List.exists (String.equal opcode) observed_opcodes)
+    required_opcodes
+
+let profile_catalog_root_option = function
+  | `String value -> Some value
+  | _ -> None
+
+let report_row_is_bound = function
+  | `Assoc fields ->
+    Option.value ~default:false (opt_bool_field "accepted" fields)
+    && (match opt_string_field "runner_report_sha256" fields with
+        | Some value -> not (String.equal value "")
+        | None -> false)
+    && (match opt_string_field "result_signature_sha256" fields with
+        | Some value -> not (String.equal value "")
+        | None -> false)
+    && (match opt_string_field "platform_key" fields with
+        | Some value -> not (String.equal value "")
+        | None -> false)
+  | _ -> false
+
+let cross_platform_evidence
+    ~required_opcodes
+    ~profile_catalog_root
+    ~template_corpus_root =
+  match !cross_platform_matrix with
+  | None ->
+    `Assoc [
+      "status", `String "missing";
+      "path", `Null;
+      "required_opcodes",
+      `List (List.map (fun opcode -> `String opcode) required_opcodes);
+      "covered_opcodes", `List [];
+      "required_profile_catalog_root",
+      (match profile_catalog_root with
+       | Some root -> `String root
+       | None -> `Null);
+      "matrix_profile_catalog_roots", `List [];
+      "required_template_corpus_root",
+      (match template_corpus_root with
+       | Some root -> `String root
+       | None -> `Null);
+      "matrix_template_corpus_roots", `List [];
+      "blockers", `List [`String "missing_cross_platform_matrix"];
+    ]
+  | Some path ->
+    let raw = read_file path in
+    let matrix_sha256 = sha256 raw in
+    (match read_json path with
+     | `Assoc fields ->
+       let schema_accepted =
+         match opt_string_field "schema" fields with
+         | Some "octra.inference.conformance.matrix.v1" -> true
+         | _ -> false
+       in
+       let status_accepted =
+         match opt_string_field "status" fields with
+         | Some "accepted" -> true
+         | _ -> false
+       in
+       let cross_platform_accepted =
+         match opt_string_field "cross_platform_status" fields with
+         | Some "accepted" -> true
+         | _ -> false
+       in
+       let observed_opcodes =
+         string_list_field "result_opcodes" fields
+       in
+       let matrix_blockers =
+         optional_string_list_field "blockers" fields
+       in
+       let report_rows = list_field "reports" fields in
+       let matrix_profile_catalog_roots =
+         optional_string_list_field "profile_catalog_roots" fields
+       in
+       let matrix_template_corpus_roots =
+         optional_string_list_field "template_corpus_roots" fields
+       in
+       let opcode_scope_accepted =
+         opcodes_covered ~required_opcodes ~observed_opcodes
+       in
+       let profile_catalog_accepted =
+         match profile_catalog_root, matrix_profile_catalog_roots with
+         | Some root, [matrix_root] -> String.equal root matrix_root
+         | _ -> false
+       in
+       let template_corpus_accepted =
+         match template_corpus_root, matrix_template_corpus_roots with
+         | Some root, [matrix_root] -> String.equal root matrix_root
+         | _ -> false
+       in
+       let matrix_sha256_accepted =
+         match !expected_cross_platform_matrix_sha256 with
+         | Some expected -> String.equal expected matrix_sha256
+         | None -> false
+       in
+       let report_rows_accepted =
+         List.length report_rows >= 2 && List.for_all report_row_is_bound report_rows
+       in
+       let blockers =
+         []
+         |> add_blocker (not schema_accepted) "matrix_schema_mismatch"
+         |> add_blocker (not status_accepted) "matrix_rejected"
+         |> add_blocker
+              (not cross_platform_accepted)
+              "matrix_cross_platform_rejected"
+         |> add_blocker
+              (matrix_blockers <> [])
+              "matrix_blockers_present"
+         |> add_blocker
+              (not matrix_sha256_accepted)
+              "matrix_sha256_unpinned_or_mismatch"
+         |> add_blocker
+              (not opcode_scope_accepted)
+              "matrix_opcode_scope_mismatch"
+         |> add_blocker
+              (not profile_catalog_accepted)
+              "matrix_profile_catalog_mismatch"
+         |> add_blocker
+              (not template_corpus_accepted)
+              "matrix_template_corpus_mismatch"
+         |> add_blocker
+              (not report_rows_accepted)
+              "matrix_source_reports_unbound"
+       in
+       `Assoc [
+         "status",
+         `String (if blockers = [] then "accepted" else "rejected");
+         "path", `String path;
+         "matrix_sha256", `String matrix_sha256;
+         "expected_matrix_sha256",
+         (match !expected_cross_platform_matrix_sha256 with
+          | Some expected -> `String expected
+          | None -> `Null);
+         "matrix_sha256_status",
+         `String (if matrix_sha256_accepted then "accepted" else "rejected");
+         "required_opcodes",
+         `List (List.map (fun opcode -> `String opcode) required_opcodes);
+         "covered_opcodes",
+         `List (List.map (fun opcode -> `String opcode) observed_opcodes);
+         "schema_status",
+         `String (if schema_accepted then "accepted" else "rejected");
+         "required_profile_catalog_root",
+         (match profile_catalog_root with
+          | Some root -> `String root
+          | None -> `Null);
+         "matrix_profile_catalog_roots",
+         `List
+           (List.map
+              (fun root -> `String root)
+              matrix_profile_catalog_roots);
+         "profile_catalog_status",
+         `String (if profile_catalog_accepted then "accepted" else "rejected");
+         "required_template_corpus_root",
+         (match template_corpus_root with
+          | Some root -> `String root
+          | None -> `Null);
+         "matrix_template_corpus_roots",
+         `List
+           (List.map
+              (fun root -> `String root)
+              matrix_template_corpus_roots);
+         "template_corpus_status",
+         `String (if template_corpus_accepted then "accepted" else "rejected");
+         "source_report_status",
+         `String (if report_rows_accepted then "accepted" else "rejected");
+         "matrix_status",
+         `String
+           (match opt_string_field "status" fields with
+            | Some status -> status
+            | None -> "missing");
+         "cross_platform_status",
+         `String
+           (match opt_string_field "cross_platform_status" fields with
+            | Some status -> status
+            | None -> "missing");
+         "blockers", `List (List.map (fun blocker -> `String blocker) blockers);
+       ]
+     | _ -> fail (path ^ ": cross-platform matrix must be an object"))
+
 let failure_cases_accepted
     ~template_count
     ~included_template_count
@@ -439,6 +657,7 @@ let validator_readiness_gate
     ~profile_gate_count
     ~unprofiled_count
     ~root_binding_counts
+    ~cross_platform_evidence
     ~included_template_count
     ~counted_failure_case_count
     ~accepted_counted_failure_case_count
@@ -459,7 +678,7 @@ let validator_readiness_gate
   let roots_ready =
     Profile.root_bindings_are_consensus_ready root_binding_counts
   in
-  let cross_platform_ready = false in
+  let cross_platform_ready = gate_status_accepted cross_platform_evidence in
   let ready =
     Profile.validator_readiness_accepted
       ~execution_ready:execution_accepted
@@ -510,6 +729,7 @@ let validator_readiness_gate
     `String (if roots_ready then "accepted" else "rejected");
     "cross_platform_status",
     `String (if cross_platform_ready then "accepted" else "rejected");
+    "cross_platform_evidence", cross_platform_evidence;
     "blockers",
     `List (List.map (fun blocker -> `String blocker) blockers);
   ]
@@ -1517,6 +1737,22 @@ let execute_p0_plus_fixture root_dir entry =
     "outputs", `List outputs;
   ]
 
+let template_corpus_entry root_dir entry =
+  let template_path = string_field "vm_execution_template" entry in
+  let full_template_path = Filename.concat root_dir template_path in
+  let raw = read_file full_template_path in
+  ignore (read_json full_template_path);
+  `Assoc [
+    "path", `String template_path;
+    "sha256", `String (sha256 raw);
+  ]
+
+let template_corpus_root root_dir entries =
+  entries
+  |> List.map (template_corpus_entry root_dir)
+  |> List.sort compare
+  |> fun values -> sha256 (Yojson.Safe.to_string (`List values))
+
 let run_p0_plus_pack path =
   let root_dir = Filename.dirname path in
   let pack =
@@ -1583,6 +1819,24 @@ let run_p0_plus_pack path =
   let classified_profile_gate_count =
     Profile.classified_gate_count status_counts
   in
+  let required_opcodes =
+    results
+    |> List.map (fun (_, result) ->
+      match result with
+      | `Assoc fields -> string_field "opcode" fields
+      | _ -> fail "result must be an object")
+    |> List.sort_uniq String.compare
+  in
+  let profile_catalog_root =
+    profile_catalog_root_option
+      (Profile.profile_catalog_root_json profile_gates)
+  in
+  let cross_platform_evidence_json =
+    cross_platform_evidence
+      ~required_opcodes
+      ~profile_catalog_root
+      ~template_corpus_root:None
+  in
   let validator_readiness_gate_json =
     validator_readiness_gate
       ~required:!require_validator_readiness
@@ -1595,6 +1849,7 @@ let run_p0_plus_pack path =
       ~profile_gate_count
       ~unprofiled_count:0
       ~root_binding_counts
+      ~cross_platform_evidence:cross_platform_evidence_json
       ~included_template_count:0
       ~counted_failure_case_count:0
       ~accepted_counted_failure_case_count:0
@@ -1779,6 +2034,22 @@ let run_index path =
     Profile.classified_gate_count status_counts
   in
   let unprofiled_count = List.length results - profile_gate_count in
+  let required_opcodes =
+    match selected_opcodes () with
+    | [] -> Template.p0_opcodes
+    | opcodes -> opcodes
+  in
+  let profile_catalog_root =
+    profile_catalog_root_option
+      (Profile.profile_catalog_root_json profile_gates)
+  in
+  let template_corpus_root = Some (template_corpus_root root_dir entries) in
+  let cross_platform_evidence_json =
+    cross_platform_evidence
+      ~required_opcodes
+      ~profile_catalog_root
+      ~template_corpus_root
+  in
   let accepted =
     execution_accepted
     && failure_cases_required_pass
@@ -1814,6 +2085,7 @@ let run_index path =
       ~profile_gate_count
       ~unprofiled_count
       ~root_binding_counts
+      ~cross_platform_evidence:cross_platform_evidence_json
       ~included_template_count:included_failure_template_count
       ~counted_failure_case_count
       ~accepted_counted_failure_case_count
@@ -1838,6 +2110,10 @@ let run_index path =
     `List (List.map (fun opcode -> `String opcode) (selected_opcodes ()));
     "source_template_count", `Int (List.length all_entries);
     "template_count", `Int template_count;
+    "template_corpus_root",
+    (match template_corpus_root with
+     | Some root -> `String root
+     | None -> `Null);
     "failure_case_gate",
     failure_case_gate
       ~template_count

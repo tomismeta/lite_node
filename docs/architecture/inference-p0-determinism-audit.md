@@ -138,7 +138,7 @@ consensus-candidate evidence.
 
 That rejection is intentional. The next validator-readiness blockers are not
 packet shape, admission, output root derivation, or local failure atomicity. The
-remaining blockers are:
+remaining blockers without an attached matrix are:
 
 ```text
 consensus_candidate_profile_gates
@@ -149,6 +149,19 @@ In other words, the Q1 path has a scoped LiteNode gate now, but promotion from
 consensus-candidate to validator-ready still requires independent
 cross-platform oracle qualification and explicit consensus promotion of the
 profile.
+
+When a real accepted matrix report is supplied with `--cross-platform-matrix`,
+the runner consumes it as the cross-platform evidence slot for the selected
+opcode scope. Matrix reports must expose `result_opcodes`; a matrix whose
+compared runner reports do not cover every required opcode is rejected as
+`matrix_opcode_scope_mismatch`. Matrix consumption also requires a pinned
+matrix SHA-256, a matching `profile_catalog_root`, a matching
+`template_corpus_root`, empty matrix blockers, and bound source reports. For a
+focused Q1 runner report with positive execution, counted failure cases, strict
+effort, and bound profile roots, an accepted and pinned matrix removes
+`cross_platform_conformance_missing`; the remaining readiness blocker should
+then be `consensus_candidate_profile_gates` until the profile itself is
+explicitly promoted.
 
 The first accepted producer indexes are:
 
@@ -217,6 +230,22 @@ tools/inference_conformance_matrix.exe \
   --runner-report <macos-report.cjson>
 ```
 
+Runner reports can then consume the accepted matrix for the same opcode scope:
+
+```text
+tools/inference_conformance_run.exe \
+  --template-index <p0-vm-execution-templates.cjson> \
+  --opcode LINEAR_Q1_G128_FP \
+  --strict-effort \
+  --include-failures \
+  --require-failure-cases \
+  --require-profile-roots-bound \
+  --require-consensus-candidate \
+  --cross-platform-matrix <matrix-report.cjson> \
+  --expected-cross-platform-matrix-sha256 <matrix-sha256> \
+  --require-validator-readiness
+```
+
 Use `--require-validator-readiness` when the matrix is acting as a release or
 admission gate. Without that flag, the command exits successfully when the
 cross-platform matrix itself is accepted, even if the lifted
@@ -227,8 +256,9 @@ The matrix verifier consumes executed `inference_conformance_run` reports, not
 schema-checker reports. It requires accepted local execution, strict effort,
 accepted punitive failure cases, distinct platform observations, and identical
 per-opcode output/effort signatures. They also require a single shared
-`profile_catalog_root`, so matching output bytes cannot hide a profile-contract
-drift between reports. A single repeated VPS report is still rejected as
+`profile_catalog_root` and a single shared `template_corpus_root`, so matching
+output bytes cannot hide a profile-contract or qualification-corpus drift
+between reports. A single repeated VPS report is still rejected as
 `insufficient_distinct_platforms`. Matrix reports include
 `runner_report_sha256`, `result_signature_sha256`, and
 `matrix_signature_sha256` as diagnostic evidence roots; those hashes identify

@@ -119,6 +119,22 @@ let opt_status_is_accepted name fields =
   | Some "accepted" -> true
   | _ -> false
 
+let unique values =
+  List.sort_uniq String.compare values
+
+type report_summary = {
+  accepted : bool;
+  platform_key : string;
+  signature : string;
+  result_opcodes : string list;
+  selected_opcodes : string list;
+  profile_catalog_root : string option;
+  template_corpus_root : string option;
+  validator_readiness_blockers : string list;
+  blockers : string list;
+  json : Yojson.Safe.t;
+}
+
 let platform_key platform =
   String.concat
     "|"
@@ -159,6 +175,22 @@ let result_signature = function
       "subspans", `List (List.map subspan_signature (list_field "subspans" fields));
     ]
   | _ -> fail "result must be an object"
+
+let result_opcode = function
+  | `Assoc fields -> string_field "opcode" fields
+  | _ -> fail "result must be an object"
+
+let optional_string_list_field name fields =
+  match field name fields with
+  | Some (`List values) ->
+    List.map
+      (function
+        | `String value -> value
+        | _ -> fail ("invalid string list field: " ^ name))
+      values
+  | Some `Null
+  | None -> []
+  | _ -> fail ("invalid list field: " ^ name)
 
 let signature_json results =
   results
@@ -226,6 +258,17 @@ let report_summary path =
         (fun fields -> bool_field "effort_match" fields)
         result_fields
     in
+    let profile_catalog_root =
+      opt_string_field "profile_catalog_root" fields
+    in
+    let template_corpus_root =
+      opt_string_field "template_corpus_root" fields
+    in
+    let profile_root_binding_accepted =
+      match opt_assoc_field "profile_root_binding_gate" fields with
+      | Some gate_fields -> opt_status_is_accepted "status" gate_fields
+      | None -> false
+    in
     let accepted =
       String.equal execution_mode "positive_template_vm_execution"
       && opt_status_is_accepted "status" fields
@@ -236,6 +279,8 @@ let report_summary path =
       && strict_effort
       && output_matched
       && effort_matched
+      && profile_root_binding_accepted
+      && Option.is_some template_corpus_root
     in
     let blockers =
       []
@@ -256,21 +301,35 @@ let report_summary path =
       |> add_if (not strict_effort) "strict_effort_not_enabled"
       |> add_if (not output_matched) "output_mismatch"
       |> add_if (not effort_matched) "effort_mismatch"
+      |> add_if
+           (not profile_root_binding_accepted)
+           "profile_root_binding_rejected"
+      |> add_if
+           (Option.is_none template_corpus_root)
+           "missing_template_corpus_root"
     in
     let signature = signature_json results in
     let signature_sha256 = sha256 signature in
+    let result_opcodes = unique (List.map result_opcode results) in
+    let selected_opcodes =
+      match optional_string_list_field "selected_opcodes" fields with
+      | [] -> result_opcodes
+      | values -> unique values
+    in
     let validator_readiness_status, validator_readiness_blockers =
       validator_readiness_summary fields
     in
-    let profile_catalog_root =
-      opt_string_field "profile_catalog_root" fields
-    in
-    accepted,
-    platform_key platform,
-    signature,
-    profile_catalog_root,
-    validator_readiness_blockers,
-    blockers,
+    {
+      accepted;
+      platform_key = platform_key platform;
+      signature;
+      result_opcodes;
+      selected_opcodes;
+      profile_catalog_root;
+      template_corpus_root;
+      validator_readiness_blockers;
+      blockers;
+      json =
     `Assoc [
       "path", `String path;
       "runner_report_sha256", `String report_sha256;
@@ -278,6 +337,10 @@ let report_summary path =
       "accepted", `Bool accepted;
       "platform", `Assoc platform;
       "platform_key", `String (platform_key platform);
+      "selected_opcodes",
+      `List (List.map (fun value -> `String value) selected_opcodes);
+      "result_opcodes",
+      `List (List.map (fun value -> `String value) result_opcodes);
       "execution_mode", `String execution_mode;
       "status",
       `String
@@ -301,10 +364,16 @@ let report_summary path =
       (match profile_catalog_root with
        | Some root -> `String root
        | None -> `Null);
+      "template_corpus_root",
+      (match template_corpus_root with
+       | Some root -> `String root
+       | None -> `Null);
       "profile_consensus_status_counts",
       json_field_or_null "profile_consensus_status_counts" fields;
       "profile_root_binding_status_counts",
       json_field_or_null "profile_root_binding_status_counts" fields;
+      "profile_root_binding_gate",
+      json_field_or_null "profile_root_binding_gate" fields;
       "validator_readiness_status", `String validator_readiness_status;
       "validator_readiness_blockers",
       `List
@@ -317,11 +386,9 @@ let report_summary path =
       "output_status", `String (if output_matched then "matched" else "mismatch");
       "effort_status", `String (if effort_matched then "matched" else "mismatch");
       "blockers", `List (List.map (fun blocker -> `String blocker) blockers);
-    ]
+    ];
+    }
   | _ -> fail (path ^ ": runner report must be an object")
-
-let unique values =
-  List.sort_uniq String.compare values
 
 let without_cross_platform_blocker blockers =
   List.filter
@@ -333,36 +400,59 @@ let matrix_report paths =
   let report_count = List.length summaries in
   let accepted_reports =
     List.length
-      (List.filter (fun (accepted, _, _, _, _, _, _) -> accepted) summaries)
+      (List.filter (fun summary -> summary.accepted) summaries)
   in
   let platforms =
-    unique (List.map (fun (_, platform, _, _, _, _, _) -> platform) summaries)
+    unique (List.map (fun summary -> summary.platform_key) summaries)
   in
   let signatures =
-    unique (List.map (fun (_, _, signature, _, _, _, _) -> signature) summaries)
+    unique (List.map (fun summary -> summary.signature) summaries)
   in
   let profile_catalog_roots =
     summaries
-    |> List.filter_map (fun (_, _, _, root, _, _, _) -> root)
+    |> List.filter_map (fun summary -> summary.profile_catalog_root)
     |> unique
   in
   let missing_profile_catalog_root_count =
     List.length
       (List.filter
-         (fun (accepted, _, _, root, _, _, _) -> accepted && root = None)
+         (fun summary -> summary.accepted && summary.profile_catalog_root = None)
+         summaries)
+  in
+  let template_corpus_roots =
+    summaries
+    |> List.filter_map (fun summary -> summary.template_corpus_root)
+    |> unique
+  in
+  let missing_template_corpus_root_count =
+    List.length
+      (List.filter
+         (fun summary -> summary.accepted && summary.template_corpus_root = None)
          summaries)
   in
   let per_report_matrix_blockers =
     summaries
-    |> List.map (fun (_, _, _, _, _, blockers, _) -> blockers)
+    |> List.map (fun summary -> summary.blockers)
     |> List.concat
     |> unique
   in
   let per_report_validator_blockers =
     summaries
-    |> List.map (fun (_, _, _, _, blockers, _, _) -> blockers)
+    |> List.map (fun summary -> summary.validator_readiness_blockers)
     |> List.concat
     |> without_cross_platform_blocker
+    |> unique
+  in
+  let result_opcodes =
+    summaries
+    |> List.map (fun summary -> summary.result_opcodes)
+    |> List.concat
+    |> unique
+  in
+  let selected_opcodes =
+    summaries
+    |> List.map (fun summary -> summary.selected_opcodes)
+    |> List.concat
     |> unique
   in
   let matrix_signature =
@@ -380,6 +470,8 @@ let matrix_report paths =
     && List.length signatures = 1
     && missing_profile_catalog_root_count = 0
     && List.length profile_catalog_roots = 1
+    && missing_template_corpus_root_count = 0
+    && List.length template_corpus_roots = 1
   in
   let blockers =
     []
@@ -399,6 +491,12 @@ let matrix_report paths =
     |> add_if
          (List.length profile_catalog_roots > 1)
          "profile_catalog_mismatch"
+    |> add_if
+         (missing_template_corpus_root_count > 0)
+         "missing_template_corpus_root"
+    |> add_if
+         (List.length template_corpus_roots > 1)
+         "template_corpus_mismatch"
   in
   let validator_readiness_blockers =
     unique (blockers @ per_report_matrix_blockers @ per_report_validator_blockers)
@@ -427,6 +525,13 @@ let matrix_report paths =
       `String
         (if missing_profile_catalog_root_count = 0
             && List.length profile_catalog_roots = 1 then
+           "accepted"
+         else
+           "rejected");
+      "template_corpus_status",
+      `String
+        (if missing_template_corpus_root_count = 0
+            && List.length template_corpus_roots = 1 then
            "accepted"
          else
            "rejected");
@@ -460,15 +565,23 @@ let matrix_report paths =
          validator_readiness_blockers);
     "validator_readiness_gate", validator_readiness_gate;
     "platform_keys", `List (List.map (fun value -> `String value) platforms);
+    "selected_opcodes",
+    `List (List.map (fun value -> `String value) selected_opcodes);
+    "result_opcodes",
+    `List (List.map (fun value -> `String value) result_opcodes);
     "result_signature_count", `Int (List.length signatures);
     "profile_catalog_root_count", `Int (List.length profile_catalog_roots);
     "profile_catalog_roots",
     `List (List.map (fun value -> `String value) profile_catalog_roots);
+    "template_corpus_root_count", `Int (List.length template_corpus_roots);
+    "template_corpus_roots",
+    `List (List.map (fun value -> `String value) template_corpus_roots);
     "matrix_signature_sha256",
     (match matrix_signature_sha256 with
      | None -> `Null
      | Some value -> `String value);
-    "reports", `List (List.map (fun (_, _, _, _, _, _, json) -> json) summaries);
+    "reports",
+    `List (List.map (fun summary -> summary.json) summaries);
   ]
 
 let () =
