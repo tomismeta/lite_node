@@ -230,6 +230,16 @@ let string_list_field name fields =
     |> List.filter_map (function `String value -> Some value | _ -> None)
   | _ -> []
 
+let json_list_field name fields =
+  match List.assoc_opt name fields with
+  | Some (`List values) -> values
+  | _ -> []
+
+let json_assoc_field name fields =
+  match List.assoc_opt name fields with
+  | Some (`Assoc _ as value) -> Some value
+  | _ -> None
+
 let catalog_entry_json (opcode, name, consensus_status, profile_root, source) =
   let fields = [
     "opcode", `String opcode;
@@ -292,6 +302,122 @@ let profile_root_catalog_json values =
        []
   |> List.sort_uniq compare
   |> List.map catalog_entry_json
+  |> fun entries -> `List entries
+
+let optional_root_json = function
+  | Some value -> `String value
+  | None -> `Null
+
+let binding_catalog_entry ?path ?case ?manifest profile_gate binding =
+  match profile_gate, binding with
+  | `Assoc gate_fields, `Assoc binding_fields ->
+    let fields = [
+      "opcode",
+      `String
+        (match string_field "opcode" gate_fields with
+         | Some value -> value
+         | None -> "unknown");
+      "name",
+      `String
+        (match string_field "name" gate_fields with
+         | Some value -> value
+         | None -> "unknown");
+      "consensus_status",
+      `String
+        (match string_field "consensus_status" gate_fields with
+         | Some value -> value
+         | None -> "unknown");
+      "status",
+      `String
+        (match string_field "status" binding_fields with
+         | Some value -> value
+         | None -> "unavailable");
+      "classification",
+      `String
+        (match string_field "classification" binding_fields with
+         | Some value -> value
+         | None -> "profile_root_unavailable");
+      "numerical_profile_root",
+      optional_root_json (string_field "numerical_profile_root" binding_fields);
+      "profile_root",
+      optional_root_json (string_field "profile_root" binding_fields);
+    ] in
+    let fields =
+      match string_field "profile_source" gate_fields with
+      | Some value -> fields @ ["profile_source", `String value]
+      | None -> fields
+    in
+    let fields =
+      match path with
+      | Some value -> fields @ ["path", `String value]
+      | None -> fields
+    in
+    let fields =
+      match case with
+      | Some value -> fields @ ["case", `String value]
+      | None -> fields
+    in
+    let fields =
+      match manifest with
+      | Some value -> fields @ ["manifest", `String value]
+      | None -> fields
+    in
+    [`Assoc fields]
+  | _ -> []
+
+let rec paired_binding_entries ?path ?case ?manifest acc gates bindings =
+  match gates, bindings with
+  | gate :: gates, binding :: bindings ->
+    paired_binding_entries
+      ?path
+      ?case
+      ?manifest
+      (binding_catalog_entry ?path ?case ?manifest gate binding @ acc)
+      gates
+      bindings
+  | _ -> List.rev acc
+
+let rec profile_root_binding_catalog_entries = function
+  | `Assoc fields ->
+    let path =
+      match string_field "path" fields with
+      | Some value -> Some value
+      | None -> string_field "template_path" fields
+    in
+    let case = string_field "case" fields in
+    let manifest = string_field "manifest" fields in
+    let direct =
+      match
+        json_assoc_field "profile_gate" fields,
+        json_assoc_field "profile_root_binding" fields
+      with
+      | Some gate, Some binding ->
+        binding_catalog_entry ?path ?case ?manifest gate binding
+      | _ -> []
+    in
+    let paired =
+      paired_binding_entries
+        ?path
+        ?case
+        ?manifest
+        []
+        (json_list_field "profile_gates" fields)
+        (json_list_field "profile_root_bindings" fields)
+    in
+    direct @ paired
+  | `List values ->
+    List.fold_left
+      (fun entries value -> profile_root_binding_catalog_entries value @ entries)
+      []
+      values
+  | _ -> []
+
+let profile_root_binding_catalog_json values =
+  values
+  |> List.fold_left
+       (fun entries value -> profile_root_binding_catalog_entries value @ entries)
+       []
+  |> List.sort_uniq compare
   |> fun entries -> `List entries
 
 let rec consensus_blocker_pairs = function

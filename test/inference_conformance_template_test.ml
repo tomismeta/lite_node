@@ -435,6 +435,90 @@ let check_profile_root_binding_counts () =
          (int_value "root_binding_unknown" fields = 0)
      | _ -> failwith "root binding classification counts json must be object")
 
+let check_profile_root_binding_catalog () =
+  let gate = `Assoc (profile_gate "RMSNORM_FP_EPS") in
+  let expected_root =
+    match gate with
+    | `Assoc fields -> string_value "profile_root" fields
+    | _ -> failwith "profile gate must be object"
+  in
+  let binding =
+    Profile.root_binding_json ~numerical_profile_root:(hex_root 'e') gate
+  in
+  let report_row =
+    `Assoc [
+      "path", `String "templates/rmsnorm.json";
+      "opcode", `String "RMSNORM_FP_EPS";
+      "profile_gate", gate;
+      "profile_root_binding", binding;
+    ]
+  in
+  (match Profile.profile_root_binding_catalog_json [report_row] with
+   | `List [`Assoc fields] ->
+     check
+       "binding catalog opcode"
+       (String.equal (string_value "opcode" fields) "RMSNORM_FP_EPS");
+     check
+       "binding catalog profile"
+       (String.equal
+          (string_value "name" fields)
+          "deterministic-fp64-normalization");
+     check
+       "binding catalog status"
+       (String.equal (string_value "status" fields) "unbound");
+     check
+       "binding catalog classification"
+       (String.equal
+          (string_value "classification" fields)
+          "profile_root_mismatch");
+     check
+       "binding catalog expected root"
+       (String.equal (string_value "profile_root" fields) expected_root);
+     check
+       "binding catalog producer root"
+       (String.equal
+          (string_value "numerical_profile_root" fields)
+          (hex_root 'e'));
+     check
+       "binding catalog path"
+       (String.equal (string_value "path" fields) "templates/rmsnorm.json")
+   | _ -> failwith "profile root binding catalog must contain one entry");
+  let q1_gate = `Assoc (profile_gate "LINEAR_Q1_G128_FP") in
+  let q1_root =
+    match q1_gate with
+    | `Assoc fields -> string_value "profile_root" fields
+    | _ -> failwith "q1 profile gate must be object"
+  in
+  let paired =
+    `Assoc [
+      "case", `String "logits-tail";
+      "manifest", `String "fixtures/logits-tail.json";
+      "profile_gates", `List [gate; q1_gate];
+      "profile_root_bindings",
+      `List [
+        binding;
+        Profile.root_binding_json ~numerical_profile_root:q1_root q1_gate;
+      ];
+    ]
+  in
+  (match Profile.profile_root_binding_catalog_json [paired] with
+   | `List entries ->
+     check "paired binding catalog count" (List.length entries = 2);
+     check
+       "paired binding catalog includes matched q1"
+       (List.exists
+          (function
+            | `Assoc fields ->
+              String.equal (string_value "opcode" fields) "LINEAR_Q1_G128_FP"
+              && String.equal (string_value "status" fields) "matched"
+              && String.equal (string_value "case" fields) "logits-tail"
+              && String.equal
+                   (string_value "manifest" fields)
+                   "fixtures/logits-tail.json"
+            | _ -> false)
+          entries)
+   | _ -> failwith "paired profile root binding catalog must be list")
+
 let check_profile_status_counts () =
   let runtime_gate opcode = `Assoc (profile_gate opcode) in
   let candidate_gate =
@@ -1789,6 +1873,7 @@ let () =
   check_q1_profile_obligations ();
   check_profile_root ();
   check_profile_root_binding_counts ();
+  check_profile_root_binding_catalog ();
   check_profile_status_counts ();
   check_p0_profile_gate_coverage ();
   check_inference_profile_surface_coverage ();
