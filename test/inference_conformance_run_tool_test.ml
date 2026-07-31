@@ -537,7 +537,7 @@ let bound_matrix_report_row
     "runner_report_sha256", `String (sha256 platform_key);
     "result_signature_sha256", `String result_signature_sha256;
     "result_signature_schema",
-    `String "octra.inference.conformance.result-signature.v2";
+    `String "octra.inference.conformance.result-signature.v3";
     "result_opcodes", `List [`String opcode];
     "platform_key", `String platform_key;
     "runner_executable_sha256", `String runner_sha;
@@ -556,7 +556,7 @@ let accepted_matrix
     "blockers", `List [];
     "result_opcodes", `List [`String opcode];
     "result_signature_schema",
-    `String "octra.inference.conformance.result-signature.v2";
+    `String "octra.inference.conformance.result-signature.v3";
     "distinct_platform_count", `Int 2;
     "distinct_runner_executable_count", `Int 2;
     "result_signature_count", `Int 1;
@@ -696,6 +696,10 @@ let check_good_template_reports_bound_abi () =
     check
       "good accepted counted failure case count"
       (int_value "accepted_counted_failure_case_count" result = 11);
+    let nonfinite_nan = failure_case_fields result "nonfinite_input_nan" in
+    check
+      "failure case carries executable mutation payload"
+      (List.length (list_value "executable_mutations" nonfinite_nan) = 1);
     let exact_alias = failure_case_fields result "output_input_aliasing" in
     check
       "exact alias snapshot matched"

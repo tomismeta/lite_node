@@ -308,6 +308,25 @@ let q1_failure_mutation_shapes_accepted fields =
         cases
     | _ -> false
 
+let q1_failure_mutation_payloads_present fields =
+  let opcode = string_field "opcode" fields in
+  if not (String.equal opcode "LINEAR_Q1_G128_FP") then
+    true
+  else
+    match field "failure_cases" fields with
+    | Some (`List cases) ->
+      cases <> []
+      &&
+      List.for_all
+        (function
+          | `Assoc case_fields ->
+            (match field "executable_mutations" case_fields with
+             | Some (`List (_ :: _)) -> true
+             | _ -> false)
+          | _ -> false)
+        cases
+    | _ -> false
+
 let optional_string_list_field name fields =
   match field name fields with
   | Some (`List values) ->
@@ -457,6 +476,9 @@ let report_summary path =
     let q1_failure_mutation_shapes_accepted =
       List.for_all q1_failure_mutation_shapes_accepted result_fields
     in
+    let q1_failure_mutation_payloads_present =
+      List.for_all q1_failure_mutation_payloads_present result_fields
+    in
     let runner_executable_sha256 =
       opt_string_from_assoc "runner_executable_sha256" platform
     in
@@ -470,6 +492,7 @@ let report_summary path =
           | None -> false)
       && required_failure_case_contracts_accepted
       && q1_failure_mutation_shapes_accepted
+      && q1_failure_mutation_payloads_present
       && strict_effort
       && output_matched
       && effort_matched
@@ -507,6 +530,9 @@ let report_summary path =
       |> add_if
            (not q1_failure_mutation_shapes_accepted)
            "q1_failure_case_mutation_shape_rejected"
+      |> add_if
+           (not q1_failure_mutation_payloads_present)
+           "missing_failure_case_executable_mutations"
       |> add_if (not strict_effort) "strict_effort_not_enabled"
       |> add_if (not output_matched) "output_mismatch"
       |> add_if (not effort_matched) "effort_mismatch"

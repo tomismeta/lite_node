@@ -2351,6 +2351,7 @@ let failure_case_result root_dir opcode template registers values op case =
       "opcode", `String opcode;
       "case", `String case_name;
       "expected", `String expected;
+      "executable_mutations", `List mutations;
       "status", `String (if passed then "accepted" else "rejected");
       "counted", `Bool counted;
       "observed", `String observed;

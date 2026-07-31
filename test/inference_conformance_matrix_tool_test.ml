@@ -106,9 +106,19 @@ let platform ?runner_sha system machine =
   in
   `Assoc fields
 
+let executable_mutation name target fields =
+  `Assoc (["mutation", `String name; "target", `String target] @ fields)
+
 let failure_case
     ?(case = "nonfinite_input_nan")
     ?(expected = "reject_before_write")
+    ?(executable_mutations =
+      [
+        executable_mutation
+          "replace_first_f64_input_cell"
+          "lhs"
+          ["value_bits", `Intlit "9221120237041090560"];
+      ])
     ?(observed = "vm_rejected")
     ?(ingress_rejection_authority = "not_applicable")
     ?(mutation_shape_status = "accepted")
@@ -140,6 +150,7 @@ let failure_case
     "opcode", `String "LINEAR_Q1_G128_FP";
     "case", `String case;
     "expected", `String expected;
+    "executable_mutations", `List executable_mutations;
     "status", `String "accepted";
     "counted", `Bool true;
     "observed", `String observed;
@@ -449,6 +460,42 @@ let remove_result_field name = function
     replace_assoc_field "results" results (`Assoc fields)
   | _ -> failwith "report must be object"
 
+let remove_failure_field name = function
+  | `Assoc fields ->
+    let results =
+      match assoc_value "results" fields with
+      | `List results ->
+        `List
+          (List.map
+             (function
+               | `Assoc result_fields ->
+                 let failure_cases =
+                   match assoc_value "failure_cases" result_fields with
+                   | `List failures ->
+                     `List
+                       (List.map
+                          (function
+                            | `Assoc failure_fields ->
+                              `Assoc
+                                (List.filter
+                                   (fun (key, _) -> not (String.equal key name))
+                                   failure_fields)
+                            | value -> value)
+                          failures)
+                   | _ -> failwith "failure_cases must be a list"
+                 in
+                 `Assoc
+                   (("failure_cases", failure_cases)
+                    :: List.filter
+                         (fun (key, _) -> not (String.equal key "failure_cases"))
+                         result_fields)
+               | value -> value)
+             results)
+      | _ -> failwith "results must be a list"
+    in
+    replace_assoc_field "results" results (`Assoc fields)
+  | _ -> failwith "report must be object"
+
 let with_temp_dir f =
   let dir = Filename.temp_file "octra-matrix-test" "" in
   Sys.remove dir;
@@ -489,7 +536,7 @@ let check_matrix_accepts_bound_reports () =
         "matrix carries result signature schema"
         (String.equal
            (string_value "result_signature_schema" fields)
-           "octra.inference.conformance.result-signature.v2");
+           "octra.inference.conformance.result-signature.v3");
       check
         "matrix carries runner hashes"
         (List.length (string_list_value "runner_executable_sha256s" fields) = 2)
@@ -679,6 +726,73 @@ let check_matrix_rejects_failure_case_mismatch () =
       check
         "failure mismatch blocker"
         (List.mem "result_mismatch_across_platforms" (blockers fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_failure_mutation_payload_mismatch () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~failure:
+             (failure_case
+                ~executable_mutations:
+                  [
+                    executable_mutation
+                      "replace_first_f64_input_cell"
+                      "lhs"
+                      ["value_bits", `Intlit "9218868437227405312"];
+                  ]
+                ())
+           "Linux"
+           "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "failure mutation payload mismatch exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "failure mutation payload mismatch blocker"
+        (List.mem "result_mismatch_across_platforms" (blockers fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_missing_failure_mutation_payload () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Linux" "x86_64"
+         |> remove_failure_field "executable_mutations")
+    in
+    let code, json = run_matrix [a; b] in
+    check "missing mutation payload matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "missing mutation payload row blocker"
+        (List.mem
+           "runner_report_rejected"
+           (blockers fields));
+      check
+        "missing mutation payload validator blocker"
+        (List.mem
+           "missing_failure_case_executable_mutations"
+           (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
 let check_matrix_rejects_failure_snapshot_mismatch () =
@@ -1332,6 +1446,8 @@ let () =
   check_matrix_rejects_missing_runner_hash ();
   check_matrix_rejects_corpus_mismatch ();
   check_matrix_rejects_failure_case_mismatch ();
+  check_matrix_rejects_failure_mutation_payload_mismatch ();
+  check_matrix_rejects_missing_failure_mutation_payload ();
   check_matrix_rejects_failure_snapshot_mismatch ();
   check_matrix_rejects_failure_finite_span_mismatch ();
   check_matrix_rejects_opcode_effort_mismatch ();

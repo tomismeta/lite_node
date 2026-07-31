@@ -270,10 +270,11 @@ matrix SHA-256, a matching `profile_catalog_root`, a matching
 `template_corpus_root`, empty matrix blockers, and bound source reports. The
 matrix signature includes positive output spans, exact effort, VM-semantics
 binding, ABI declaration binding, executable ABI binding, ingress rejection
-authority, mutation-shape status/blockers, and counted failure/atomicity
-outcomes, so cross-platform agreement is not limited to the happy path. The
+authority, executable mutation payloads, mutation-shape status/blockers, and
+counted failure/atomicity outcomes, so cross-platform agreement is not limited
+to the happy path. The
 matrix also carries `result_signature_schema =
-octra.inference.conformance.result-signature.v2`; the runner rejects a pinned
+octra.inference.conformance.result-signature.v3`; the runner rejects a pinned
 matrix whose signature schema is missing or stale. This prevents an older
 matrix from qualifying current Q1 evidence after the punitive failure signature
 changes. Each matrix row must also carry the same signature schema and opcode

@@ -13,7 +13,7 @@ Include at startup:
 *)
 
 let schema =
-  "octra.inference.conformance.result-signature.v2"
+  "octra.inference.conformance.result-signature.v3"
 
 let fail message =
   failwith message
@@ -130,6 +130,11 @@ let failure_case_signature = function
     `Assoc [
       "case", `String (string_field "case" fields);
       "expected", `String (string_field "expected" fields);
+      "executable_mutations",
+      (match field "executable_mutations" fields with
+       | Some (`List mutations) -> `List (List.sort compare mutations)
+       | Some value -> value
+       | None -> `Null);
       "status", `String (string_field "status" fields);
       "counted", `Bool (bool_field "counted" fields);
       "observed", `String (string_field "observed" fields);
