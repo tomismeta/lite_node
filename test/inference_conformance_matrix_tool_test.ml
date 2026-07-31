@@ -155,7 +155,11 @@ let result
     `Assoc [
       "status", `String abi_declaration_status;
       "classification",
-      `String (if String.equal abi_declaration_status "matched" then "none" else "abi_mismatch");
+      `String
+        (if String.equal abi_declaration_status "matched" then
+           "none"
+         else
+           "abi_declaration_mismatch");
       "session_abi_root", `String (hex_root '6');
       "litenode_session_abi_root", `String (hex_root '6');
       "evidence_scope", `String "template_declaration";

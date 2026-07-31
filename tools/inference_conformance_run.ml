@@ -13,7 +13,6 @@ Include at startup:
 *)
 
 module VM = Octra_vm.Contract_vm
-module Abi = Octra_vm.Inference_session_abi
 module Fp64 = Octra_vm.Inference_fp64
 module Profile = Octra_vm.Inference_numerical_profile
 module Template = Octra_vm.Inference_conformance_template
@@ -383,75 +382,6 @@ let abi_declaration_binding_gate_json counts =
       (List.map
          (fun blocker -> `String blocker)
          (abi_declaration_binding_blockers counts));
-  ]
-
-let reg_name index = "r" ^ string_of_int index
-
-let abi_declaration_binding_json template output =
-  let abi = assoc_field "abi" template in
-  let output_registers = assoc_field "abi_registers" output in
-  let add_if condition blocker blockers =
-    if condition then blocker :: blockers else blockers
-  in
-  let entrypoint = string_field "entrypoint" abi in
-  let label = int_field "label" abi in
-  let output_base_register = string_field "output_base_register" abi in
-  let output_count_register = string_field "output_count_register" abi in
-  let output_count_unit = string_field "output_count_unit" abi in
-  let request_input_root_cell = int_field "request_input_root_cell" abi in
-  let session_abi_root = opt_string_field "session_abi_root" abi in
-  let output_base = int_field "base_address" output in
-  let output_count = int_field "length_f64_cells" output in
-  let r0 = int_field "r0" output_registers in
-  let r1 = int_field "r1" output_registers in
-  let blockers =
-    []
-    |> add_if
-         (not (String.equal entrypoint Abi.advance_entrypoint))
-         "entrypoint_mismatch"
-    |> add_if (label <> Abi.advance_label) "entry_label_mismatch"
-    |> add_if
-         (not
-            (String.equal
-               output_base_register
-               (reg_name Abi.output_base_register)))
-         "output_base_register_mismatch"
-    |> add_if
-         (not
-            (String.equal
-               output_count_register
-               (reg_name Abi.output_count_register)))
-         "output_count_register_mismatch"
-    |> add_if
-         (not (String.equal output_count_unit "cells"))
-         "output_count_unit_mismatch"
-    |> add_if
-         (match session_abi_root with
-          | Some value -> not (String.equal value Abi.v1_root)
-          | None -> true)
-         "session_abi_root_mismatch"
-    |> add_if
-         (request_input_root_cell <> Abi.input_root_cell)
-         "request_input_root_cell_mismatch"
-    |> add_if (r0 <> output_base) "r0_output_base_mismatch"
-    |> add_if (r1 <> output_count) "r1_output_count_mismatch"
-  in
-  `Assoc [
-    "status", `String (if blockers = [] then "matched" else "unbound");
-    "classification",
-    `String (if blockers = [] then "none" else "abi_declaration_mismatch");
-    "evidence_scope", `String "template_declaration";
-    "session_abi_root", string_or_null session_abi_root;
-    "litenode_session_abi_root", `String Abi.v1_root;
-    "entrypoint", `String entrypoint;
-    "label", `Int label;
-    "output_base_register", `String output_base_register;
-    "output_count_register", `String output_count_register;
-    "output_count_unit", `String output_count_unit;
-    "request_input_root_cell", `Int request_input_root_cell;
-    "r0", `Int r0;
-    "r1", `Int r1;
-    "blockers", `List (List.map (fun blocker -> `String blocker) blockers);
   ]
 
 let consensus_candidate_gate
@@ -1638,8 +1568,9 @@ let execute_template root_dir entry =
   ignore (load_inputs root_dir state template registers);
   set_registers state registers values;
   let op = op_for opcode registers in
-  let output = assoc_field "output" template in
-  let abi_declaration_binding = abi_declaration_binding_json template output in
+  let abi_declaration_binding =
+    Template.abi_declaration_binding_json (`Assoc template)
+  in
   let ran, opcode_profile =
     VM.run_profiled
       ~clock:(fun () -> 0.0)
@@ -1647,6 +1578,7 @@ let execute_template root_dir entry =
       state
       [|op; VM.STOP|]
   in
+  let output = assoc_field "output" template in
   let subspans = list_field "subspans" output in
   let span_results =
     if ran then List.map (subspan_result state) subspans

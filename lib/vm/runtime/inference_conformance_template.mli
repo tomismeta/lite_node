@@ -76,3 +76,4 @@ val p0_opcodes : string list
 val vm_semantics_root_for_opcode : opcode:string -> string option
 val vm_semantics_binding_json :
   opcode:string -> vm_semantics_root:string -> Yojson.Safe.t
+val abi_declaration_binding_json : Yojson.Safe.t -> Yojson.Safe.t

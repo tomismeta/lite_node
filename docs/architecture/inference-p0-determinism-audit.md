@@ -169,25 +169,31 @@ strict_effort: accepted, 201 == 201
 failure_case_gate: rejected, 6/7 declared cases counted
 profile_root_binding_gate: rejected
 vm_semantics_binding_gate: rejected
+abi_declaration_binding_gate: rejected
 template numerical_profile_root: 66be1b09b91d4e339ffaa16bda41bc87b18141b3506bbfe698448e2e401eb245
 current LiteNode profile_root: e56a53248e58276b480ece29a69b2cfa8609eaea90b9f462d8f5a1de6d7abe50
 template vm_semantics_root: d49cc837c452322bd6193645a02b89adef33eccad66cdab73a891140cabba950
-current LiteNode vm_semantics_root: dadbe73c450bdd3dc0165a979221fee9eab5cf1d088a1340359a0407b4fb73c0
+current LiteNode vm_semantics_root: 5eddadb896095cbb74b716994cd08743052fd27be0f235e93ea089df9a5a51d1
+current LiteNode session_abi_root: be55d94fec70093495473690eb303aa617162e322b76426205ecaa4617d1bb90
 validator_readiness_gate: rejected
 blockers: unbound_profile_roots, unbound_vm_semantics_roots,
-  uncounted_failure_cases, consensus_candidate_profile_gates,
-  cross_platform_conformance_missing
+  unbound_abi_declaration_binding, uncounted_failure_cases,
+  consensus_candidate_profile_gates, cross_platform_conformance_missing
 ```
 
 That means the immediate producer action is narrow: re-emit the P0 template
 index with the current `deterministic-q1-g128-fp64-linear` profile root, which
 now includes the rooted Q1 effort formula, and the current
-`LINEAR_Q1_G128_FP` VM semantics root, and replace the ambiguous
-`output_input_aliasing` case with explicit `accept_from_snapshot` evidence for
-both exact and partial lhs/output overlap. Once the focused runner reports
+`LINEAR_Q1_G128_FP` VM semantics root, bind the current session ABI root in
+`abi.session_abi_root`, declare `abi.output_count_unit: cells`, and replace
+the ambiguous `output_input_aliasing` case with explicit
+`accept_from_snapshot` evidence for both exact and partial lhs/output overlap.
+The Q1 output representation should remain in `output.length_f64_cells` and
+subspan layout metadata, not in the session ABI declaration. Once the focused runner reports
 `failure_case_gate: accepted`, `profile_root_binding_gate: accepted`, and
-`vm_semantics_binding_gate: accepted`, the same template corpus should be run
-on at least two independent platforms and consumed through
+`vm_semantics_binding_gate: accepted`, and
+`abi_declaration_binding_gate: accepted`, the same template corpus should be
+run on at least two independent platforms and consumed through
 `inference_conformance_matrix.exe`.
 
 When a real accepted matrix report is supplied with `--cross-platform-matrix`,
@@ -198,13 +204,14 @@ compared runner reports do not cover every required opcode is rejected as
 matrix SHA-256, a matching `profile_catalog_root`, a matching
 `template_corpus_root`, empty matrix blockers, and bound source reports. The
 matrix signature includes positive output spans, exact effort, VM-semantics
-binding, and counted failure/atomicity outcomes, so cross-platform agreement is
-not limited to the happy path. For a
+binding, ABI declaration binding, and counted failure/atomicity outcomes, so
+cross-platform agreement is not limited to the happy path. For a
 focused Q1 runner report with positive execution, counted failure cases, strict
-effort, bound profile roots, and bound VM-semantics roots, an accepted and
-pinned matrix removes `cross_platform_conformance_missing`; the remaining
-readiness blocker should then be `consensus_candidate_profile_gates` until the
-profile itself is explicitly promoted.
+effort, bound profile roots, bound VM-semantics roots, and bound ABI
+declaration, an accepted and pinned matrix removes
+`cross_platform_conformance_missing`; the remaining readiness blocker should
+then be `consensus_candidate_profile_gates` until the profile itself is
+explicitly promoted.
 
 The first accepted producer indexes are:
 

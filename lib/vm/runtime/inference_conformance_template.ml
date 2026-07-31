@@ -141,7 +141,7 @@ let vm_semantics_contract_json ~opcode =
         `List [
           `String "lhs and output use f64 VM cells";
           `String "q1_owner uses immutable octets";
-          `String "output ABI uses r0 base and r1 f64 cell count";
+          `String "session ABI uses r0 base and r1 VM cell count";
         ];
         "shape_policy",
         `List [
@@ -267,6 +267,23 @@ let assoc_field name fields =
   | Ok _ -> Error (Json_error ("field must be an object: " ^ name))
   | Error error -> Error error
 
+let opt_string_field name fields =
+  match field name fields with
+  | Ok (`String value) -> Some value
+  | _ -> None
+
+let opt_int_json_field name fields =
+  match field name fields with
+  | Ok (`Int value) -> Some value
+  | Ok (`Intlit value) ->
+    (try Some (int_of_string value) with Failure _ -> None)
+  | _ -> None
+
+let opt_assoc_field name fields =
+  match field name fields with
+  | Ok (`Assoc values) -> Some values
+  | _ -> None
+
 let string_list_field name fields =
   let* values = list_field name fields in
   let rec loop acc = function
@@ -297,6 +314,148 @@ let hex_char = function
 let root_ok value =
   String.length value = 64
   && String.for_all hex_char value
+
+let json_string_opt = function
+  | Some value -> `String value
+  | None -> `Null
+
+let json_int_opt = function
+  | Some value -> `Int value
+  | None -> `Null
+
+let reg_name index = "r" ^ string_of_int index
+
+let abi_declaration_binding_json = function
+  | `Assoc fields ->
+    (match opt_assoc_field "abi" fields, opt_assoc_field "output" fields with
+     | Some abi, Some output ->
+       let output_registers = opt_assoc_field "abi_registers" output in
+       let entrypoint = opt_string_field "entrypoint" abi in
+       let label = opt_int_json_field "label" abi in
+       let output_base_register =
+         opt_string_field "output_base_register" abi
+       in
+       let output_count_register =
+         opt_string_field "output_count_register" abi
+       in
+       let output_count_unit = opt_string_field "output_count_unit" abi in
+       let request_input_root_cell =
+         opt_int_json_field "request_input_root_cell" abi
+       in
+       let session_abi_root = opt_string_field "session_abi_root" abi in
+       let output_base = opt_int_json_field "base_address" output in
+       let output_count = opt_int_json_field "length_f64_cells" output in
+       let r0 =
+         match output_registers with
+         | Some registers -> opt_int_json_field "r0" registers
+         | None -> None
+       in
+       let r1 =
+         match output_registers with
+         | Some registers -> opt_int_json_field "r1" registers
+         | None -> None
+       in
+       let add_if condition blocker blockers =
+         if condition then blocker :: blockers else blockers
+       in
+       let blockers =
+         []
+         |> add_if
+              (match entrypoint with
+               | Some value ->
+                 not
+                   (String.equal
+                      value
+                      Inference_session_abi.advance_entrypoint)
+               | None -> true)
+              "entrypoint_mismatch"
+         |> add_if
+              (match label with
+               | Some value -> value <> Inference_session_abi.advance_label
+               | None -> true)
+              "entry_label_mismatch"
+         |> add_if
+              (match output_base_register with
+               | Some value ->
+                 not
+                   (String.equal
+                      value
+                      (reg_name Inference_session_abi.output_base_register))
+               | None -> true)
+              "output_base_register_mismatch"
+         |> add_if
+              (match output_count_register with
+               | Some value ->
+                 not
+                   (String.equal
+                      value
+                      (reg_name Inference_session_abi.output_count_register))
+               | None -> true)
+              "output_count_register_mismatch"
+         |> add_if
+              (match output_count_unit with
+               | Some value -> not (String.equal value "cells")
+               | None -> true)
+              "output_count_unit_mismatch"
+         |> add_if
+              (match session_abi_root with
+               | Some value ->
+                 not (String.equal value Inference_session_abi.v1_root)
+               | None -> true)
+              "session_abi_root_mismatch"
+         |> add_if
+              (match request_input_root_cell with
+               | Some value -> value <> Inference_session_abi.input_root_cell
+               | None -> true)
+              "request_input_root_cell_mismatch"
+         |> add_if
+              (match r0, output_base with
+               | Some actual, Some expected -> actual <> expected
+               | _ -> true)
+              "r0_output_base_mismatch"
+         |> add_if
+              (match r1, output_count with
+               | Some actual, Some expected -> actual <> expected
+               | _ -> true)
+              "r1_output_count_mismatch"
+       in
+       `Assoc [
+         "status", `String (if blockers = [] then "matched" else "unbound");
+         "classification",
+         `String
+           (if blockers = [] then "none" else "abi_declaration_mismatch");
+         "evidence_scope", `String "template_declaration";
+         "session_abi_root", json_string_opt session_abi_root;
+         "litenode_session_abi_root", `String Inference_session_abi.v1_root;
+         "entrypoint", json_string_opt entrypoint;
+         "label", json_int_opt label;
+         "output_base_register", json_string_opt output_base_register;
+         "output_count_register", json_string_opt output_count_register;
+         "output_count_unit", json_string_opt output_count_unit;
+         "request_input_root_cell", json_int_opt request_input_root_cell;
+         "r0", json_int_opt r0;
+         "r1", json_int_opt r1;
+         "blockers",
+         `List (List.map (fun blocker -> `String blocker) blockers);
+       ]
+     | _ ->
+       `Assoc [
+         "status", `String "unavailable";
+         "classification", `String "abi_declaration_unavailable";
+         "evidence_scope", `String "template_declaration";
+         "session_abi_root", `Null;
+         "litenode_session_abi_root", `String Inference_session_abi.v1_root;
+         "blockers", `List [`String "missing_abi_or_output"];
+       ])
+  | _ ->
+    `Assoc [
+      "status", `String "unavailable";
+      "classification", `String "abi_declaration_unavailable";
+      "evidence_scope", `String "template_declaration";
+      "session_abi_root", `Null;
+      "litenode_session_abi_root", `String Inference_session_abi.v1_root;
+      "blockers", `List [`String "template_not_object"];
+    ]
 
 let require_string expected name fields =
   let* actual = string_field name fields in

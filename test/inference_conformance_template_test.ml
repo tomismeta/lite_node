@@ -14,6 +14,7 @@ Include at startup:
 
 module Profile = Octra_vm.Inference_numerical_profile
 module Template = Octra_vm.Inference_conformance_template
+module Abi = Octra_vm.Inference_session_abi
 
 let check label condition =
   if not condition then failwith label
@@ -109,6 +110,36 @@ let string_list_field name fields =
         | _ -> failwith ("json field must be a string list: " ^ name))
       values
   | _ -> failwith ("json field must be a list: " ^ name)
+
+let abi_template
+    ?(session_abi_root = Abi.v1_root)
+    ?(entrypoint = Abi.advance_entrypoint)
+    ?(label = Abi.advance_label)
+    ?(output_base_register = "r0")
+    ?(output_count_register = "r1")
+    ?(output_count_unit = "cells")
+    ?(request_input_root_cell = Abi.input_root_cell)
+    ?(r0 = 10000)
+    ?(r1 = 6)
+    () =
+  `Assoc [
+    "abi",
+    `Assoc [
+      "session_abi_root", `String session_abi_root;
+      "entrypoint", `String entrypoint;
+      "label", `Int label;
+      "output_base_register", `String output_base_register;
+      "output_count_register", `String output_count_register;
+      "output_count_unit", `String output_count_unit;
+      "request_input_root_cell", `Int request_input_root_cell;
+    ];
+    "output",
+    `Assoc [
+      "base_address", `Int 10000;
+      "length_f64_cells", `Int 6;
+      "abi_registers", `Assoc ["r0", `Int r0; "r1", `Int r1];
+    ];
+  ]
 
 let template ?(opcode = "RMSNORM_FP_EPS") ?(primitive = "rmsnorm_fp_eps")
     ?(effects = ["memory_read"; "memory_write"]) ?(memory_access = "read_write")
@@ -321,7 +352,7 @@ let check_q1_profile_obligations () =
           with
           | Some root ->
             let expected =
-              "dadbe73c450bdd3dc0165a979221fee9eab5cf1d088a1340359a0407b4fb73c0"
+              "5eddadb896095cbb74b716994cd08743052fd27be0f235e93ea089df9a5a51d1"
             in
             if String.equal root expected then true
             else
@@ -333,7 +364,7 @@ let check_q1_profile_obligations () =
           Template.vm_semantics_binding_json
             ~opcode:"LINEAR_Q1_G128_FP"
             ~vm_semantics_root:
-              "dadbe73c450bdd3dc0165a979221fee9eab5cf1d088a1340359a0407b4fb73c0"
+              "5eddadb896095cbb74b716994cd08743052fd27be0f235e93ea089df9a5a51d1"
         with
         | `Assoc binding ->
           check
@@ -832,6 +863,77 @@ let check_validator_readiness_predicate () =
           ~profile_ready:false
           ~roots_ready:true
           ~cross_platform_ready:true))
+
+let check_abi_declaration_binding () =
+  let matched =
+    Template.abi_declaration_binding_json (abi_template ())
+  in
+  (match matched with
+   | `Assoc fields ->
+     check
+       "abi declaration matched"
+       (String.equal (string_value "status" fields) "matched");
+     check
+       "abi declaration scope"
+       (String.equal
+          (string_value "evidence_scope" fields)
+          "template_declaration");
+     check
+       "abi root bound"
+       (String.equal (string_value "session_abi_root" fields) Abi.v1_root);
+     check
+       "abi root authority"
+       (String.equal
+          (string_value "litenode_session_abi_root" fields)
+          Abi.v1_root);
+     check
+       "abi count unit is generic"
+       (String.equal (string_value "output_count_unit" fields) "cells");
+     check "abi output base register" (int_value "r0" fields = 10000);
+     check "abi output count register" (int_value "r1" fields = 6)
+   | _ -> failwith "abi declaration binding must be object");
+  let stale_root =
+    Template.abi_declaration_binding_json
+      (abi_template ~session_abi_root:(hex_root '1') ())
+  in
+  (match stale_root with
+   | `Assoc fields ->
+     check
+       "stale ABI root rejects"
+       (String.equal (string_value "status" fields) "unbound");
+     check
+       "stale ABI root blocker"
+       (List.mem
+          "session_abi_root_mismatch"
+          (string_list_value "blockers" fields))
+   | _ -> failwith "stale ABI root binding must be object");
+  let narrow_unit =
+    Template.abi_declaration_binding_json
+      (abi_template ~output_count_unit:"f64_cells" ())
+  in
+  (match narrow_unit with
+   | `Assoc fields ->
+     check
+       "f64_cells session ABI rejects"
+       (String.equal (string_value "status" fields) "unbound");
+     check
+       "f64_cells session ABI blocker"
+       (List.mem
+          "output_count_unit_mismatch"
+          (string_list_value "blockers" fields))
+   | _ -> failwith "narrow ABI unit binding must be object");
+  let stale_register =
+    Template.abi_declaration_binding_json (abi_template ~r1:7 ())
+  in
+  match stale_register with
+  | `Assoc fields ->
+    check
+      "stale r1 rejects"
+      (String.equal (string_value "status" fields) "unbound");
+    check
+      "stale r1 blocker"
+      (List.mem "r1_output_count_mismatch" (string_list_value "blockers" fields))
+  | _ -> failwith "stale register ABI binding must be object"
 
 let check_p0_profile_gate_coverage () =
   List.iter
@@ -2211,6 +2313,7 @@ let () =
   check_profile_root_binding_catalog ();
   check_profile_status_counts ();
   check_validator_readiness_predicate ();
+  check_abi_declaration_binding ();
   check_p0_profile_gate_coverage ();
   check_inference_profile_surface_coverage ();
   check_remaining_p0_profile_obligations ();

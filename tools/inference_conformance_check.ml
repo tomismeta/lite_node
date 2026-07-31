@@ -14,7 +14,6 @@ Include at startup:
 
 module Template = Octra_vm.Inference_conformance_template
 module Profile = Octra_vm.Inference_numerical_profile
-module Abi = Octra_vm.Inference_session_abi
 
 let template_path = ref None
 let template_dir = ref None
@@ -848,116 +847,8 @@ let gated_delta_semantic_issues path opcode fields =
          | None -> [issue ~opcode path
                      "missing Gated Delta operation_order"])
 
-let reg_name index = "r" ^ string_of_int index
-
-let json_string_opt = function
-  | Some value -> `String value
-  | None -> `Null
-
-let json_int_opt = function
-  | Some value -> `Int value
-  | None -> `Null
-
 let abi_declaration_binding_json fields =
-  let add_if condition blocker blockers =
-    if condition then blocker :: blockers else blockers
-  in
-  match assoc_field "abi" fields, assoc_field "output" fields with
-  | Some abi, Some output ->
-    let output_registers = assoc_field "abi_registers" output in
-    let entrypoint = string_field "entrypoint" abi in
-    let label = int_field "label" abi in
-    let output_base_register = string_field "output_base_register" abi in
-    let output_count_register = string_field "output_count_register" abi in
-    let output_count_unit = string_field "output_count_unit" abi in
-    let request_input_root_cell = int_field "request_input_root_cell" abi in
-    let session_abi_root = string_field "session_abi_root" abi in
-    let output_base = int_field "base_address" output in
-    let output_count = int_field "length_f64_cells" output in
-    let r0 =
-      match output_registers with
-      | Some fields -> int_field "r0" fields
-      | None -> None
-    in
-    let r1 =
-      match output_registers with
-      | Some fields -> int_field "r1" fields
-      | None -> None
-    in
-    let blockers =
-      []
-      |> add_if
-           (match entrypoint with
-            | Some value -> not (String.equal value Abi.advance_entrypoint)
-            | None -> true)
-           "entrypoint_mismatch"
-      |> add_if
-           (match label with Some value -> value <> Abi.advance_label | None -> true)
-           "entry_label_mismatch"
-      |> add_if
-           (match output_base_register with
-            | Some value ->
-              not (String.equal value (reg_name Abi.output_base_register))
-            | None -> true)
-           "output_base_register_mismatch"
-      |> add_if
-           (match output_count_register with
-            | Some value ->
-              not (String.equal value (reg_name Abi.output_count_register))
-            | None -> true)
-           "output_count_register_mismatch"
-      |> add_if
-           (match output_count_unit with
-            | Some value -> not (String.equal value "cells")
-            | None -> true)
-           "output_count_unit_mismatch"
-      |> add_if
-           (match session_abi_root with
-            | Some value -> not (String.equal value Abi.v1_root)
-            | None -> true)
-           "session_abi_root_mismatch"
-      |> add_if
-           (match request_input_root_cell with
-            | Some value -> value <> Abi.input_root_cell
-            | None -> true)
-           "request_input_root_cell_mismatch"
-      |> add_if
-           (match r0, output_base with
-            | Some value, Some expected -> value <> expected
-            | _ -> true)
-           "r0_output_base_mismatch"
-      |> add_if
-           (match r1, output_count with
-            | Some value, Some expected -> value <> expected
-            | _ -> true)
-           "r1_output_count_mismatch"
-    in
-    `Assoc [
-      "status", `String (if blockers = [] then "matched" else "unbound");
-      "classification",
-      `String (if blockers = [] then "none" else "abi_declaration_mismatch");
-      "evidence_scope", `String "template_declaration";
-      "session_abi_root", json_string_opt session_abi_root;
-      "litenode_session_abi_root", `String Abi.v1_root;
-      "entrypoint", json_string_opt entrypoint;
-      "label", json_int_opt label;
-      "output_base_register", json_string_opt output_base_register;
-      "output_count_register", json_string_opt output_count_register;
-      "output_count_unit", json_string_opt output_count_unit;
-      "request_input_root_cell", json_int_opt request_input_root_cell;
-      "r0", json_int_opt r0;
-      "r1", json_int_opt r1;
-      "blockers", `List (List.map (fun blocker -> `String blocker) blockers);
-    ]
-  | _ ->
-    `Assoc [
-      "status", `String "unavailable";
-      "classification", `String "abi_declaration_unavailable";
-      "evidence_scope", `String "template_declaration";
-      "session_abi_root", `Null;
-      "litenode_session_abi_root", `String Abi.v1_root;
-      "blockers", `List [`String "missing_abi_or_output"];
-    ]
+  Template.abi_declaration_binding_json (`Assoc fields)
 
 let abi_issues path opcode fields =
   match abi_declaration_binding_json fields with
