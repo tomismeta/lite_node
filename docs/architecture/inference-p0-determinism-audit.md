@@ -789,6 +789,11 @@ larger `k = 512` vector proves `expected_opcode_effort = 201` and total program
 effort `202`, with `lower_effort_limit = expected_opcode_effort - 1` reaching
 VM execution and rejecting before output writeback.
 
+The primitive test suite now pins Q1 byte-offset bounds directly: negative
+offsets, offsets beyond the owner length, and offsets whose remaining byte span
+cannot cover `n * (k / 128) * 18` bytes all reject before output writeback.
+Valid nonzero offsets still execute against the shifted Q1 span.
+
 `finite_square_overflow` is now counted for `RMSNORM_FP_EPS` and `L2NORM_FP`
 under the current deterministic normalization profile: finite square/reduction
 overflow must reject before output writeback.

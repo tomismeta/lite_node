@@ -460,6 +460,25 @@ let check_offset_and_overlap () =
   check
     "nonzero offset output"
     (output_bytes state dst 6 = expected_output);
+  let state, dst, _ = q1_state () in
+  set_int_reg state 3 (-1);
+  set_output_cell state dst 42.0;
+  check "negative offset rejects" (not (VM.run state q1_code));
+  check
+    "negative offset preserves output"
+    (output_bytes state dst 1 = f64_bytes [42.0]);
+  let state, dst, _ = q1_state ~off:(String.length q1_owner + 1) () in
+  set_output_cell state dst 42.0;
+  check "out-of-range offset rejects" (not (VM.run state q1_code));
+  check
+    "out-of-range offset preserves output"
+    (output_bytes state dst 1 = f64_bytes [42.0]);
+  let state, dst, _ = q1_state ~q1:("\255" ^ q1_owner) ~off:2 () in
+  set_output_cell state dst 42.0;
+  check "truncated offset span rejects" (not (VM.run state q1_code));
+  check
+    "truncated offset span preserves output"
+    (output_bytes state dst 1 = f64_bytes [42.0]);
   let state, dst, _ = q1_state ~dst:20000 () in
   check "exact overlap runs from snapshot" (VM.run state q1_code);
   check
