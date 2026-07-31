@@ -105,11 +105,22 @@ let classified_gate_count counts =
   + counts.consensus_ready
   + counts.unknown
 
+let status_counts_are_consensus_candidate counts =
+  counts.consensus_candidate + counts.consensus_ready > 0
+  && counts.local_only = 0
+  && counts.unknown = 0
+
 let status_counts_are_consensus_ready counts =
   counts.consensus_ready > 0
   && counts.local_only = 0
   && counts.consensus_candidate = 0
   && counts.unknown = 0
+
+let consensus_candidate ~profile_gate_count ~unprofiled_count counts =
+  profile_gate_count > 0
+  && classified_gate_count counts = profile_gate_count
+  && unprofiled_count = 0
+  && status_counts_are_consensus_candidate counts
 
 let consensus_ready ~profile_gate_count ~unprofiled_count counts =
   profile_gate_count > 0
@@ -119,6 +130,17 @@ let consensus_ready ~profile_gate_count ~unprofiled_count counts =
 
 let add_if condition value values =
   if condition then value :: values else values
+
+let consensus_candidate_blockers ~profile_gate_count ~unprofiled_count counts =
+  let classified_count = classified_gate_count counts in
+  []
+  |> add_if
+       (classified_count <> profile_gate_count)
+       "unclassified_profile_gates"
+  |> add_if (counts.unknown > 0) "unknown_profile_gates"
+  |> add_if (counts.local_only > 0) "local_only_profile_gates"
+  |> add_if (unprofiled_count > 0) "unprofiled_profile_gates"
+  |> add_if (profile_gate_count = 0) "no_profile_gates"
 
 let consensus_ready_blockers ~profile_gate_count ~unprofiled_count counts =
   let classified_count = classified_gate_count counts in

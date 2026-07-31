@@ -174,9 +174,12 @@ semantic.
 4. Generate scalar oracle fixtures outside the optimized VM implementation.
 5. Add a conformance runner that executes the same vectors through VM runtime,
    oracle, and `octra-inference` reference emission.
-6. Run conformance on at least Linux x86_64, macOS arm64, and release/debug
+6. Gate accepted artifacts through `--require-consensus-candidate` before any
+   validator-readiness discussion, so local-only host math cannot hide behind
+   matching output roots.
+7. Run conformance on at least Linux x86_64, macOS arm64, and release/debug
    builds before any validator-readiness claim.
-7. Only after P0 conformance passes, decide whether to optimize FP kernels or
+8. Only after P0 conformance passes, decide whether to optimize FP kernels or
    move more of the path onto Q16/fixed-point semantics.
 
 ## Immediate Work Split

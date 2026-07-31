@@ -115,6 +115,10 @@ profiles from remaining local-only host-FP math.
 Passing `--require-profile-roots-bound` turns stale or missing
 `numerical_profile_root` bindings into a hard gate without requiring every
 profile to be consensus-ready.
+Passing `--require-consensus-candidate` is the next stricter gate: every
+profile must be `consensus_candidate` or `consensus_ready`, every template must
+be profiled, and every numerical profile root must bind. It intentionally
+rejects local-only host-math profiles even when VM execution matches.
 Passing `--require-consensus-ready` turns that diagnostic boundary into a hard
 gate; current non-ready artifacts are expected to reject under that flag with
 profile blockers in `consensus_ready_gate.blockers`.
@@ -287,6 +291,11 @@ Passing `--require-consensus-ready` rejects any report with unprofiled,
 unclassified, `local_only`, `consensus_candidate`, or unknown profile gates,
 and any `unbound` or `unavailable` profile roots. Rejection reasons are emitted
 as stable strings in `consensus_ready_gate.blockers`.
+Passing `--require-consensus-candidate` rejects the same unprofiled,
+unclassified, unknown, and root-binding blockers, but it allows
+`consensus_candidate` gates and rejects only `local_only` math at the profile
+status layer. Rejection reasons are emitted in
+`consensus_candidate_gate.blockers`.
 `schema_status` remains the producer/template shape result in both normal and
 strict mode; top-level `status` additionally includes the active readiness gate.
 `consensus_blocker_codes` is the stable, machine-readable list of primitive

@@ -19,6 +19,7 @@ let template_path = ref None
 let template_dir = ref None
 let template_index = ref None
 let require_profile_roots_bound = ref false
+let require_consensus_candidate = ref false
 let require_consensus_ready = ref false
 
 let fail message =
@@ -38,6 +39,9 @@ let args = [
   "--require-profile-roots-bound",
   Arg.Set require_profile_roots_bound,
   "reject reports whose numerical_profile_root values do not match LiteNode profile roots";
+  "--require-consensus-candidate",
+  Arg.Set require_consensus_candidate,
+  "reject reports whose profile gates are still local-only or unbound";
   "--require-consensus-ready",
   Arg.Set require_consensus_ready,
   "reject reports whose profile gates are not all consensus_ready";
@@ -45,11 +49,14 @@ let args = [
 
 let usage =
   "inference_conformance_check --template <path> \
-   [--require-profile-roots-bound] [--require-consensus-ready]\n\
+   [--require-profile-roots-bound] [--require-consensus-candidate] \
+   [--require-consensus-ready]\n\
    or inference_conformance_check --template-dir <dir> \
-   [--require-profile-roots-bound] [--require-consensus-ready]\n\
+   [--require-profile-roots-bound] [--require-consensus-candidate] \
+   [--require-consensus-ready]\n\
    or inference_conformance_check --template-index <path> \
-   [--require-profile-roots-bound] [--require-consensus-ready]"
+   [--require-profile-roots-bound] [--require-consensus-candidate] \
+   [--require-consensus-ready]"
 
 let read_json path =
   try Yojson.Safe.from_file path with
@@ -217,6 +224,36 @@ let profile_root_binding_classification_counts values =
   |> List.filter_map profile_root_binding_value
   |> Profile.root_binding_classification_counts_of_json
 
+let consensus_candidate_gate
+    ~profile_gate_count
+    ~unprofiled_count
+    ~root_binding_counts
+    status_counts =
+  let ready =
+    Profile.consensus_candidate
+      ~profile_gate_count
+      ~unprofiled_count
+      status_counts
+    && Profile.root_bindings_are_consensus_ready root_binding_counts
+  in
+  `Assoc [
+    "required", `Bool !require_consensus_candidate;
+    "status",
+    `String
+      (if not !require_consensus_candidate then "not_required"
+       else if ready then "accepted"
+       else "rejected");
+    "blockers",
+    `List
+      (List.map
+         (fun blocker -> `String blocker)
+         (Profile.consensus_candidate_blockers
+            ~profile_gate_count
+            ~unprofiled_count
+            status_counts
+          @ Profile.root_binding_blockers root_binding_counts));
+  ]
+
 let consensus_ready_gate
     ~profile_gate_count
     ~unprofiled_count
@@ -255,6 +292,19 @@ let consensus_ready_required_passes
   (not !require_consensus_ready)
   ||
   (Profile.consensus_ready
+     ~profile_gate_count
+     ~unprofiled_count
+     status_counts
+   && Profile.root_bindings_are_consensus_ready root_binding_counts)
+
+let consensus_candidate_required_passes
+    ~profile_gate_count
+    ~unprofiled_count
+    ~root_binding_counts
+    status_counts =
+  (not !require_consensus_candidate)
+  ||
+  (Profile.consensus_candidate
      ~profile_gate_count
      ~unprofiled_count
      status_counts
@@ -737,6 +787,11 @@ let producer_index_report index_path =
         String.equal schema_status "accepted"
         && profile_roots_required_passes
              ~root_binding_counts:profile_root_binding_counts
+        && consensus_candidate_required_passes
+             ~profile_gate_count
+             ~unprofiled_count:unprofiled_template_count
+             ~root_binding_counts:profile_root_binding_counts
+             profile_status_counts
         && consensus_ready_required_passes
              ~profile_gate_count
              ~unprofiled_count:unprofiled_template_count
@@ -776,6 +831,12 @@ let producer_index_report index_path =
       Profile.root_binding_gate_json
         ~required:!require_profile_roots_bound
         profile_root_binding_counts;
+      "consensus_candidate_gate",
+      consensus_candidate_gate
+        ~profile_gate_count
+        ~unprofiled_count:unprofiled_template_count
+        ~root_binding_counts:profile_root_binding_counts
+        profile_status_counts;
       "consensus_ready_gate",
       consensus_ready_gate
         ~profile_gate_count
@@ -840,6 +901,12 @@ let () =
               profile_roots_required_passes
                 ~root_binding_counts:profile_root_binding_counts
               &&
+              consensus_candidate_required_passes
+                ~profile_gate_count
+                ~unprofiled_count:(1 - profile_gate_count)
+                ~root_binding_counts:profile_root_binding_counts
+                profile_status_counts
+              &&
               consensus_ready_required_passes
                 ~profile_gate_count
                 ~unprofiled_count:(1 - profile_gate_count)
@@ -877,6 +944,12 @@ let () =
               Profile.root_binding_gate_json
                 ~required:!require_profile_roots_bound
                 profile_root_binding_counts;
+              "consensus_candidate_gate",
+              consensus_candidate_gate
+                ~profile_gate_count
+                ~unprofiled_count:(1 - profile_gate_count)
+                ~root_binding_counts:profile_root_binding_counts
+                profile_status_counts;
               "consensus_ready_gate",
               consensus_ready_gate
                 ~profile_gate_count
@@ -918,6 +991,12 @@ let () =
         profile_roots_required_passes
           ~root_binding_counts
         &&
+        consensus_candidate_required_passes
+          ~profile_gate_count
+          ~unprofiled_count
+          ~root_binding_counts
+          status_counts
+        &&
         consensus_ready_required_passes
           ~profile_gate_count
           ~unprofiled_count
@@ -954,6 +1033,12 @@ let () =
         Profile.root_binding_gate_json
           ~required:!require_profile_roots_bound
           root_binding_counts;
+        "consensus_candidate_gate",
+        consensus_candidate_gate
+          ~profile_gate_count
+          ~unprofiled_count
+          ~root_binding_counts
+          status_counts;
         "consensus_ready_gate",
         consensus_ready_gate
           ~profile_gate_count

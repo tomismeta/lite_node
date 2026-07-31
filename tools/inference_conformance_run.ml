@@ -21,6 +21,7 @@ let p0_plus_pack = ref None
 let strict_effort = ref false
 let include_failures = ref false
 let require_profile_roots_bound = ref false
+let require_consensus_candidate = ref false
 let require_consensus_ready = ref false
 
 let fail message =
@@ -43,6 +44,9 @@ let args = [
   "--require-profile-roots-bound",
   Arg.Set require_profile_roots_bound,
   "reject reports whose numerical_profile_root values do not match LiteNode profile roots";
+  "--require-consensus-candidate",
+  Arg.Set require_consensus_candidate,
+  "reject reports whose profile gates are still local-only or unbound";
   "--require-consensus-ready",
   Arg.Set require_consensus_ready,
   "reject reports whose profile gates are not all consensus_ready";
@@ -51,9 +55,10 @@ let args = [
 let usage =
   "inference_conformance_run --template-index <path> [--strict-effort] \
    [--include-failures] [--require-profile-roots-bound] \
-   [--require-consensus-ready]\n\
+   [--require-consensus-candidate] [--require-consensus-ready]\n\
    or inference_conformance_run --p0-plus-pack <path> \
-   [--require-profile-roots-bound] [--require-consensus-ready]"
+   [--require-profile-roots-bound] [--require-consensus-candidate] \
+   [--require-consensus-ready]"
 
 let read_file path =
   let input = open_in_bin path in
@@ -201,6 +206,36 @@ let profile_root_binding_classification_counts values =
   |> List.filter_map profile_root_binding_value
   |> Profile.root_binding_classification_counts_of_json
 
+let consensus_candidate_gate
+    ~profile_gate_count
+    ~unprofiled_count
+    ~root_binding_counts
+    status_counts =
+  let ready =
+    Profile.consensus_candidate
+      ~profile_gate_count
+      ~unprofiled_count
+      status_counts
+    && Profile.root_bindings_are_consensus_ready root_binding_counts
+  in
+  `Assoc [
+    "required", `Bool !require_consensus_candidate;
+    "status",
+    `String
+      (if not !require_consensus_candidate then "not_required"
+       else if ready then "accepted"
+       else "rejected");
+    "blockers",
+    `List
+      (List.map
+         (fun blocker -> `String blocker)
+         (Profile.consensus_candidate_blockers
+            ~profile_gate_count
+            ~unprofiled_count
+            status_counts
+          @ Profile.root_binding_blockers root_binding_counts));
+  ]
+
 let consensus_ready_gate
     ~profile_gate_count
     ~unprofiled_count
@@ -239,6 +274,19 @@ let consensus_ready_required_passes
   (not !require_consensus_ready)
   ||
   (Profile.consensus_ready
+     ~profile_gate_count
+     ~unprofiled_count
+     status_counts
+   && Profile.root_bindings_are_consensus_ready root_binding_counts)
+
+let consensus_candidate_required_passes
+    ~profile_gate_count
+    ~unprofiled_count
+    ~root_binding_counts
+    status_counts =
+  (not !require_consensus_candidate)
+  ||
+  (Profile.consensus_candidate
      ~profile_gate_count
      ~unprofiled_count
      status_counts
@@ -1316,6 +1364,12 @@ let run_p0_plus_pack path =
     execution_accepted
     && profile_roots_required_passes ~root_binding_counts
     &&
+    consensus_candidate_required_passes
+      ~profile_gate_count
+      ~unprofiled_count:0
+      ~root_binding_counts
+      status_counts
+    &&
     consensus_ready_required_passes
       ~profile_gate_count
       ~unprofiled_count:0
@@ -1353,6 +1407,12 @@ let run_p0_plus_pack path =
     Profile.root_binding_gate_json
       ~required:!require_profile_roots_bound
       root_binding_counts;
+    "consensus_candidate_gate",
+    consensus_candidate_gate
+      ~profile_gate_count
+      ~unprofiled_count:0
+      ~root_binding_counts
+      status_counts;
     "consensus_ready_gate",
     consensus_ready_gate
       ~profile_gate_count
@@ -1406,6 +1466,12 @@ let run_index path =
     execution_accepted
     && profile_roots_required_passes ~root_binding_counts
     &&
+    consensus_candidate_required_passes
+      ~profile_gate_count
+      ~unprofiled_count
+      ~root_binding_counts
+      status_counts
+    &&
     consensus_ready_required_passes
       ~profile_gate_count
       ~unprofiled_count
@@ -1442,6 +1508,12 @@ let run_index path =
     Profile.root_binding_gate_json
       ~required:!require_profile_roots_bound
       root_binding_counts;
+    "consensus_candidate_gate",
+    consensus_candidate_gate
+      ~profile_gate_count
+      ~unprofiled_count
+      ~root_binding_counts
+      status_counts;
     "consensus_ready_gate",
     consensus_ready_gate
       ~profile_gate_count

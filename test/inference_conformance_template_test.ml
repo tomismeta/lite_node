@@ -586,6 +586,20 @@ let check_profile_status_counts () =
        "mixed counts are not consensus-ready"
        (not (Profile.status_counts_are_consensus_ready counts));
      check
+       "mixed counts are not consensus-candidate"
+       (not (Profile.status_counts_are_consensus_candidate counts));
+     check
+       "mixed consensus-candidate blockers"
+       (list_equal
+          (Profile.consensus_candidate_blockers
+             ~profile_gate_count:6
+             ~unprofiled_count:2
+             counts)
+          [
+            "unprofiled_profile_gates";
+            "unknown_profile_gates";
+          ]);
+     check
        "mixed consensus-ready blockers"
        (list_equal
           (Profile.consensus_ready_blockers
@@ -604,6 +618,22 @@ let check_profile_status_counts () =
      check
        "ready-only counts are consensus-ready"
        (Profile.status_counts_are_consensus_ready ready_counts);
+     check
+       "ready-only counts are consensus-candidate"
+       (Profile.status_counts_are_consensus_candidate ready_counts);
+     check
+       "ready-only gate is consensus-candidate"
+       (Profile.consensus_candidate
+          ~profile_gate_count:1
+          ~unprofiled_count:0
+          ready_counts);
+     check
+       "ready-only candidate blockers empty"
+       (Profile.consensus_candidate_blockers
+          ~profile_gate_count:1
+          ~unprofiled_count:0
+          ready_counts
+        = []);
      check
        "ready-only gate is consensus-ready"
        (Profile.consensus_ready
@@ -625,12 +655,40 @@ let check_profile_status_counts () =
           ready_counts
         = ["unclassified_profile_gates"]);
      check
+       "unclassified candidate gate blocker"
+       (Profile.consensus_candidate_blockers
+          ~profile_gate_count:2
+          ~unprofiled_count:0
+          ready_counts
+        = ["unclassified_profile_gates"]);
+     check
+       "unclassified gate is not consensus-candidate"
+       (not
+          (Profile.consensus_candidate
+             ~profile_gate_count:2
+             ~unprofiled_count:0
+             ready_counts));
+     check
        "unclassified gate is not consensus-ready"
        (not
           (Profile.consensus_ready
              ~profile_gate_count:2
              ~unprofiled_count:0
              ready_counts));
+     let local_counts =
+       Profile.status_counts_of_json_gates
+         [`Assoc ["consensus_status", `String "local_only"]]
+     in
+     check
+       "local-only counts are not consensus-candidate"
+       (not (Profile.status_counts_are_consensus_candidate local_counts));
+     check
+       "local-only candidate blocker"
+       (Profile.consensus_candidate_blockers
+          ~profile_gate_count:1
+          ~unprofiled_count:0
+          local_counts
+        = ["local_only_profile_gates"]);
      check
        "empty counts are not consensus-ready"
        (not
