@@ -323,11 +323,14 @@ let check_rejects_stale_session_abi_root () =
       (List.mem
          "ABI declaration binding rejected: session_abi_root_mismatch"
          (report_issues report));
-    match report_gate "abi_declaration_binding_gate" report with
-    | fields ->
-      check
-        "stale ABI root gate"
-        (String.equal (string_value "status" fields) "rejected"))
+    let abi_gate = report_gate "abi_declaration_binding_gate" report in
+    check
+      "stale ABI root gate"
+      (String.equal (string_value "status" abi_gate) "rejected");
+    let readiness = report_gate "validator_readiness_gate" report in
+    check
+      "stale ABI root next blocker"
+      (String.equal (string_value "next_blocker" readiness) "schema_rejected"))
 
 let check_rejects_narrow_output_unit () =
   with_temp_dir (fun dir ->

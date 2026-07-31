@@ -623,8 +623,13 @@ let check_matrix_rejects_failure_contract_result_mismatch_with_gate_accepted () 
       check
         "failure contract result mismatch blocker"
         (List.mem
-        "required_failure_case_contract_rejected"
-           readiness_blockers)
+           "required_failure_case_contract_rejected"
+           readiness_blockers);
+      check
+        "failure contract result mismatch next blocker"
+        (String.equal
+           (string_value "next_validator_readiness_blocker" fields)
+           "required_failure_case_contract_rejected")
     | _ -> failwith "matrix output must be object")
 
 let check_matrix_rejects_missing_failure_contract_with_gate_accepted () =

@@ -432,6 +432,58 @@ let profile_roots_required_passes ~root_binding_counts =
 let add_blocker condition blocker blockers =
   if condition then blocker :: blockers else blockers
 
+let blocker_matches pattern blocker =
+  if String.equal pattern "q1_failure_case_" then
+    starts_with pattern blocker
+  else
+    String.equal pattern blocker
+
+let next_readiness_blocker blockers =
+  let priority =
+    [
+      "schema_rejected";
+      "execution_rejected";
+      "execution_not_run";
+      "strict_effort_not_enabled";
+      "effort_mismatch";
+      "effort_not_run";
+      "q1_failure_case_";
+      "uncounted_failure_cases";
+      "punitive_failure_cases_not_accepted";
+      "punitive_failure_cases_not_run";
+      "vm_semantics_root_binding_not_proven";
+      "unbound_vm_semantics_roots";
+      "vm_semantics_binding_mismatch";
+      "vm_semantics_binding_rejected";
+      "abi_declaration_binding_not_proven";
+      "unbound_abi_declaration_binding";
+      "abi_declaration_binding_mismatch";
+      "abi_declaration_binding_rejected";
+      "consensus_candidate_profile_gates";
+      "unbound_profile_roots";
+      "profile_root_binding_mismatch";
+      "profile_root_binding_rejected";
+      "cross_platform_conformance_missing";
+      "missing_cross_platform_matrix";
+    ]
+  in
+  match
+    List.find_map
+      (fun pattern ->
+         List.find_opt (blocker_matches pattern) blockers)
+      priority
+  with
+  | Some blocker -> Some blocker
+  | None ->
+    (match blockers with
+     | [] -> None
+     | blocker :: _ -> Some blocker)
+
+let next_blocker_json blockers =
+  match next_readiness_blocker blockers with
+  | Some blocker -> `String blocker
+  | None -> `Null
+
 let gate_status_accepted = function
   | `Assoc fields ->
     (match string_field "status" fields with
@@ -527,6 +579,7 @@ let static_validator_readiness_gate
     "abi_declaration_binding_gate", abi_declaration_binding_gate_json abi_declaration_binding_counts;
     "cross_platform_status",
     `String (if cross_platform_ready then "accepted" else "rejected");
+    "next_blocker", next_blocker_json blockers;
     "blockers",
     `List (List.map (fun blocker -> `String blocker) blockers);
   ]

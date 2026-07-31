@@ -564,7 +564,13 @@ let check_require_failure_cases_rejects_missing_q1_case () =
          "missing Q1 failure gate blocker"
          (List.mem
             "q1_failure_case_missing_nonfinite_fp16_scale"
-            (string_list "blockers" gate))
+            (string_list "blockers" gate));
+       let readiness = assoc_json "validator_readiness_gate" fields in
+       check
+         "missing Q1 failure next blocker"
+         (String.equal
+            (string_value "next_blocker" readiness)
+            "q1_failure_case_missing_nonfinite_fp16_scale")
      | _ -> failwith "report must be object"))
 
 let check_require_failure_cases_rejects_wrong_q1_expectation () =
@@ -712,7 +718,12 @@ let check_pinned_cross_platform_matrix_is_consumed () =
            (not (List.mem "cross_platform_conformance_missing" blockers));
          check
            "matrix-backed readiness still needs consensus promotion"
-           (List.mem "consensus_candidate_profile_gates" blockers)
+           (List.mem "consensus_candidate_profile_gates" blockers);
+         check
+           "matrix-backed readiness next blocker"
+           (String.equal
+              (string_value "next_blocker" readiness)
+              "consensus_candidate_profile_gates")
        | _ -> failwith "report must be object")
     | _ -> failwith "seed report must be object")
 

@@ -114,6 +114,65 @@ let json_field_or_null name fields =
 let add_if condition value values =
   if condition then value :: values else values
 
+let blocker_matches pattern blocker =
+  if String.equal pattern "q1_failure_case_" then
+    let pattern_len = String.length pattern in
+    String.length blocker >= pattern_len
+    && String.equal (String.sub blocker 0 pattern_len) pattern
+  else
+    String.equal pattern blocker
+
+let next_readiness_blocker blockers =
+  let priority =
+    [
+      "schema_rejected";
+      "execution_rejected";
+      "execution_not_run";
+      "strict_effort_not_enabled";
+      "effort_mismatch";
+      "effort_not_run";
+      "q1_failure_case_";
+      "uncounted_failure_cases";
+      "punitive_failure_cases_not_accepted";
+      "punitive_failure_cases_not_run";
+      "required_failure_case_contract_rejected";
+      "runner_report_rejected";
+      "report_rejected";
+      "vm_semantics_root_binding_not_proven";
+      "unbound_vm_semantics_roots";
+      "vm_semantics_binding_mismatch";
+      "vm_semantics_binding_rejected";
+      "abi_declaration_binding_not_proven";
+      "unbound_abi_declaration_binding";
+      "abi_declaration_binding_mismatch";
+      "abi_declaration_binding_rejected";
+      "consensus_candidate_profile_gates";
+      "unbound_profile_roots";
+      "profile_root_binding_mismatch";
+      "profile_root_binding_rejected";
+      "cross_platform_conformance_missing";
+      "missing_cross_platform_matrix";
+      "insufficient_distinct_platforms";
+      "result_mismatch_across_platforms";
+    ]
+  in
+  match
+    List.find_map
+      (fun pattern ->
+         List.find_opt (blocker_matches pattern) blockers)
+      priority
+  with
+  | Some blocker -> Some blocker
+  | None ->
+    (match blockers with
+     | [] -> None
+     | blocker :: _ -> Some blocker)
+
+let next_blocker_json blockers =
+  match next_readiness_blocker blockers with
+  | Some blocker -> `String blocker
+  | None -> `Null
+
 let opt_status_is_accepted name fields =
   match opt_string_field name fields with
   | Some "accepted" -> true
@@ -745,6 +804,7 @@ let matrix_report paths =
            "rejected");
       "cross_platform_status",
       `String (if matrix_accepted then "accepted" else "rejected");
+      "next_blocker", next_blocker_json validator_readiness_blockers;
       "blockers",
       `List
         (List.map
@@ -766,6 +826,8 @@ let matrix_report paths =
     "blockers", `List (List.map (fun blocker -> `String blocker) blockers);
     "validator_readiness_status",
     `String (if validator_readiness_accepted then "accepted" else "rejected");
+    "next_validator_readiness_blocker",
+    next_blocker_json validator_readiness_blockers;
     "validator_readiness_blockers",
     `List
       (List.map
