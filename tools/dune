@@ -16,7 +16,7 @@
 (executable
  (name inference_conformance_run)
  (modules inference_conformance_run)
- (libraries octra_vm yojson digestif digestif.c))
+ (libraries octra_vm yojson unix digestif digestif.c))
 
 (executable
  (name inference_conformance_matrix)

@@ -259,16 +259,20 @@ per-opcode output/effort signatures. They also require a single shared
 `profile_catalog_root` and a single shared `template_corpus_root`, so matching
 output bytes cannot hide a profile-contract or qualification-corpus drift
 between reports. A single repeated VPS report is still rejected as
-`insufficient_distinct_platforms`. Matrix reports include
+`insufficient_distinct_platforms`. Runner reports record the OCaml version,
+OS class, `uname` system name/release/machine, word size, endianness, backend
+type, runner executable path, and runner executable SHA-256. The matrix uses
+those runtime fields to derive `platform_key` and preserves
+`runner_executable_sha256s` at top level for audit. Matrix reports include
 `runner_report_sha256`, `result_signature_sha256`, and
 `matrix_signature_sha256` as diagnostic evidence roots; those hashes identify
 the compared report bytes and normalized result signatures, but they are not
-platform attestation. Matrix reports also lift `validator_readiness_status`
-and `validator_readiness_blockers` to the top level for compatibility, and
-emit the same nested `validator_readiness_gate` shape used by the checker and
-runner. New consumers should use the nested gate when distinguishing local
-execution evidence from validator-ready inference math. Each matrix
-`reports[]` row also preserves the source runner's nested
+signed platform attestation. Matrix reports also lift
+`validator_readiness_status` and `validator_readiness_blockers` to the top
+level for compatibility, and emit the same nested `validator_readiness_gate`
+shape used by the checker and runner. New consumers should use the nested gate
+when distinguishing local execution evidence from validator-ready inference
+math. Each matrix `reports[]` row also preserves the source runner's nested
 `validator_readiness_gate`, so aggregate matrix failures and per-platform
 runner failures can be inspected without reopening the original report files.
 

@@ -84,9 +84,7 @@ let usage =
    [--require-validator-readiness]\n\
    or inference_conformance_run --p0-plus-pack <path> \
    [--require-profile-roots-bound] [--require-consensus-candidate] \
-   [--require-consensus-ready] [--cross-platform-matrix <path>] \
-   [--expected-cross-platform-matrix-sha256 <sha256>] \
-   [--require-validator-readiness]"
+   [--require-consensus-ready] [--require-validator-readiness]"
 
 let selected_opcodes () =
   List.rev !requested_opcodes |> List.sort_uniq String.compare
@@ -125,13 +123,41 @@ let backend_type_string = function
   | Sys.Bytecode -> "bytecode"
   | Sys.Other value -> "other:" ^ value
 
+let current_executable_sha256 () =
+  try Some (sha256 (read_file Sys.executable_name)) with
+  | Sys_error _ -> None
+
+let command_line command =
+  try
+    let input = Unix.open_process_in command in
+    let line =
+      try Some (String.trim (input_line input)) with
+      | End_of_file -> None
+    in
+    ignore (Unix.close_process_in input);
+    match line with
+    | Some value when not (String.equal value "") -> Some value
+    | _ -> None
+  with
+  | Unix.Unix_error _ -> None
+  | Sys_error _ -> None
+
+let string_or_null = function
+  | Some value -> `String value
+  | None -> `Null
+
 let platform_json () =
   `Assoc [
     "ocaml_version", `String Sys.ocaml_version;
     "os_type", `String Sys.os_type;
+    "system_name", string_or_null (command_line "uname -s");
+    "system_release", string_or_null (command_line "uname -r");
+    "machine", string_or_null (command_line "uname -m");
     "word_size", `Int Sys.word_size;
     "big_endian", `Bool Sys.big_endian;
     "backend_type", `String (backend_type_string Sys.backend_type);
+    "runner_executable", `String Sys.executable_name;
+    "runner_executable_sha256", string_or_null (current_executable_sha256 ());
   ]
 
 let field name fields =
@@ -409,6 +435,9 @@ let report_row_is_bound = function
         | Some value -> not (String.equal value "")
         | None -> false)
     && (match opt_string_field "platform_key" fields with
+        | Some value -> not (String.equal value "")
+        | None -> false)
+    && (match opt_string_field "runner_executable_sha256" fields with
         | Some value -> not (String.equal value "")
         | None -> false)
   | _ -> false
@@ -1754,6 +1783,14 @@ let template_corpus_root root_dir entries =
   |> fun values -> sha256 (Yojson.Safe.to_string (`List values))
 
 let run_p0_plus_pack path =
+  (match !cross_platform_matrix with
+   | Some _ -> fail "--cross-platform-matrix is supported only with --template-index"
+   | None -> ());
+  (match !expected_cross_platform_matrix_sha256 with
+   | Some _ ->
+     fail
+       "--expected-cross-platform-matrix-sha256 is supported only with --template-index"
+   | None -> ());
   let root_dir = Filename.dirname path in
   let pack =
     match read_json path with
@@ -1819,23 +1856,12 @@ let run_p0_plus_pack path =
   let classified_profile_gate_count =
     Profile.classified_gate_count status_counts
   in
-  let required_opcodes =
-    results
-    |> List.map (fun (_, result) ->
-      match result with
-      | `Assoc fields -> string_field "opcode" fields
-      | _ -> fail "result must be an object")
-    |> List.sort_uniq String.compare
-  in
-  let profile_catalog_root =
-    profile_catalog_root_option
-      (Profile.profile_catalog_root_json profile_gates)
-  in
   let cross_platform_evidence_json =
-    cross_platform_evidence
-      ~required_opcodes
-      ~profile_catalog_root
-      ~template_corpus_root:None
+    `Assoc [
+      "status", `String "not_supported";
+      "path", `Null;
+      "blockers", `List [`String "p0_plus_matrix_not_supported"];
+    ]
   in
   let validator_readiness_gate_json =
     validator_readiness_gate

@@ -119,12 +119,18 @@ let opt_status_is_accepted name fields =
   | Some "accepted" -> true
   | _ -> false
 
+let opt_string_from_assoc name fields =
+  match field name fields with
+  | Some (`String value) -> Some value
+  | _ -> None
+
 let unique values =
   List.sort_uniq String.compare values
 
 type report_summary = {
   accepted : bool;
   platform_key : string;
+  runner_executable_sha256 : string option;
   signature : string;
   result_opcodes : string list;
   selected_opcodes : string list;
@@ -141,6 +147,9 @@ let platform_key platform =
     [
       string_field "ocaml_version" platform;
       string_field "os_type" platform;
+      string_field "system_name" platform;
+      string_field "system_release" platform;
+      string_field "machine" platform;
       string_of_int (int_field "word_size" platform);
       string_of_bool (bool_field "big_endian" platform);
       string_field "backend_type" platform;
@@ -269,6 +278,9 @@ let report_summary path =
       | Some gate_fields -> opt_status_is_accepted "status" gate_fields
       | None -> false
     in
+    let runner_executable_sha256 =
+      opt_string_from_assoc "runner_executable_sha256" platform
+    in
     let accepted =
       String.equal execution_mode "positive_template_vm_execution"
       && opt_status_is_accepted "status" fields
@@ -281,6 +293,7 @@ let report_summary path =
       && effort_matched
       && profile_root_binding_accepted
       && Option.is_some template_corpus_root
+      && Option.is_some runner_executable_sha256
     in
     let blockers =
       []
@@ -307,6 +320,9 @@ let report_summary path =
       |> add_if
            (Option.is_none template_corpus_root)
            "missing_template_corpus_root"
+      |> add_if
+           (Option.is_none runner_executable_sha256)
+           "missing_runner_executable_sha256"
     in
     let signature = signature_json results in
     let signature_sha256 = sha256 signature in
@@ -322,6 +338,7 @@ let report_summary path =
     {
       accepted;
       platform_key = platform_key platform;
+      runner_executable_sha256;
       signature;
       result_opcodes;
       selected_opcodes;
@@ -337,6 +354,10 @@ let report_summary path =
       "accepted", `Bool accepted;
       "platform", `Assoc platform;
       "platform_key", `String (platform_key platform);
+      "runner_executable_sha256",
+      (match runner_executable_sha256 with
+       | Some digest -> `String digest
+       | None -> `Null);
       "selected_opcodes",
       `List (List.map (fun value -> `String value) selected_opcodes);
       "result_opcodes",
@@ -407,6 +428,11 @@ let matrix_report paths =
   in
   let signatures =
     unique (List.map (fun summary -> summary.signature) summaries)
+  in
+  let runner_executable_sha256s =
+    summaries
+    |> List.filter_map (fun summary -> summary.runner_executable_sha256)
+    |> unique
   in
   let profile_catalog_roots =
     summaries
@@ -565,6 +591,8 @@ let matrix_report paths =
          validator_readiness_blockers);
     "validator_readiness_gate", validator_readiness_gate;
     "platform_keys", `List (List.map (fun value -> `String value) platforms);
+    "runner_executable_sha256s",
+    `List (List.map (fun value -> `String value) runner_executable_sha256s);
     "selected_opcodes",
     `List (List.map (fun value -> `String value) selected_opcodes);
     "result_opcodes",
