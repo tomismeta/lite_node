@@ -148,6 +148,48 @@ let assoc_field name fields =
   | Some (`Assoc values) -> Some values
   | _ -> None
 
+let mutation_name = function
+  | `String value -> Some value
+  | `Assoc fields -> string_field "mutation" fields
+  | _ -> None
+
+let mutation_targets_output = function
+  | `Assoc fields ->
+    (match string_field "target" fields with
+     | Some "output.base_address"
+     | Some "dst" -> true
+     | Some _ -> false
+     | None -> true)
+  | _ -> true
+
+let mutation_offset_cells = function
+  | `Assoc fields -> int_field "offset_cells" fields
+  | _ -> None
+
+let exact_q1_alias_mutation mutation =
+  match mutation_name mutation with
+  | Some "dst=lhs" -> true
+  | Some "set_output_base_to_first_input_base" ->
+    mutation_targets_output mutation
+  | Some "set_output_base_to_first_input_base_plus" ->
+    mutation_targets_output mutation
+    && Option.value ~default:(-1) (mutation_offset_cells mutation) = 0
+  | _ -> false
+
+let partial_q1_alias_mutation mutation =
+  match mutation_name mutation with
+  | Some value when starts_with "dst=lhs+" value ->
+    (match String.split_on_char '+' value |> List.rev with
+     | offset :: _ ->
+       (match int_of_string_opt offset with
+        | Some value -> value > 0
+        | None -> false)
+     | [] -> false)
+  | Some "set_output_base_to_first_input_base_plus" ->
+    mutation_targets_output mutation
+    && Option.value ~default:0 (mutation_offset_cells mutation) > 0
+  | _ -> false
+
 let relative_path_ok path =
   String.length path > 0
   && path.[0] <> '/'
@@ -794,12 +836,16 @@ let failure_issues path opcode fields =
                 | None -> "<unknown>"
               in
               let expected = string_field "expected" failure_fields in
+              let mutations =
+                match list_field "executable_mutations" failure_fields with
+                | Some mutations -> mutations
+                | None -> []
+              in
               `Case
                 (case,
                  expected,
-                 (match list_field "executable_mutations" failure_fields with
-                  | Some (_ :: _) -> true
-                  | _ -> false),
+                 mutations,
+                 (match mutations with _ :: _ -> true | [] -> false),
                  (match list_field "unchanged_spans" failure_fields with
                   | Some (_ :: _) -> true
                   | _ -> false))
@@ -815,21 +861,21 @@ let failure_issues path opcode fields =
       let missing_mutations =
         List.filter_map
           (function
-            | `Case (case, _, false, _) -> Some case
+            | `Case (case, _, _, false, _) -> Some case
             | _ -> None)
           parsed
       in
       let missing_unchanged =
         List.filter_map
           (function
-            | `Case (case, _, _, false) -> Some case
+            | `Case (case, _, _, _, false) -> Some case
             | _ -> None)
           parsed
       in
       let missing_expected =
         List.filter_map
           (function
-            | `Case (case, None, _, _) -> Some case
+            | `Case (case, None, _, _, _) -> Some case
             | _ -> None)
           parsed
       in
@@ -839,7 +885,8 @@ let failure_issues path opcode fields =
           let expected_for case =
             List.find_map
               (function
-                | `Case (actual, expected, _, _) when String.equal actual case ->
+                | `Case (actual, expected, _, _, _)
+                  when String.equal actual case ->
                   expected
                 | _ -> None)
               parsed
@@ -856,7 +903,39 @@ let failure_issues path opcode fields =
               Some
                 (issue ~opcode path
                    (case
-                    ^ " failure case is required for Q1 validator readiness")))
+                   ^ " failure case is required for Q1 validator readiness")))
+      in
+      let q1_alias_shape_issues =
+        if not (String.equal opcode "LINEAR_Q1_G128_FP") then []
+        else
+          let mutations_for case =
+            List.find_map
+              (function
+                | `Case (actual, _, mutations, _, _)
+                  when String.equal actual case ->
+                  Some mutations
+                | _ -> None)
+              parsed
+          in
+          let exact_issue =
+            match mutations_for "output_input_aliasing" with
+            | Some mutations
+              when List.exists exact_q1_alias_mutation mutations -> []
+            | Some _ ->
+              [issue ~opcode path
+                 "output_input_aliasing must declare output/lhs alias mutation"]
+            | None -> []
+          in
+          let partial_issue =
+            match mutations_for "partial_output_input_aliasing" with
+            | Some mutations
+              when List.exists partial_q1_alias_mutation mutations -> []
+            | Some _ ->
+              [issue ~opcode path
+                 "partial_output_input_aliasing must declare partial output/lhs alias mutation"]
+            | None -> []
+          in
+          exact_issue @ partial_issue
       in
       let expected_issue =
         if missing_expected = [] then []
@@ -880,7 +959,7 @@ let failure_issues path opcode fields =
               ^ String.concat "," missing_unchanged)]
       in
       bad @ expected_issue @ mutation_issue @ unchanged_issue
-      @ q1_required_case_issues
+      @ q1_required_case_issues @ q1_alias_shape_issues
 
 let gated_delta_semantic_issues path opcode fields =
   if not (String.equal opcode "GATED_DELTA_RULE_FP") then []

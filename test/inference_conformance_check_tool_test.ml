@@ -218,6 +218,19 @@ let replace_failure_expected case expected = function
          fields)
   | value -> value
 
+let replace_failure_mutations case mutations = function
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (key, value) ->
+            if String.equal key "executable_mutations"
+               && String.equal (string_value "case" fields) case then
+              key, `List (List.map (fun value -> `String value) mutations)
+            else
+              key, value)
+         fields)
+  | value -> value
+
 let index_json =
   `Assoc [
     "type", `String "p0_litenode_vm_execution_template_index";
@@ -406,10 +419,56 @@ let check_rejects_wrong_q1_failure_expectation () =
          "nonfinite_fp16_scale must declare reject_before_write"
          (report_issues report)))
 
+let check_rejects_q1_exact_alias_without_alias_mutation () =
+  with_temp_dir (fun dir ->
+    let failures =
+      List.map
+        (replace_failure_mutations "output_input_aliasing" ["lhs[0]=nan"])
+        q1_failure_cases
+    in
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "expected_failure_atomicity_behavior"
+              (`List failures))
+    in
+    check "wrong exact alias mutation exits nonzero" (code = 1);
+    check
+      "wrong exact alias mutation issue"
+      (List.mem
+         "output_input_aliasing must declare output/lhs alias mutation"
+         (report_issues report)))
+
+let check_rejects_q1_partial_alias_without_partial_mutation () =
+  with_temp_dir (fun dir ->
+    let failures =
+      List.map
+        (replace_failure_mutations "partial_output_input_aliasing" ["dst=lhs"])
+        q1_failure_cases
+    in
+    let code, report =
+      run_check
+        dir
+        (q1_template ()
+         |> replace_assoc_field
+              "expected_failure_atomicity_behavior"
+              (`List failures))
+    in
+    check "wrong partial alias mutation exits nonzero" (code = 1);
+    check
+      "wrong partial alias mutation issue"
+      (List.mem
+         "partial_output_input_aliasing must declare partial output/lhs alias mutation"
+         (report_issues report)))
+
 let () =
   check_accepts_bound_abi_declaration ();
   check_rejects_stale_session_abi_root ();
   check_rejects_narrow_output_unit ();
   check_rejects_r1_output_count_drift ();
   check_rejects_missing_q1_failure_case ();
-  check_rejects_wrong_q1_failure_expectation ()
+  check_rejects_wrong_q1_failure_expectation ();
+  check_rejects_q1_exact_alias_without_alias_mutation ();
+  check_rejects_q1_partial_alias_without_partial_mutation ()

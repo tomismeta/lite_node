@@ -727,6 +727,11 @@ cases, the active aliased output span must hash to the declared expected output
 bytes, and the cross-platform matrix signs that `snapshot_output` evidence in
 the result signature.
 
+The static checker also validates the alias mutation shape. Exact
+`output_input_aliasing` must declare an output-to-lhs alias mutation, and
+`partial_output_input_aliasing` must declare a nonzero partial output-to-lhs
+offset before the template can pass Q1 schema validation.
+
 `finite_square_overflow` is now counted for `RMSNORM_FP_EPS` and `L2NORM_FP`
 under the current deterministic normalization profile: finite square/reduction
 overflow must reject before output writeback.
