@@ -152,6 +152,30 @@ let q1_failure_cases =
          ["truncate_bytes", `Int 1])
       (span "output" 10000 2);
     failure_case
+      "negative_byte_offset"
+      "reject_before_write"
+      (mutation
+         "set_scalar_param"
+         "parameter_addresses_and_scalar_params.values.byte_offset"
+         ["value", `Int (-1)])
+      (span "output" 10000 2);
+    failure_case
+      "byte_offset_out_of_bounds"
+      "reject_before_write"
+      (mutation
+         "set_scalar_param"
+         "parameter_addresses_and_scalar_params.values.byte_offset"
+         ["value", `Int 1_000_000])
+      (span "output" 10000 2);
+    failure_case
+      "byte_offset_truncated_span"
+      "reject_before_write"
+      (mutation
+         "set_scalar_param"
+         "parameter_addresses_and_scalar_params.values.byte_offset"
+         ["value", `Int 1])
+      (span "output" 10000 2);
+    failure_case
       "nonfinite_fp16_scale"
       "reject_before_write"
       (mutation
@@ -425,7 +449,7 @@ let check_q1_contract_visible report =
             "LINEAR_Q1_G128_FP");
        check
          "q1 contract expectation count"
-         (List.length (list_value "expectations" contract) = 8)
+         (List.length (list_value "expectations" contract) = 11)
      | _ -> failwith "expected one required failure-case contract")
   | _ -> failwith "report must be object"
 

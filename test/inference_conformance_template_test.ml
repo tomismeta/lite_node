@@ -2379,6 +2379,9 @@ let check_q1_required_failure_expectations () =
        "partial_output_input_aliasing", "accept_from_snapshot";
        "k_not_multiple_of_128", "reject_before_write";
        "bad_q1_owner_length", "reject_before_write";
+       "negative_byte_offset", "reject_before_write";
+       "byte_offset_out_of_bounds", "reject_before_write";
+       "byte_offset_truncated_span", "reject_before_write";
        "nonfinite_fp16_scale", "reject_before_write";
        "lower_effort_limit", "reject_before_write";
      ]);
@@ -2411,6 +2414,18 @@ let check_q1_required_failure_expectations () =
          ];
          `Assoc [
            "case", `String "bad_q1_owner_length";
+           "expected_prefix", `String "reject_before_write";
+         ];
+         `Assoc [
+           "case", `String "negative_byte_offset";
+           "expected_prefix", `String "reject_before_write";
+         ];
+         `Assoc [
+           "case", `String "byte_offset_out_of_bounds";
+           "expected_prefix", `String "reject_before_write";
+         ];
+         `Assoc [
+           "case", `String "byte_offset_truncated_span";
            "expected_prefix", `String "reject_before_write";
          ];
          `Assoc [

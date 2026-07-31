@@ -236,6 +236,33 @@ let q1_failure_cases ?(output_cells = 1) ?(lower_effort = 199) () =
       ];
     reject_case
       ~output_cells
+      "negative_byte_offset"
+      [
+        mutation
+          "set_scalar_param"
+          "parameter_addresses_and_scalar_params.values.byte_offset"
+          ["value", `Int (-1)];
+      ];
+    reject_case
+      ~output_cells
+      "byte_offset_out_of_bounds"
+      [
+        mutation
+          "set_scalar_param"
+          "parameter_addresses_and_scalar_params.values.byte_offset"
+          ["value", `Int 1_000_000];
+      ];
+    reject_case
+      ~output_cells
+      "byte_offset_truncated_span"
+      [
+        mutation
+          "set_scalar_param"
+          "parameter_addresses_and_scalar_params.values.byte_offset"
+          ["value", `Int 1];
+      ];
+    reject_case
+      ~output_cells
       "nonfinite_fp16_scale"
       [
         mutation
@@ -484,7 +511,7 @@ let check_q1_contract_visible gate =
          "LINEAR_Q1_G128_FP");
     check
       "runner q1 contract expectation count"
-      (List.length (list_value "expectations" contract) = 8)
+      (List.length (list_value "expectations" contract) = 11)
   | _ -> failwith "expected one runner required failure-case contract"
 
 let bound_matrix_report_row ~profile_catalog_root ~template_corpus_root
@@ -617,13 +644,13 @@ let check_good_template_reports_bound_abi () =
     check "good program effort" (bool_value "program_effort_match" result);
     check "good opcode effort" (bool_value "opcode_effort_match" result);
     check "good failure cases included" (bool_value "failure_cases_included" result);
-    check "good failure case count" (int_value "failure_case_count" result = 8);
+    check "good failure case count" (int_value "failure_case_count" result = 11);
     check
       "good counted failure case count"
-      (int_value "counted_failure_case_count" result = 8);
+      (int_value "counted_failure_case_count" result = 11);
     check
       "good accepted counted failure case count"
-      (int_value "accepted_counted_failure_case_count" result = 8);
+      (int_value "accepted_counted_failure_case_count" result = 11);
     let exact_alias = failure_case_fields result "output_input_aliasing" in
     check
       "exact alias snapshot matched"

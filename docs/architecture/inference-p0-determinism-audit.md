@@ -793,6 +793,9 @@ The primitive test suite now pins Q1 byte-offset bounds directly: negative
 offsets, offsets beyond the owner length, and offsets whose remaining byte span
 cannot cover `n * (k / 128) * 18` bytes all reject before output writeback.
 Valid nonzero offsets still execute against the shifted Q1 span.
+These offset-bound cases are also part of the required Q1 failure-case
+contract for producer VM templates, so validator-readiness cannot be satisfied
+by positive offset execution plus a generic short-owner case alone.
 
 `finite_square_overflow` is now counted for `RMSNORM_FP_EPS` and `L2NORM_FP`
 under the current deterministic normalization profile: finite square/reduction
