@@ -359,17 +359,23 @@ profile-root blockers.
 The matrix verifier consumes executed `inference_conformance_run` reports, not
 schema-checker reports. It requires accepted local execution, strict effort,
 accepted punitive failure cases, distinct platform observations, and identical
-per-opcode output/effort signatures. They also require a single shared
+per-opcode output/effort signatures. It also requires distinct runner
+executable SHA-256 observations at the same threshold as platform observations,
+so platform metadata alone cannot satisfy cross-platform evidence. The verifier
+also requires a single shared
 `profile_catalog_root` and a single shared `template_corpus_root`, so matching
 output bytes cannot hide a profile-contract or qualification-corpus drift
 between reports. Each result row must also bind a matched `vm_semantics_root`
 and session ABI declaration; top-level gates alone are not sufficient. A
 single repeated VPS report is still rejected as
-`insufficient_distinct_platforms`. Runner reports record the OCaml version,
-OS class, `uname` system name/release/machine, word size, endianness, backend
-type, runner executable path, and runner executable SHA-256. The matrix uses
-those runtime fields to derive `platform_key` and preserves
-`runner_executable_sha256s` at top level for audit. Matrix reports include
+`insufficient_distinct_platforms` or
+`insufficient_distinct_runner_executables`. Runner reports record the OCaml
+version, OS class, `uname` system name/release/machine, word size, endianness,
+backend type, runner executable path, and runner executable SHA-256. The matrix
+uses those runtime fields to derive `platform_key` and preserves
+`runner_executable_sha256s`, `distinct_runner_executable_count`, and
+`required_distinct_runner_executable_count` at top level for audit. Matrix
+reports include
 `runner_report_sha256`, `result_signature_sha256`, and
 `matrix_signature_sha256` as diagnostic evidence roots; those hashes identify
 the compared report bytes and normalized result signatures, but they are not

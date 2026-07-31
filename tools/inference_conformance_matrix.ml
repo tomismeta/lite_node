@@ -158,6 +158,7 @@ let next_readiness_blocker blockers =
       "missing_cross_platform_matrix";
       "required_opcode_missing";
       "insufficient_distinct_platforms";
+      "insufficient_distinct_runner_executables";
       "result_mismatch_across_platforms";
     ]
   in
@@ -772,6 +773,7 @@ let matrix_report paths =
     report_count > 0
     && accepted_reports = report_count
     && List.length platforms >= !min_platforms
+    && List.length runner_executable_sha256s >= !min_platforms
     && List.length signatures = 1
     && missing_profile_catalog_root_count = 0
     && List.length profile_catalog_roots = 1
@@ -788,6 +790,9 @@ let matrix_report paths =
     |> add_if
          (List.length platforms < !min_platforms)
          "insufficient_distinct_platforms"
+    |> add_if
+         (List.length runner_executable_sha256s < !min_platforms)
+         "insufficient_distinct_runner_executables"
     |> add_if
          (List.length signatures <> 1)
          "result_mismatch_across_platforms"
@@ -828,6 +833,12 @@ let matrix_report paths =
       "distinct_platform_status",
       `String
         (if List.length platforms >= !min_platforms then "accepted" else "rejected");
+      "distinct_runner_executable_status",
+      `String
+        (if List.length runner_executable_sha256s >= !min_platforms then
+           "accepted"
+         else
+           "rejected");
       "result_signature_status",
       `String (if List.length signatures = 1 then "accepted" else "rejected");
       "profile_catalog_status",
@@ -864,6 +875,9 @@ let matrix_report paths =
     "accepted_report_count", `Int accepted_reports;
     "required_distinct_platform_count", `Int !min_platforms;
     "distinct_platform_count", `Int (List.length platforms);
+    "required_distinct_runner_executable_count", `Int !min_platforms;
+    "distinct_runner_executable_count",
+    `Int (List.length runner_executable_sha256s);
     "cross_platform_status",
     `String (if matrix_accepted then "accepted" else "rejected");
     "validator_readiness_required", `Bool !require_validator_readiness;

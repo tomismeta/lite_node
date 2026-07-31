@@ -404,6 +404,35 @@ let check_matrix_accepts_bound_reports () =
         (List.length (string_list_value "runner_executable_sha256s" fields) = 2)
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_reused_runner_hash () =
+  with_temp_dir (fun dir ->
+    let runner_sha = hex_root '1' in
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "reused runner hash matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "reused runner hash blocker"
+        (List.mem "insufficient_distinct_runner_executables" (blockers fields));
+      check
+        "runner executable count is one"
+        (match assoc_value "distinct_runner_executable_count" fields with
+         | `Int count -> count = 1
+         | _ -> false)
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_accepts_required_opcode_reports () =
   with_temp_dir (fun dir ->
     let a =
@@ -998,6 +1027,7 @@ let check_matrix_rejects_same_platform () =
 
 let () =
   check_matrix_accepts_bound_reports ();
+  check_matrix_rejects_reused_runner_hash ();
   check_matrix_accepts_required_opcode_reports ();
   check_matrix_rejects_missing_required_opcode ();
   check_matrix_rejects_missing_runner_hash ();
