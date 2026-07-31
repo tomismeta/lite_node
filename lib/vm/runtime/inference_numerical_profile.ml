@@ -349,9 +349,31 @@ let optional_root_json = function
   | Some value -> `String value
   | None -> `Null
 
+let validator_readiness_blockers gate_fields binding_fields =
+  let root_blockers =
+    match string_field "classification" binding_fields with
+    | Some "none" -> []
+    | Some value -> [value]
+    | None -> ["profile_root_unavailable"]
+  in
+  let profile_blockers =
+    match string_field "consensus_status" gate_fields with
+    | Some "consensus_ready" -> []
+    | Some "consensus_candidate" -> ["consensus_candidate_profile_gate"]
+    | Some "local_only" -> ["local_only_profile_gate"]
+    | Some _ -> ["unknown_profile_gate"]
+    | None -> ["unknown_profile_gate"]
+  in
+  root_blockers
+  @ profile_blockers
+  @ string_list_field "consensus_blocker_codes" gate_fields
+
 let binding_catalog_entry ?path ?case ?manifest profile_gate binding =
   match profile_gate, binding with
   | `Assoc gate_fields, `Assoc binding_fields ->
+    let readiness_blockers =
+      validator_readiness_blockers gate_fields binding_fields
+    in
     let fields = [
       "opcode",
       `String
@@ -382,6 +404,15 @@ let binding_catalog_entry ?path ?case ?manifest profile_gate binding =
       optional_root_json (string_field "numerical_profile_root" binding_fields);
       "profile_root",
       optional_root_json (string_field "profile_root" binding_fields);
+      "consensus_blocker_codes",
+      `List
+        (List.map
+           (fun blocker -> `String blocker)
+           (string_list_field "consensus_blocker_codes" gate_fields));
+      "validator_readiness_status",
+      `String (if readiness_blockers = [] then "accepted" else "rejected");
+      "validator_readiness_blockers",
+      `List (List.map (fun blocker -> `String blocker) readiness_blockers);
     ] in
     let fields =
       match string_field "profile_source" gate_fields with

@@ -518,6 +518,22 @@ let check_profile_root_binding_catalog () =
           (string_value "numerical_profile_root" fields)
           (hex_root 'e'));
      check
+       "binding catalog readiness status"
+       (String.equal
+          (string_value "validator_readiness_status" fields)
+          "rejected");
+     check
+       "binding catalog readiness blockers"
+       (let blockers = string_list_value "validator_readiness_blockers" fields in
+        List.mem "profile_root_mismatch" blockers
+        && List.mem "consensus_candidate_profile_gate" blockers
+        && List.mem "fp64_sqrt_conformance" blockers);
+     check
+       "binding catalog blocker codes"
+       (List.mem
+          "fp64_sqrt_conformance"
+          (string_list_value "consensus_blocker_codes" fields));
+     check
        "binding catalog path"
        (String.equal (string_value "path" fields) "templates/rmsnorm.json")
    | _ -> failwith "profile root binding catalog must contain one entry");
@@ -549,6 +565,12 @@ let check_profile_root_binding_catalog () =
             | `Assoc fields ->
               String.equal (string_value "opcode" fields) "LINEAR_Q1_G128_FP"
               && String.equal (string_value "status" fields) "matched"
+              && String.equal
+                   (string_value "validator_readiness_status" fields)
+                   "rejected"
+              && List.mem
+                   "consensus_candidate_profile_gate"
+                   (string_list_value "validator_readiness_blockers" fields)
               && String.equal (string_value "case" fields) "logits-tail"
               && String.equal
                    (string_value "manifest" fields)

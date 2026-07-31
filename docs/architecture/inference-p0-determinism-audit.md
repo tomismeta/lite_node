@@ -334,6 +334,12 @@ codes must be intentionally classified before the report shape is extended.
 Reports also expose `consensus_blocker_class_counts`, a class-level summary
 derived from the same catalog for planning and review. The detailed
 `blocker_code` entries remain the stable automation keys.
+Each `profile_root_binding_catalog` row also carries
+`validator_readiness_status`, `validator_readiness_blockers`, and
+`consensus_blocker_codes`. That row is the compact per-primitive answer to:
+what ran, which profile it claimed, whether the root bound, and why it is not
+validator-ready. A matched profile root can still be validator-rejected when
+the profile is only `consensus_candidate` or when blocker codes remain.
 
 `local_semantics` records what the current VM does today.
 `consensus_obligations` records what must become protocol-owned before the
