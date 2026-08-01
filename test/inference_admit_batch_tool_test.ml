@@ -358,10 +358,22 @@ let check_runtime_semantics report =
   | `Assoc fields ->
     let semantics = assoc_json "runtime_semantics" fields in
     check
+      "runtime semantics diagnostic"
+      (bool_json "diagnostic_only" semantics);
+    check
       "session mode"
       (String.equal
          (string_json "session_mode" semantics)
          "independent_session_per_stage");
+    check
+      "product lifecycle"
+      (list_json "product_lifecycle" semantics
+       = [
+         `String "open_session";
+         `String "prefill";
+         `String "decode";
+         `String "finalize";
+       ]);
     check
       "continuation unsupported"
       (not (bool_json "continuation_supported" semantics));
@@ -378,14 +390,32 @@ let check_runtime_semantics report =
       (list_json "batch_cache_scope" semantics
        = [`String "owner_bytes"; `String "model_range_pins"]);
     check
-      "no resident cache claim"
-      (List.assoc_opt "resident_cache_scope" semantics = None);
+      "resident cache empty"
+      (list_json "resident_cache_scope" semantics = []);
     check
-      "no state carry field"
-      (List.assoc_opt "state_carry" semantics = None);
+      "state carry unsupported"
+      (String.equal
+         (string_json "state_carry" semantics)
+         "not_supported");
     check
-      "no next blocker field"
-      (List.assoc_opt "next_runtime_blocker" semantics = None)
+      "runtime readiness rejected"
+      (String.equal
+         (string_json "runtime_readiness_status" semantics)
+         "rejected");
+    check
+      "next runtime blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" semantics)
+         "session_continuation_state_carry_not_supported");
+    check
+      "missing runtime capabilities"
+      (list_json "missing_runtime_capabilities" semantics
+       = [
+         `String "resident_session";
+         `String "multi_advance_state_carry";
+         `String "prefill_decode_phase_contract";
+         `String "decode_loop_argmax_session_output";
+       ])
   | _ -> failwith "report must be an object"
 
 let check_batch_hash report =

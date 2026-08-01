@@ -46,6 +46,7 @@ session/runtime packaging.
 | P0-plus top-k boundary | `/home/exedev/evidence/octra-inference/determinism-p0-plus-topk-boundary-20260730-025306` | boundary accepted as product authority classification; top-k remains reference-only and does not qualify P0-plus validator readiness |
 | Recurrent-heavy performance fixture on rebased LiteNode | `/home/exedev/evidence/octra-inference/litenode-recurrent-heavy-reemitted-2ca5dfd-754b0a5-20260729` | accepted |
 | Prefill session bundle shape | `/home/exedev/evidence/octra-inference/prefill-session-bundle-55cd597-20260730-121116` | producer-shaped; not continuous LiteNode execution |
+| Batch runtime readiness | local `--run-batch` report `runtime_semantics` | diagnostic-only; current mode is `independent_session_per_stage`, with `session_continuation_state_carry_not_supported` as the next runtime blocker |
 
 The `/private/tmp` reports above are local rerun snapshots, not durable
 artifacts. The durable identity of the current local rerun is:
@@ -139,7 +140,11 @@ d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
 3. Runtime performance.
    The current local proof mode is correctness-first. Batch execution improved
    harness overhead, but full prompt runtime still needs resident execution,
-   cached authenticated ranges, and measured kernel optimization.
+   cached authenticated ranges, and measured kernel optimization. Batch reports
+   now make this explicit in diagnostic `runtime_semantics`: owner-byte and
+   model-range pin caches are supported, while resident session state carry,
+   prefill/decode phase ownership, and decode-loop ARGMAX outputs remain the
+   runtime blocker.
 
 4. Multi-platform conformance.
    Strict P0 reports must run across the intended validator platforms and

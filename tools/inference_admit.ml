@@ -1496,7 +1496,15 @@ let run_batch_file ~timing_mode path =
   in
   let runtime_semantics =
     `Assoc [
+      "diagnostic_only", `Bool true;
       "session_mode", `String "independent_session_per_stage";
+      "product_lifecycle",
+      `List [
+        `String "open_session";
+        `String "prefill";
+        `String "decode";
+        `String "finalize";
+      ];
       "stage_lifecycle",
       `List [
         `String "open_session";
@@ -1509,6 +1517,18 @@ let run_batch_file ~timing_mode path =
         `String "model_range_pins";
       ];
       "continuation_supported", `Bool false;
+      "state_carry", `String "not_supported";
+      "resident_cache_scope", `List [];
+      "runtime_readiness_status", `String "rejected";
+      "next_runtime_blocker",
+      `String "session_continuation_state_carry_not_supported";
+      "missing_runtime_capabilities",
+      `List [
+        `String "resident_session";
+        `String "multi_advance_state_carry";
+        `String "prefill_decode_phase_contract";
+        `String "decode_loop_argmax_session_output";
+      ];
     ]
   in
   let batch_payload =
