@@ -960,6 +960,18 @@ output encoding are protocol-owned; max selection, score-shift,
 exponential-sum, and probability-division steps now use LiteNode's finite
 binary64 core.
 
+The 2026-08-01 P0-plus `wide-1024-stable-tail` fixture is the concrete
+portability warning for that boundary. The fixture rejects by one ULP in one
+probability cell while every input remains finite and the local execution path
+completes. The first mismatch is byte `4904`, f64 cell `613`:
+expected bits `0x3c6cceffa4571f9a`, observed bits
+`0x3c6cceffa4571f9b`. That is exactly the kind of host-transcendental drift
+that keeps `SOFTMAX_FP` behind `host-fp-exp-local-candidate`. The replacement
+plan is therefore not to chase a platform's native `exp`; it is to provide a
+protocol-owned Softmax authority: exact exponential approximation/table,
+rounding, max-subtract order, summation order, division, output encoding, and
+punitive cross-platform vectors.
+
 `fp64_subtract_conformance` is now represented by the named `Inference_fp64.sub`
 helper. The helper is deliberately defined through the same deterministic
 finite binary64 `add` plus sign-bit negation path used before, so this documents

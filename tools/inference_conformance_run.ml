@@ -1410,6 +1410,86 @@ let int64_le raw offset =
   done;
   !value
 
+let uint64_z value =
+  let z = Z.of_int64 value in
+  if Int64.compare value 0L < 0 then Z.add z (Z.shift_left Z.one 64)
+  else z
+
+let int64_hex value =
+  let buffer = Bytes.create 16 in
+  for index = 0 to 15 do
+    let shift = (15 - index) * 4 in
+    let nibble =
+      Int64.(
+        to_int (logand (shift_right_logical value shift) 0xfL))
+    in
+    Bytes.set
+      buffer
+      index
+      (Char.chr
+         ((if nibble < 10 then Char.code '0' else Char.code 'a' - 10)
+          + nibble))
+  done;
+  "0x" ^ Bytes.to_string buffer
+
+let first_mismatch_byte expected observed =
+  let expected_len = String.length expected in
+  let observed_len = String.length observed in
+  let limit = min expected_len observed_len in
+  let rec loop index =
+    if index = limit then
+      if expected_len = observed_len then None else Some index
+    else if not (Char.equal expected.[index] observed.[index]) then Some index
+    else loop (index + 1)
+  in
+  loop 0
+
+let mismatch_detail ?(decode_f64 = false) expected observed =
+  let expected_len = String.length expected in
+  let observed_len = String.length observed in
+  match first_mismatch_byte expected observed with
+  | None ->
+    `Assoc [
+      "status", `String "no_mismatch";
+      "expected_bytes", `Int expected_len;
+      "observed_bytes", `Int observed_len;
+    ]
+  | Some byte ->
+    let common =
+      [
+        "status", `String "mismatch";
+        "first_mismatch_byte", `Int byte;
+        "expected_bytes", `Int expected_len;
+        "observed_bytes", `Int observed_len;
+      ]
+    in
+    if decode_f64
+       && byte + 8 <= expected_len
+       && byte + 8 <= observed_len
+       && expected_len mod 8 = 0
+       && observed_len mod 8 = 0 then
+      let cell = byte / 8 in
+      let offset = cell * 8 in
+      let expected_bits = int64_le expected offset in
+      let observed_bits = int64_le observed offset in
+      `Assoc
+        (common
+         @ [
+             "first_mismatch_f64_cell", `Int cell;
+             "expected_bits_hex", `String (int64_hex expected_bits);
+             "observed_bits_hex", `String (int64_hex observed_bits);
+             "expected_f64_decimal",
+             `String (Printf.sprintf "%.17g" (Int64.float_of_bits expected_bits));
+             "observed_f64_decimal",
+             `String (Printf.sprintf "%.17g" (Int64.float_of_bits observed_bits));
+             "raw_u64_bit_delta",
+             `Intlit
+               Z.(
+                 abs (sub (uint64_z observed_bits) (uint64_z expected_bits))
+                 |> to_string);
+           ])
+    else `Assoc common
+
 let put_int64_le buffer index value =
   for byte = 0 to 7 do
     Bytes.set
@@ -2879,15 +2959,27 @@ let load_input_raw root_dir fixture name =
 let compare_expected_raw root_dir fixture name raw =
   let manifest = find_manifest "expected_output_byte_manifests" fixture name in
   let expected = load_manifest_raw root_dir manifest in
-  let matched = String.equal raw expected in
+  let expected_root = string_field "root" manifest in
+  let observed_root = fixture_value_root ~name raw in
+  let root_matched = String.equal expected_root observed_root in
+  let matched = String.equal raw expected && root_matched in
+  let decode_f64 =
+    match opt_string_field "layout" manifest with
+    | Some layout -> starts_with "f64le" layout
+    | None -> false
+  in
   matched,
   `Assoc [
     "name", `String name;
     "status", `String (if matched then "matched" else "mismatch");
     "expected_sha256", `String (sha256 expected);
     "observed_sha256", `String (sha256 raw);
-    "expected_root", `String (string_field "root" manifest);
+    "expected_root", `String expected_root;
+    "observed_root", `String observed_root;
+    "root_matched", `Bool root_matched;
     "bytes", `Int (String.length raw);
+    "mismatch_detail",
+    (if matched then `Null else mismatch_detail ~decode_f64 expected raw);
   ]
 
 let producer_only_expected root_dir fixture name =
