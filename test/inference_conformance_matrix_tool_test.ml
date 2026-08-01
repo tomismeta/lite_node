@@ -370,6 +370,7 @@ let result
     ?(profile_root_status = "matched")
     ?(vm_semantics_status = "matched")
     ?(abi_declaration_status = "matched")
+    ?(session_abi_root = Abi.v1_root)
     ?(executable_abi_status = "matched")
     ?(required_failure_contract_status = "accepted")
     ?required_failure_contract_blockers
@@ -468,8 +469,16 @@ let result
            "none"
          else
            "abi_declaration_mismatch");
-      "session_abi_root", `String Abi.v1_root;
+      "session_abi_root", `String session_abi_root;
       "litenode_session_abi_root", `String Abi.v1_root;
+      "litenode_matched_session_abi_root",
+      `String
+        (if String.equal abi_declaration_status "matched" then
+           session_abi_root
+         else
+           Abi.v1_root);
+      "litenode_supported_session_abi_roots",
+      `List (List.map (fun root -> `String root) Abi.supported_roots);
       "evidence_scope", `String "template_declaration";
       "entrypoint", `String "advance";
       "label", `Int 100;
@@ -558,6 +567,7 @@ let report
     ?(vm_semantics_gate_status = "accepted")
     ?(abi_declaration_status = "matched")
     ?(abi_gate_status = "accepted")
+    ?(session_abi_root = Abi.v1_root)
     ?(executable_abi_status = "matched")
     ?(required_failure_contract_status = "accepted")
     ?required_failure_contract_blockers
@@ -595,6 +605,7 @@ let report
         ~profile_root_status
         ~vm_semantics_status
         ~abi_declaration_status
+        ~session_abi_root
         ~executable_abi_status
         ~required_failure_contract_status
         ?required_failure_contract_blockers
@@ -915,6 +926,37 @@ let check_matrix_accepts_bound_reports () =
         (match assoc_value "distinct_platform_runner_observation_count" fields with
          | `Int count -> count = 2
          | _ -> false)
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_accepts_v2_abi_reports () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report
+           ~runner_sha:(hex_root '1')
+           ~session_abi_root:Abi.v2_root
+           "Darwin"
+           "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~session_abi_root:Abi.v2_root
+           "Linux"
+           "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "accepted v2 matrix exits zero" (code = 0);
+    match json with
+    | `Assoc fields ->
+      check
+        "v2 matrix accepted"
+        (String.equal (string_value "status" fields) "accepted")
     | _ -> failwith "matrix output must be object")
 
 let check_matrix_rejects_aggregate_only_runner_diversity () =
@@ -3013,6 +3055,7 @@ let check_matrix_rejects_same_platform () =
 
 let () =
   check_matrix_accepts_bound_reports ();
+  check_matrix_accepts_v2_abi_reports ();
   check_matrix_rejects_aggregate_only_runner_diversity ();
   check_matrix_rejects_validator_readiness_without_opcode_scope ();
   check_matrix_rejects_one_platform_validator_readiness ();

@@ -168,13 +168,13 @@ let validate target =
                  | Error error -> Error error
                  | Ok () ->
                    if not
-                       (String.equal
-                          target.session_abi_root
-                          Inference_session_abi.v1_root)
+                       (Inference_session_abi.supported_root
+                          target.session_abi_root)
                    then
                      Error
                        (Session_abi_root_mismatch
-                          (target.session_abi_root, Inference_session_abi.v1_root))
+                          ( target.session_abi_root,
+                            Inference_session_abi.supported_root_message ))
                    else
                      check_advance_entrypoint target.entrypoints)))))
 

@@ -1773,6 +1773,28 @@ let check_stale_abi_is_visible_in_executable_report () =
       "stale ABI gate rejected"
       (String.equal (gate_status "abi_declaration_binding_gate" report) "rejected"))
 
+let check_v2_abi_is_visible_in_executable_report () =
+  with_temp_dir (fun dir ->
+    let code, report =
+      run_conformance
+        dir
+        (q1_template ~session_abi_root:Abi.v2_root ())
+        ["--strict-effort"; "--require-profile-roots-bound"]
+    in
+    check "v2 ABI runner exits zero" (code = 0);
+    let result = first_result report in
+    check "v2 ABI execution accepted" (String.equal (string_value "status" result) "accepted");
+    let abi = assoc_json "abi_declaration_binding" result in
+    check "v2 ABI declaration matched" (String.equal (string_value "status" abi) "matched");
+    check
+      "v2 ABI matched root"
+      (String.equal
+         (string_value "litenode_matched_session_abi_root" abi)
+         Abi.v2_root);
+    check
+      "v2 ABI gate accepted"
+      (String.equal (gate_status "abi_declaration_binding_gate" report) "accepted"))
+
 let check_stale_entry_label_repair_hint_is_precise () =
   with_temp_dir (fun dir ->
     let code, report =
@@ -3053,6 +3075,7 @@ let () =
   check_require_failure_cases_rejects_exact_partial_alias_shape ();
   check_accept_snapshot_requires_exact_output ();
   check_stale_abi_is_visible_in_executable_report ();
+  check_v2_abi_is_visible_in_executable_report ();
   check_stale_entry_label_repair_hint_is_precise ();
   check_readiness_gate_rejects_stale_abi ();
   check_readiness_gate_reports_executable_abi_mismatch ();

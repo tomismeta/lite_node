@@ -49,6 +49,7 @@ type error =
   | Execution_failed
   | Effort_exceeded of int * int
   | Effort_overflow of int * int
+  | Progress_overflow of string * int
   | Session_limit_exceeded of int * int
 
 let phase_name = function
@@ -133,6 +134,21 @@ let check_sequence expected session =
   if session.sequence = expected then Ok ()
   else Error (Bad_sequence (expected, session.sequence))
 
+let next_sequence session =
+  if session.sequence = max_int then
+    Error (Progress_overflow ("sequence", session.sequence))
+  else
+    Ok (session.sequence + 1)
+
+let next_progress session =
+  match next_sequence session with
+  | Error error -> Error error
+  | Ok sequence ->
+    if session.logical_position = max_int then
+      Error (Progress_overflow ("logical_position", session.logical_position))
+    else
+      Ok (sequence, session.logical_position + 1)
+
 let terminal = function
   | Finalized
   | Canceled -> true
@@ -157,6 +173,19 @@ let check_identity ~plan session =
          (session.model_deployment_root, model_deployment_root))
   else
     Ok ()
+
+let plan_supports_continuation plan =
+  Inference_session_abi.continuation_supported
+    (Inference_plan.target plan).Inference_target.session_abi_root
+
+let continuation_context (session : t) =
+  Inference_session_abi.{
+    sequence = session.sequence;
+    logical_position = session.logical_position;
+    output_root = session.output_root;
+    output_prefix_root = session.output_prefix_root;
+    committed_target_state_root = session.committed_target_state_root;
+  }
 
 let receipt ~status (prior : t) (next : t) =
   let prior_session_root = root prior in
@@ -202,20 +231,27 @@ let advance_with_profile ?profile ~plan ~expected_sequence session =
   | Error error -> Error error
   | Ok () ->
     if terminal session.phase then Error Terminal_session
-    else if session.phase = Advanced then
+    else if session.phase = Advanced && not (plan_supports_continuation plan) then
       Error (Invalid_phase "advance requires persistent target state")
     else
-      match check_identity ~plan session with
-      | Error error -> Error error
-      | Ok () ->
+      match next_progress session, check_identity ~plan session with
+      | Error error, _
+      | _, Error error -> Error error
+      | Ok (next_sequence, next_position), Ok () ->
+        let session_context =
+          if plan_supports_continuation plan then
+            Some (continuation_context session)
+          else
+            None
+        in
         let execution_result =
           match profile with
           | None ->
-            (match Inference_execution.run ~plan () with
+            (match Inference_execution.run ?session_context ~plan () with
              | Ok execution -> Ok (execution, [], [])
              | Error error -> Error error)
           | Some profile ->
-            (match Inference_execution.run_profiled ~profile ~plan () with
+            (match Inference_execution.run_profiled ?session_context ~profile ~plan () with
              | Ok profiled ->
                Ok
                  ( profiled.Inference_execution.result,
@@ -241,9 +277,9 @@ let advance_with_profile ?profile ~plan ~expected_sequence session =
              let committed_effort = session.committed_effort + effort in
              let next = {
                session with
-               sequence = session.sequence + 1;
+               sequence = next_sequence;
                phase = Advanced;
-               logical_position = session.logical_position + 1;
+               logical_position = next_position;
                output_root = execution.output_root;
                output_prefix_root =
                  append_output_prefix
@@ -277,14 +313,17 @@ let finalize ~expected_sequence session =
     else if session.phase = Open then
       Error (Invalid_phase "finalize requires an advanced session")
     else
-      let next = {
-        session with
-        sequence = session.sequence + 1;
-        phase = Finalized;
-      } in
-      (match check_session_size next with
-       | Error error -> Error error
-       | Ok next -> Ok (next, receipt ~status:"finalized" session next))
+      match next_sequence session with
+      | Error error -> Error error
+      | Ok sequence ->
+        let next = {
+          session with
+          sequence;
+          phase = Finalized;
+        } in
+        (match check_session_size next with
+         | Error error -> Error error
+         | Ok next -> Ok (next, receipt ~status:"finalized" session next))
 
 let cancel ~expected_sequence session =
   match check_sequence expected_sequence session with
@@ -292,11 +331,14 @@ let cancel ~expected_sequence session =
   | Ok () ->
     if terminal session.phase then Error Terminal_session
     else
-      check_session_size {
-        session with
-        sequence = session.sequence + 1;
-        phase = Canceled;
-      }
+      match next_sequence session with
+      | Error error -> Error error
+      | Ok sequence ->
+        check_session_size {
+          session with
+          sequence;
+          phase = Canceled;
+        }
 
 let sequence session = session.sequence
 let phase session = session.phase
@@ -350,6 +392,10 @@ let error_message = function
     Printf.sprintf
       "session effort overflow: current %d next %d"
       current next
+  | Progress_overflow (field, value) ->
+    Printf.sprintf
+      "session progress overflow: %s %d"
+      field value
   | Session_limit_exceeded (required, available) ->
     Printf.sprintf
       "session bytes exceeded: required %d available %d"

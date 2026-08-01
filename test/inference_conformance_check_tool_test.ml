@@ -464,6 +464,18 @@ let check_accepts_bound_abi_declaration () =
         "accepted ABI declaration gate"
         (String.equal (string_value "status" fields) "accepted"))
 
+let check_accepts_v2_bound_abi_declaration () =
+  with_temp_dir (fun dir ->
+    let code, report =
+      run_check dir (q1_template ~session_abi_root:Abi.v2_root ())
+    in
+    check "accepted v2 ABI declaration exits zero" (code = 0);
+    match report_gate "abi_declaration_binding_gate" report with
+    | fields ->
+      check
+        "accepted v2 ABI declaration gate"
+        (String.equal (string_value "status" fields) "accepted"))
+
 let check_rejects_stale_session_abi_root () =
   with_temp_dir (fun dir ->
     let code, report =
@@ -1051,6 +1063,7 @@ let check_rejects_q1_reject_case_without_full_output_span () =
 
 let () =
   check_accepts_bound_abi_declaration ();
+  check_accepts_v2_bound_abi_declaration ();
   check_rejects_stale_session_abi_root ();
   check_rejects_narrow_output_unit ();
   check_rejects_r1_output_count_drift ();

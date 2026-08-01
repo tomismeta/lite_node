@@ -212,9 +212,12 @@ continuation_supported = false
 batch_cache_scope = owner_bytes, model_range_pins
 ```
 
-The next runtime blocker remains session-state carry: a resident inference
-session must preserve rooted target state across prefill/decode advances
-instead of reopening an independent session for each stage.
+The next runtime blocker has narrowed. The core session runtime now has an
+ABI-v2 continuation context for repeated advances, but the batch harness still
+opens an independent session for each stage. The product runtime must route
+multi-transition bundles through one v2 session, then bind target-owned
+prefill/decode phase semantics instead of reopening an independent session for
+each stage.
 
 Compatibility checks:
 

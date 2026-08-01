@@ -42,6 +42,7 @@ type profiled_result = {
 type error =
   | Entrypoint_unsupported of string
   | Entrypoint_missing of int
+  | Session_context_mismatch of string
   | Opaque_value
   | Invalid_output of string
   | Missing_output_cell of int
@@ -50,11 +51,13 @@ type error =
   | Execution_failed
 
 val run :
+  ?session_context:Inference_session_abi.continuation_context ->
   plan:Inference_plan.t ->
   unit ->
   (result, error) Stdlib.result
 
 val run_profiled :
+  ?session_context:Inference_session_abi.continuation_context ->
   profile:profile_config ->
   plan:Inference_plan.t ->
   unit ->

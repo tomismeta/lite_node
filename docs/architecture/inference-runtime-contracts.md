@@ -201,11 +201,25 @@ runtime or RPC sampling policy.
 
 ## Session ABI
 
-The first session ABI is a small descriptor, not a registry. LiteNode seeds
+The session ABI is a small descriptor, not a registry. ABI v1 seeds
 `memory[1000]` with `VString request.input_root` before entering the target
 program and exposes the exact request input bytes as `blobs[input_root]`.
 Bytecode can therefore use `MLOAD` followed by authenticated `FLOAD` without
 baking request-specific roots into the admitted program.
+
+ABI v2 preserves the v1 input/output convention and additionally seeds
+canonical pre-advance progress:
+
+```text
+memory[1001] = VInt sequence
+memory[1002] = VInt logical_position
+memory[1003] = VString output_root
+memory[1004] = VString output_prefix_root
+memory[1005] = VString committed_target_state_root, or "" when absent
+```
+
+The v2 ABI root binds these cell numbers and value encodings. It does not
+promote diagnostic `candidate_root` into committed target state.
 
 Only `advance` at label `100` enters model execution. Additional target
 entrypoint aliases are rejected until the session protocol explicitly grows.
@@ -261,12 +275,13 @@ ordinary KV or recurrent caches.
 When committed target state exists, its payload is durable canonical session
 data. It is not stored only in an optional checkpoint.
 
-The first local runner accepts at most one successful advance. Its logical
-position starts at zero and increments after that committed transition. Its
+ABI v1 accepts at most one successful advance. ABI v2 permits repeated
+advances when the target consumes prior canonical progress or explicitly
+committed target state through the ABI cells above. In both cases, logical
+position starts at zero and increments after a committed transition. The
 candidate root is the canonical VM memory payload retained at the transition
 boundary for diagnostics. It is not committed target state and not part of the
-session root. Multi-advance execution requires the target ABI to consume prior
-canonical progress or explicitly committed target state.
+session root.
 
 The output prefix is append-only and hash-chained from target-owned output
 roots. A successful advance may append output, replace logical phase or

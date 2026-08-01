@@ -206,8 +206,9 @@ supported shape executes one target-owned stage labeled `prefill` or `decode`
 through the same open/advance/finalize machinery and reports
 `session_report_sha256`, transition roots, receipts, and diagnostic runtime
 semantics. Multi-transition bundles are intentionally rejected with
-`session_continuation_state_carry_not_supported` until resident state carry is
-implemented. The rejection includes a hash-bound `continuation_preflight`
+`session_continuation_state_carry_not_supported` until the harness routes them
+through the ABI-v2 repeated-advance path. The rejection includes a hash-bound
+`continuation_preflight`
 diagnostic plan: each requested transition is prepared through the same
 input/range/plan-creation path as the stage runner, root uniformity and
 explicit `identity_blockers`, `declaration_blockers`, and top-level

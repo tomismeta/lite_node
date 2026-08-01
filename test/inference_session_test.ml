@@ -70,14 +70,14 @@ let code = [| VM.JDEST Abi.advance_label; VM.STOP |]
 let admitted () =
   Inference_cert.admit ~support ~requirement code
 
-let target admitted =
+let target ?(requirement = requirement) ?(session_abi_root = Abi.v1_root) admitted =
   Target.{
     program_root = Target.program_root admitted;
     requirement_root = Req.root requirement;
     model_root = hex_root 'e';
     execution_descriptor_root = hex_root '1';
     store_root = hex_root '2';
-    session_abi_root = Abi.v1_root;
+    session_abi_root;
     entrypoints = [{
       entry_name = Abi.advance_entrypoint;
       entry_label = Abi.advance_label;
@@ -100,15 +100,15 @@ let model target =
     }];
   }
 
-let request target =
+let request ?(max_output_bytes = 32) ?(max_advance_effort = 16) target =
   Request.{
     schema = Abi.request_schema;
     target_root = Target.root target;
     entrypoint = Abi.advance_entrypoint;
     input_root = sha256 "";
     request_nonce = hex_root '5';
-    max_output_bytes = 32;
-    max_advance_effort = 16;
+    max_output_bytes;
+    max_advance_effort;
   }
 
 let pins model =
@@ -171,6 +171,146 @@ let check_lifecycle () =
       check "finalized sequence" (Session.sequence finalized = 2);
       check "finalize effort delta" (receipt.Receipt.effort_delta = 0);
       check "final receipt root" (String.length (Receipt.root receipt) = 64)
+
+let continuation_limits =
+  Req.{
+    limits with
+    max_session_bytes = 1024;
+    max_scratch_bytes = 1024;
+    max_output_bytes = 512;
+    max_advance_effort = 128;
+  }
+
+let continuation_requirement =
+  Req.{ requirement with limits = continuation_limits }
+
+let continuation_support =
+  Req.{ support with support_limits = continuation_limits }
+
+let continuation_code =
+  [|
+    VM.JDEST Abi.advance_label;
+    VM.MLOAD (2, Abi.sequence_cell);
+    VM.MSTORE (10, 2);
+    VM.MLOAD (2, Abi.logical_position_cell);
+    VM.MSTORE (11, 2);
+    VM.MLOAD (2, Abi.output_root_cell);
+    VM.MSTORE (12, 2);
+    VM.MLOAD (2, Abi.output_prefix_root_cell);
+    VM.MSTORE (13, 2);
+    VM.MLOAD (2, Abi.committed_target_state_root_cell);
+    VM.MSTORE (14, 2);
+    VM.LDI (0, VM.VInt (Z.of_int 10));
+    VM.LDI (1, VM.VInt (Z.of_int 5));
+    VM.STOP;
+  |]
+
+let check_v2_continuation_lifecycle () =
+  let admitted =
+    Inference_cert.admit
+      ~support:continuation_support
+      ~requirement:continuation_requirement
+      continuation_code
+  in
+  let target =
+    target
+      ~requirement:continuation_requirement
+      ~session_abi_root:Abi.v2_root
+      admitted
+  in
+  let request =
+    request
+      ~max_output_bytes:512
+      ~max_advance_effort:128
+      target
+  in
+  let model = model target in
+  let plan, session = open_session admitted target request model in
+  let open_output_prefix_root = Session.output_prefix_root session in
+  let first =
+    match Session.advance ~plan ~expected_sequence:0 session with
+    | Ok (advanced, receipt) ->
+      check "first sequence" (Session.sequence advanced = 1);
+      check "first position" (Session.logical_position advanced = 1);
+      check
+        "first committed state remains absent"
+        (Session.committed_target_state_root advanced = None);
+      check "first receipt delta" (receipt.Receipt.effort_delta > 0);
+      check
+        "first output prefix changed"
+        (not
+           (String.equal
+              (Session.output_prefix_root advanced)
+              open_output_prefix_root));
+      advanced
+    | Error error -> failwith (Session.error_message error)
+  in
+  let profile =
+    {
+      Execution.clock = (fun () -> 0.0);
+      opcode_name = (function
+        | VM.MLOAD _ -> "MLOAD"
+        | VM.STOP -> "STOP"
+        | _ -> "other");
+    }
+  in
+  (match
+     Session.advance_profiled
+       ~profile
+       ~plan
+       ~expected_sequence:0
+       session
+   with
+   | Error error -> failwith (Session.error_message error)
+   | Ok (profiled, _, execution_profile, _) ->
+     check
+       "v2 profiled output root"
+       (String.equal (Session.output_root profiled) (Session.output_root first));
+     check
+       "v2 profiled candidate root"
+       (String.equal
+          (Session.candidate_root profiled)
+          (Session.candidate_root first));
+     check
+       "v2 profiled context phase"
+       (List.exists
+          (fun (row : Execution.execution_profile) ->
+             String.equal row.phase "bind_session_context")
+          execution_profile));
+  let first_output_root = Session.output_root first in
+  check
+    "v2 first output root vector"
+    (String.equal
+       first_output_root
+       "f0a9f45f415c4f07b5bfe7d96d10a5a081fcab489fc3c79d993a6d1cd85c4701");
+  let second =
+    match Session.advance ~plan ~expected_sequence:1 first with
+    | Ok (advanced, receipt) ->
+      check "second sequence" (Session.sequence advanced = 2);
+      check "second position" (Session.logical_position advanced = 2);
+      check
+        "second committed state remains absent"
+        (Session.committed_target_state_root advanced = None);
+      check "second receipt delta" (receipt.Receipt.effort_delta > 0);
+      check
+        "second output changed"
+        (not (String.equal (Session.output_root advanced) first_output_root));
+      check
+        "candidate is not committed state"
+        (Session.committed_target_state_root advanced = None);
+      advanced
+    | Error error -> failwith (Session.error_message error)
+  in
+  check
+    "v2 second output root vector"
+    (String.equal
+       (Session.output_root second)
+       "068f827975f8fefdb63835e8e960be297c3a8f96e1780cae6e9c125f45ba1f45");
+  match Session.finalize ~expected_sequence:2 second with
+  | Error error -> failwith (Session.error_message error)
+  | Ok (finalized, receipt) ->
+    check "v2 finalized sequence" (Session.sequence finalized = 3);
+    check "v2 finalize delta" (receipt.Receipt.effort_delta = 0)
 
 let check_profiled_advance_equivalence () =
   let admitted = admitted () in
@@ -348,6 +488,7 @@ let check_session_cancel_limit () =
 
 let () =
   check_lifecycle ();
+  check_v2_continuation_lifecycle ();
   check_profiled_advance_equivalence ();
   check_sequence_mismatch ();
   check_finalize_phase ();

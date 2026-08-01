@@ -19,6 +19,7 @@ module Plan = Octra_vm.Inference_plan
 module Req = Octra_vm.Execution_requirement
 module Request = Octra_vm.Inference_request
 module Abi = Octra_vm.Inference_session_abi
+module Execution = Octra_vm.Inference_execution
 module Policy = Octra_vm.Inference_opcode_policy
 module Session = Octra_vm.Inference_session
 module Store = Octra_vm.Inference_store
@@ -229,6 +230,134 @@ let run bytes =
   match run_result bytes with
   | Ok output_root -> output_root
   | Error error -> failwith error
+
+let execution_plan ?(session_abi_root = Abi.v1_root) ?program bytes =
+  let owner = encoded bytes in
+  let owner_root = sha256 owner in
+  let range =
+    Model.{
+      owner_root;
+      offset = 0;
+      length = String.length owner;
+      encoding = "tensor.q1-g128";
+      shape_root = None;
+    }
+  in
+  let code =
+    match program with
+    | Some code -> code
+    | None -> code (Model.range_root range)
+  in
+  let admitted =
+    Inference_cert.admit ~support ~requirement code
+  in
+  let target =
+    Target.{
+      program_root = Target.program_root admitted;
+      requirement_root = Req.root requirement;
+      model_root = hex_root 'f';
+      execution_descriptor_root = hex_root '1';
+      store_root = hex_root '2';
+      session_abi_root;
+      entrypoints = [{
+        entry_name = Abi.advance_entrypoint;
+        entry_label = Abi.advance_label;
+      }];
+    }
+  in
+  let request =
+    Request.{
+      schema = Abi.request_schema;
+      target_root = Target.root target;
+      entrypoint = Abi.advance_entrypoint;
+      input_root = sha256 "";
+      request_nonce = hex_root '5';
+      max_output_bytes = 64;
+      max_advance_effort = 10000;
+    }
+  in
+  let model =
+    Model.{
+      model_root = target.model_root;
+      store_root = target.store_root;
+      ranges = [range];
+    }
+  in
+  let pins =
+    match Store.pin ~limits ~read:(fun root ->
+      if String.equal root owner_root then Some owner else None) model with
+    | Ok pins -> pins
+    | Error error -> failwith (Store.error_message error)
+  in
+  match Plan.create ~admitted ~target ~request ~model ~pins ~input:"" with
+  | Ok plan -> plan
+  | Error error -> failwith (Plan.error_message error)
+
+let continuation_context =
+  Abi.{
+    sequence = 0;
+    logical_position = 0;
+    output_root = hex_root '6';
+    output_prefix_root = hex_root '7';
+    committed_target_state_root = None;
+  }
+
+let check_execution_rejects_v1_context () =
+  let plan = execution_plan "context mismatch" in
+  match Execution.run ~session_context:continuation_context ~plan () with
+  | Error (Execution.Session_context_mismatch _) -> ()
+  | Error error -> failwith (Execution.error_message error)
+  | Ok _ -> failwith "expected v1 context mismatch"
+
+let check_execution_rejects_v2_without_context () =
+  let plan =
+    execution_plan
+      ~session_abi_root:Abi.v2_root
+      "missing context"
+  in
+  match Execution.run ~plan () with
+  | Error (Execution.Session_context_mismatch _) -> ()
+  | Error error -> failwith (Execution.error_message error)
+  | Ok _ -> failwith "expected v2 context mismatch"
+
+let check_profiled_execution_rejects_v2_without_context () =
+  let plan =
+    execution_plan
+      ~session_abi_root:Abi.v2_root
+      "missing profiled context"
+  in
+  let profile =
+    {
+      Execution.clock = (fun () -> 0.0);
+      opcode_name = (function
+        | VM.STOP -> "STOP"
+        | _ -> "other");
+    }
+  in
+  match Execution.run_profiled ~profile ~plan () with
+  | Error (Execution.Session_context_mismatch _) -> ()
+  | Error error -> failwith (Execution.error_message error)
+  | Ok _ -> failwith "expected profiled v2 context mismatch"
+
+let check_execution_rejects_bad_context_values () =
+  let plan =
+    execution_plan
+      ~session_abi_root:Abi.v2_root
+      "bad context"
+  in
+  let bad_context =
+    Abi.{
+      sequence = -1;
+      logical_position = 0;
+      output_root = hex_root '6';
+      output_prefix_root = hex_root '7';
+      committed_target_state_root = None;
+    }
+  in
+  match Execution.run ~session_context:bad_context ~plan () with
+  | Error (Execution.Session_context_mismatch _) -> ()
+  | Error error -> failwith (Execution.error_message error)
+  | Ok _ -> failwith "expected v2 context value rejection"
 
 let starts_with prefix value =
   String.length value >= String.length prefix
@@ -515,5 +644,9 @@ let () =
   check_matmul_q16_forbidden ();
   check_data_rooted_execution ();
   check_request_rooted_execution ();
+  check_execution_rejects_v1_context ();
+  check_execution_rejects_v2_without_context ();
+  check_profiled_execution_rejects_v2_without_context ();
+  check_execution_rejects_bad_context_values ();
   check_output_contract ();
   check_argmax_output_contract ()

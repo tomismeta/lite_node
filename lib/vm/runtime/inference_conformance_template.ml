@@ -665,6 +665,11 @@ let abi_declaration_binding_json = function
          opt_int_json_field "request_input_root_cell" abi
        in
        let session_abi_root = opt_string_field "session_abi_root" abi in
+       let matched_session_abi_root =
+         match session_abi_root with
+         | Some root when Inference_session_abi.supported_root root -> Some root
+         | _ -> None
+       in
        let output_base = opt_int_json_field "base_address" output in
        let output_count = opt_int_json_field "length_f64_cells" output in
        let r0 =
@@ -722,7 +727,7 @@ let abi_declaration_binding_json = function
          |> add_if
               (match session_abi_root with
                | Some value ->
-                 not (String.equal value Inference_session_abi.v1_root)
+                 not (Inference_session_abi.supported_root value)
                | None -> true)
               "session_abi_root_mismatch"
          |> add_if
@@ -749,6 +754,13 @@ let abi_declaration_binding_json = function
          "evidence_scope", `String "template_declaration";
          "session_abi_root", json_string_opt session_abi_root;
          "litenode_session_abi_root", `String Inference_session_abi.v1_root;
+         "litenode_matched_session_abi_root",
+         json_string_opt matched_session_abi_root;
+         "litenode_supported_session_abi_roots",
+         `List
+           (List.map
+              (fun root -> `String root)
+              Inference_session_abi.supported_roots);
          "entrypoint", json_string_opt entrypoint;
          "label", json_int_opt label;
          "output_base_register", json_string_opt output_base_register;
@@ -769,6 +781,12 @@ let abi_declaration_binding_json = function
          "evidence_scope", `String "template_declaration";
          "session_abi_root", `Null;
          "litenode_session_abi_root", `String Inference_session_abi.v1_root;
+         "litenode_matched_session_abi_root", `Null;
+         "litenode_supported_session_abi_roots",
+         `List
+           (List.map
+              (fun root -> `String root)
+              Inference_session_abi.supported_roots);
          "blockers", `List [`String "missing_abi_or_output"];
        ])
   | _ ->
@@ -778,6 +796,12 @@ let abi_declaration_binding_json = function
       "evidence_scope", `String "template_declaration";
       "session_abi_root", `Null;
       "litenode_session_abi_root", `String Inference_session_abi.v1_root;
+      "litenode_matched_session_abi_root", `Null;
+      "litenode_supported_session_abi_roots",
+      `List
+        (List.map
+           (fun root -> `String root)
+           Inference_session_abi.supported_roots);
       "blockers", `List [`String "template_not_object"];
     ]
 

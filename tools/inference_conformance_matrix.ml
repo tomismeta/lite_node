@@ -324,14 +324,19 @@ let vm_semantics_binding_matched ~opcode fields =
        (Template.vm_semantics_root_for_opcode ~opcode)
 
 let abi_declaration_binding_matched fields =
+  let matched_root =
+    match opt_string_field "litenode_matched_session_abi_root" fields with
+    | Some root -> Some root
+    | None -> opt_string_field "litenode_session_abi_root" fields
+  in
   opt_string_field "status" fields = Some "matched"
   && opt_string_field "classification" fields = Some "none"
   && opt_string_field "evidence_scope" fields = Some "template_declaration"
-  && matched_authoritative_root_pair
-       fields
-       ~left:"session_abi_root"
-       ~right:"litenode_session_abi_root"
-       (Some Abi.v1_root)
+  &&
+  (match opt_string_field "session_abi_root" fields, matched_root with
+   | Some declared, Some matched ->
+     String.equal declared matched && Abi.supported_root matched
+   | _ -> false)
   && opt_string_field "entrypoint" fields = Some "advance"
   && binding_int "label" fields = Some 100
   && opt_string_field "output_base_register" fields = Some "r0"

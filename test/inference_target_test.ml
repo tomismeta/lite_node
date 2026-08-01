@@ -74,14 +74,14 @@ let code = [| VM.JDEST Abi.advance_label; VM.STOP |]
 let admitted () =
   Inference_cert.admit ~support ~requirement code
 
-let target admitted =
+let target ?(session_abi_root = Abi.v1_root) admitted =
   Target.{
     program_root = Target.program_root admitted;
     requirement_root = Req.root requirement;
     model_root = hex_root 'f';
     execution_descriptor_root = hex_root '1';
     store_root = hex_root '2';
-    session_abi_root = Abi.v1_root;
+    session_abi_root;
     entrypoints = [{
       entry_name = Abi.advance_entrypoint;
       entry_label = Abi.advance_label;
@@ -94,6 +94,12 @@ let check_supported () =
     "checked provenance"
     (Admission.provenance admitted = Admission.Checked_envelope);
   match Target.check ~admitted (target admitted) with
+  | Ok () -> ()
+  | Error error -> failwith (Target.error_message error)
+
+let check_supported_v2_session_abi () =
+  let admitted = admitted () in
+  match Target.check ~admitted (target ~session_abi_root:Abi.v2_root admitted) with
   | Ok () -> ()
   | Error error -> failwith (Target.error_message error)
 
@@ -220,6 +226,7 @@ let check_missing_entrypoint_label () =
 
 let () =
   check_supported ();
+  check_supported_v2_session_abi ();
   check_program_root_mismatch ();
   check_requirement_root_mismatch ();
   check_missing_requirement ();

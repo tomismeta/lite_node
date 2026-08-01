@@ -46,8 +46,8 @@ session/runtime packaging.
 | P0-plus top-k boundary | `/home/exedev/evidence/octra-inference/determinism-p0-plus-topk-boundary-20260730-025306` | boundary accepted as product authority classification; top-k remains reference-only and does not qualify P0-plus validator readiness |
 | Recurrent-heavy performance fixture on rebased LiteNode | `/home/exedev/evidence/octra-inference/litenode-recurrent-heavy-reemitted-2ca5dfd-754b0a5-20260729` | accepted |
 | Prefill session bundle shape | `/home/exedev/evidence/octra-inference/prefill-session-bundle-55cd597-20260730-121116` | producer-shaped; not continuous LiteNode execution |
-| Batch runtime readiness | local `--run-batch` report `runtime_semantics` | diagnostic-only; current mode is `independent_session_per_stage`, with `session_continuation_state_carry_not_supported` as the next runtime blocker |
-| Session bundle harness | local `--run-inference-session` report | accepts one target-owned stage labeled `prefill` or `decode`; multi-transition bundles are rejected with a hash-bound `continuation_preflight` plan-created root/identity report until canonical state carry is implemented |
+| Batch runtime readiness | local `--run-batch` report `runtime_semantics` | diagnostic-only; current mode is `independent_session_per_stage`; core ABI-v2 continuation exists, but batch mode still does not use it |
+| Session bundle harness | local `--run-inference-session` report | accepts one target-owned stage labeled `prefill` or `decode`; multi-transition bundles are rejected with a hash-bound `continuation_preflight` until the harness routes them through ABI-v2 repeated advance |
 
 The `/private/tmp` reports above are local rerun snapshots, not durable
 artifacts. The durable identity of the current local rerun is:
@@ -175,21 +175,17 @@ d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
 4. Wire conformance into CI for schema, positive execution, strict effort, and
    counted failure/atomicity.
 5. Build the target-owned prefill/decode session path; do not continue relying
-   on caller-visible layer orchestration as product runtime. The first
-   LiteNode harness step exists as `--run-inference-session`: it accepts a
-   single target-owned stage labeled `prefill` or `decode`. Multi-transition
-   session bundles are still rejected, but the rejection now includes a
-   deterministic `continuation_preflight` object bound into
-   `session_report_sha256`. That preflight reads request input, pins
-   authenticated ranges, creates the same execution plan used by the normal
-   stage runner, reports target/request/model-range/model-deployment/session-ABI
-   root uniformity, emits explicit `identity_blockers` and
-   `declaration_blockers`, validates top-level request/deployment root claims
-   when present, and records that no session execution was attempted. Identity
-   blockers take precedence in `next_runtime_blocker`, declaration blockers
-   come next, and identity-clean/declaration-clean bundles report
-   `session_continuation_state_carry_not_supported`. The label is not yet a
-   VM-proven prefill/decode phase contract.
+   on caller-visible layer orchestration as product runtime. The core session
+   runtime now has an ABI-v2 continuation input: sequence, logical position,
+   output root, output-prefix root, and optional committed target-state root are
+   seeded into fixed VM memory cells before each advance. ABI v1 remains
+   one-shot. The remaining product harness work is to route
+   `--run-inference-session` multi-transition bundles through the v2 repeated
+   advance path. A separate state-transport step is still required if a target
+   declares non-empty committed target state; today's proven path keeps that
+   root absent and does not persist a canonical state payload. After routing
+   and state transport, bind target-owned `prefill` and `decode` phase
+   semantics. The label is not yet a VM-proven prefill/decode phase contract.
 6. Re-run one Bonsai prompt-to-token proof under the target-owned session shape.
 7. Re-run recurrent-heavy and logits-tail performance gates against that shape.
 8. Only then prepare the mergeable branch by reducing evidence-only scaffolding

@@ -955,6 +955,29 @@ let check_abi_declaration_binding () =
      check "abi output base register" (int_value "r0" fields = 10000);
      check "abi output count register" (int_value "r1" fields = 6)
    | _ -> failwith "abi declaration binding must be object");
+  let matched_v2 =
+    Template.abi_declaration_binding_json
+      (abi_template ~session_abi_root:Abi.v2_root ())
+  in
+  (match matched_v2 with
+   | `Assoc fields ->
+     check
+       "v2 abi declaration matched"
+       (String.equal (string_value "status" fields) "matched");
+     check
+       "v2 abi root bound"
+       (String.equal (string_value "session_abi_root" fields) Abi.v2_root);
+     check
+       "v2 abi matched root"
+       (String.equal
+          (string_value "litenode_matched_session_abi_root" fields)
+          Abi.v2_root);
+     check
+       "v2 abi supported roots"
+       (List.mem
+          Abi.v2_root
+          (string_list_value "litenode_supported_session_abi_roots" fields))
+   | _ -> failwith "v2 abi declaration binding must be object");
   let stale_root =
     Template.abi_declaration_binding_json
       (abi_template ~session_abi_root:(hex_root '1') ())

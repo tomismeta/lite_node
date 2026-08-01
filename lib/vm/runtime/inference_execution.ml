@@ -57,6 +57,7 @@ let profile_phase profile phases phase f =
 type error =
   | Entrypoint_unsupported of string
   | Entrypoint_missing of int
+  | Session_context_mismatch of string
   | Opaque_value
   | Invalid_output of string
   | Missing_output_cell of int
@@ -132,8 +133,9 @@ let output_integer = function
   | _ -> None
 
 (* The session ABI reserves r0/r1 for output bounds and writes request.input_root
-   into memory before entry. The retained candidate state is canonical memory;
-   immutable blobs are bound by the plan, not copied into scratch. *)
+   into memory before entry. ABI v2 also exposes prior session progress through
+   fixed cells. The retained candidate state is canonical memory; immutable
+   blobs are bound by the plan, not copied into scratch. *)
 let output_payload state ~max_bytes =
   match
     output_integer
@@ -200,6 +202,34 @@ let bind_request_input state request input =
     request.Inference_request.input_root
     input
 
+let bind_session_context state context =
+  let open Inference_session_abi in
+  let root_or_empty = function
+    | None -> ""
+    | Some root -> root
+  in
+  Hashtbl.replace
+    state.Contract_vm.memory.data
+    sequence_cell
+    (Contract_vm.VInt (Z.of_int context.sequence));
+  Hashtbl.replace
+    state.Contract_vm.memory.data
+    logical_position_cell
+    (Contract_vm.VInt (Z.of_int context.logical_position));
+  Hashtbl.replace
+    state.Contract_vm.memory.data
+    output_root_cell
+    (Contract_vm.VString context.output_root);
+  Hashtbl.replace
+    state.Contract_vm.memory.data
+    output_prefix_root_cell
+    (Contract_vm.VString context.output_prefix_root);
+  Hashtbl.replace
+    state.Contract_vm.memory.data
+    committed_target_state_root_cell
+    (Contract_vm.VString
+       (root_or_empty context.committed_target_state_root))
+
 let check_scratch_payload payload ~max_bytes =
   let length = String.length payload in
   if length > max_bytes then Error (Scratch_limit_exceeded (length, max_bytes))
@@ -211,20 +241,68 @@ let plain_ctx =
     allow_fhe_capability = (fun _ -> false);
   }
 
-let run_internal ?profile ~plan () =
+let hex = function
+  | '0' .. '9'
+  | 'a' .. 'f' -> true
+  | _ -> false
+
+let valid_root value =
+  String.length value = 64 && String.for_all hex value
+
+let check_context_values context =
+  if context.Inference_session_abi.sequence < 0 then
+    Error (Session_context_mismatch "sequence must be non-negative")
+  else if context.logical_position < 0 then
+    Error (Session_context_mismatch "logical position must be non-negative")
+  else if not (valid_root context.output_root) then
+    Error (Session_context_mismatch "output root must be 64 lowercase hex")
+  else if not (valid_root context.output_prefix_root) then
+    Error
+      (Session_context_mismatch
+         "output prefix root must be 64 lowercase hex")
+  else
+    match context.committed_target_state_root with
+    | None -> Ok ()
+    | Some root ->
+      if valid_root root then Ok ()
+      else
+        Error
+          (Session_context_mismatch
+             "committed target state root must be 64 lowercase hex")
+
+let check_session_context = function
+  | Some _, false ->
+    Error
+      (Session_context_mismatch
+         "continuation context requires a continuation-capable session ABI")
+  | None, true ->
+    Error
+      (Session_context_mismatch
+         "continuation-capable session ABI requires continuation context")
+  | Some context, true -> check_context_values context
+  | None, false -> Ok ()
+
+let run_internal ?profile ?session_context ~plan () =
   let admitted = Inference_plan.admitted plan in
   let target = Inference_plan.target plan in
   let request = Inference_plan.request plan in
   let pins = Inference_plan.pins plan in
   let requirement = Inference_plan.requirement plan in
-  if not
+  let continuation_supported =
+    Inference_session_abi.continuation_supported
+      target.Inference_target.session_abi_root
+  in
+  match check_session_context (session_context, continuation_supported) with
+  | Error error -> Error error
+  | Ok () ->
+    if not
       (String.equal
          request.Inference_request.entrypoint
          Inference_session_abi.advance_entrypoint)
-  then
-    Error (Entrypoint_unsupported request.entrypoint)
-  else
-    (match entrypoint_pc (Admission.code admitted) Inference_session_abi.advance_label with
+    then
+      Error (Entrypoint_unsupported request.entrypoint)
+    else
+      (match entrypoint_pc (Admission.code admitted) Inference_session_abi.advance_label with
      | None -> Error (Entrypoint_missing Inference_session_abi.advance_label)
      | Some pc ->
        let state =
@@ -245,6 +323,14 @@ let run_internal ?profile ~plan () =
          add_pins state pins);
        profile_phase profile execution_profile "bind_request_input" (fun () ->
          bind_request_input state request (Inference_plan.input plan));
+       (match session_context with
+        | None -> ()
+        | Some context ->
+          profile_phase
+            profile
+            execution_profile
+            "bind_session_context"
+            (fun () -> bind_session_context state context));
        let fixed =
          profile_phase profile execution_profile "fix_jumps" (fun () ->
            Contract.fix_jumps (Admission.code admitted))
@@ -311,13 +397,13 @@ let run_internal ?profile ~plan () =
                    } )
                 | Error error -> Error error))))
 
-let run ~plan () =
-  match run_internal ~plan () with
+let run ?session_context ~plan () =
+  match run_internal ?session_context ~plan () with
   | Ok (result, _) -> Ok result
   | Error error -> Error error
 
-let run_profiled ~profile ~plan () =
-  match run_internal ~profile ~plan () with
+let run_profiled ?session_context ~profile ~plan () =
+  match run_internal ?session_context ~profile ~plan () with
   | Ok (result, profile) -> Ok { result; profile }
   | Error error -> Error error
 
@@ -326,6 +412,8 @@ let error_message = function
     Printf.sprintf "unsupported inference entrypoint: %s" name
   | Entrypoint_missing label ->
     Printf.sprintf "missing inference entrypoint label: %d" label
+  | Session_context_mismatch error ->
+    "inference session context mismatch: " ^ error
   | Opaque_value ->
     "inference execution encountered an opaque value"
   | Invalid_output error -> "invalid inference output: " ^ error
