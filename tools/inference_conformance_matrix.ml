@@ -671,6 +671,22 @@ let q1_failure_mutation_payload_shape_ok result_fields case_fields =
      | _ -> true)
   | _ -> false
 
+let q1_failure_observed_behavior_ok case_fields =
+  let expected = string_field "expected" case_fields in
+  let observed = string_field "observed" case_fields in
+  if starts_with "reject_before_write" expected then
+    (String.equal observed "vm_rejected"
+     || String.equal observed "ingress_rejected")
+    && opt_string_field "unchanged_status" case_fields = Some "matched"
+    && opt_string_field "snapshot_output_status" case_fields = Some "not_required"
+  else if starts_with "accept_from_snapshot" expected then
+    String.equal observed "vm_accepted"
+    && opt_string_field "active_changed_status" case_fields = Some "changed"
+    && opt_string_field "active_finite_status" case_fields = Some "finite"
+    && opt_string_field "snapshot_output_status" case_fields = Some "matched"
+  else
+    false
+
 let q1_required_failure_rows_accepted fields =
   let opcode = string_field "opcode" fields in
   if not (String.equal opcode "LINEAR_Q1_G128_FP") then
@@ -709,6 +725,7 @@ let q1_required_failure_rows_accepted fields =
               | Some (`List (_ :: _)) -> true
               | _ -> false)
              && q1_failure_mutation_payload_shape_ok fields case_fields
+             && q1_failure_observed_behavior_ok case_fields
            | _ -> false)
         Template.q1_required_failure_expectations
     | _ -> false

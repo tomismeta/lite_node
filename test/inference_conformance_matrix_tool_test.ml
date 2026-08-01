@@ -130,6 +130,8 @@ let failure_case
     ?(mutation_shape_status = "accepted")
     ?(mutation_shape_blockers = [])
     ?(observed_effort = 200)
+    ?(active_changed_status = "not_changed")
+    ?(active_finite_status = "finite")
     ?(finite_spans = `List [])
     ?(active_finite_spans = `List [])
     ?snapshot_sha
@@ -168,8 +170,8 @@ let failure_case
     "unchanged_status", `String "matched";
     "changed_status", `String "not_changed";
     "finite_status", `String "finite";
-    "active_changed_status", `String "not_changed";
-    "active_finite_status", `String "finite";
+    "active_changed_status", `String active_changed_status;
+    "active_finite_status", `String active_finite_status;
     "snapshot_output_status", `String snapshot_output_status;
     "snapshot_output", snapshot_output;
     "unchanged_spans",
@@ -286,11 +288,18 @@ let executable_mutation_for_case = function
 let q1_required_failure_cases () =
   List.map
     (fun (case, expected) ->
-       failure_case
-         ~case
-         ~expected
-         ~executable_mutations:[executable_mutation_for_case case]
-         ())
+       let executable_mutations = [executable_mutation_for_case case] in
+       if String.equal expected "accept_from_snapshot" then
+         failure_case
+           ~case
+           ~expected
+           ~executable_mutations
+           ~observed:"vm_accepted"
+           ~active_changed_status:"changed"
+           ~snapshot_sha:(hex_root 'a')
+           ()
+       else
+         failure_case ~case ~expected ~executable_mutations ())
     q1_required_failure_expectations
 
 let replace_failure_case replacement cases =
@@ -1240,6 +1249,78 @@ let check_matrix_rejects_forged_failure_mutation_payload_shape () =
            (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_forged_reject_failure_observed_accepted () =
+  with_temp_dir (fun dir ->
+    let forged =
+      failure_case
+        ~case:"nonfinite_input_nan"
+        ~expected:"reject_before_write"
+        ~observed:"vm_accepted"
+        ~executable_mutations:[executable_mutation_for_case "nonfinite_input_nan"]
+        ()
+    in
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') ~failure:forged "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') ~failure:forged "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "forged reject behavior exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "forged reject behavior top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      check
+        "forged reject behavior validator blocker"
+        (List.mem
+           "required_q1_failure_cases_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_forged_snapshot_failure_observed_rejected () =
+  with_temp_dir (fun dir ->
+    let forged =
+      failure_case
+        ~case:"output_input_aliasing"
+        ~expected:"accept_from_snapshot"
+        ~observed:"vm_rejected"
+        ~executable_mutations:[executable_mutation_for_case "output_input_aliasing"]
+        ()
+    in
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') ~failure:forged "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') ~failure:forged "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "forged snapshot behavior exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "forged snapshot behavior top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      check
+        "forged snapshot behavior validator blocker"
+        (List.mem
+           "required_q1_failure_cases_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_accepts_nonfinite_fp16_nan_scale_payload () =
   with_temp_dir (fun dir ->
     let nan_scale =
@@ -1388,6 +1469,7 @@ let check_matrix_rejects_failure_snapshot_mismatch () =
                 ~expected:"accept_from_snapshot_exact"
                 ~observed:"vm_accepted"
                 ~observed_effort:201
+                ~active_changed_status:"changed"
                 ~snapshot_sha:(hex_root 'a')
                 ())
            "Darwin"
@@ -1405,6 +1487,7 @@ let check_matrix_rejects_failure_snapshot_mismatch () =
                 ~expected:"accept_from_snapshot_exact"
                 ~observed:"vm_accepted"
                 ~observed_effort:201
+                ~active_changed_status:"changed"
                 ~snapshot_sha:(hex_root 'b')
                 ())
            "Linux"
@@ -2500,6 +2583,8 @@ let () =
   check_matrix_rejects_failure_case_mismatch ();
   check_matrix_rejects_failure_mutation_payload_mismatch ();
   check_matrix_rejects_forged_failure_mutation_payload_shape ();
+  check_matrix_rejects_forged_reject_failure_observed_accepted ();
+  check_matrix_rejects_forged_snapshot_failure_observed_rejected ();
   check_matrix_accepts_nonfinite_fp16_nan_scale_payload ();
   check_matrix_rejects_partial_alias_payload_outside_lhs ();
   check_matrix_rejects_missing_failure_mutation_payload ();
