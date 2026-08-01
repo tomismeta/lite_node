@@ -100,6 +100,17 @@ let matrix_tool_path () =
   | Some path -> path
   | None -> failwith "missing inference_conformance_matrix.exe"
 
+let check_tool_path () =
+  let candidates =
+    [
+      "_build/default/tools/inference_conformance_check.exe";
+      "../tools/inference_conformance_check.exe";
+    ]
+  in
+  match List.find_opt Sys.file_exists candidates with
+  | Some path -> path
+  | None -> failwith "missing inference_conformance_check.exe"
+
 let sha256 raw =
   Digestif.SHA256.(digest_string raw |> to_hex)
 
@@ -471,6 +482,22 @@ let replace_failure_mutations case mutations = function
          fields)
   | value -> value
 
+let ends_with ~suffix value =
+  let suffix_len = String.length suffix in
+  let value_len = String.length value in
+  value_len >= suffix_len
+  && String.equal
+       (String.sub value (value_len - suffix_len) suffix_len)
+       suffix
+
+let rec has_ref_field = function
+  | `Assoc fields ->
+    List.exists
+      (fun (name, value) -> ends_with ~suffix:"_ref" name || has_ref_field value)
+      fields
+  | `List values -> List.exists has_ref_field values
+  | _ -> false
+
 let index_json =
   `Assoc [
     "type", `String "p0_litenode_vm_execution_template_index";
@@ -538,6 +565,31 @@ let run_conformance dir template args =
       " "
       ([
          Filename.quote (tool_path ());
+         "--template-index";
+         Filename.quote (Filename.concat dir "index.cjson");
+         "--opcode";
+         opcode;
+       ]
+       @ args)
+  in
+  let input = Unix.open_process_in command in
+  let raw = read_all input in
+  let status = Unix.close_process_in input in
+  let code =
+    match status with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED signal -> 128 + signal
+    | Unix.WSTOPPED signal -> 128 + signal
+  in
+  code, Yojson.Safe.from_string raw
+
+let run_check_index dir template args =
+  write_fixture dir template;
+  let command =
+    String.concat
+      " "
+      ([
+         Filename.quote (check_tool_path ());
          "--template-index";
          Filename.quote (Filename.concat dir "index.cjson");
          "--opcode";
@@ -1257,11 +1309,56 @@ let check_require_failure_cases_rejects_missing_q1_case () =
          (String.equal
             (string_value "case" missing_case)
             "nonfinite_fp16_scale");
-       check
-         "missing Q1 repair expected prefix"
-         (String.equal
-            (string_value "expected_prefix" missing_case)
-            "reject_before_write")
+      check
+        "missing Q1 repair expected prefix"
+        (String.equal
+           (string_value "expected_prefix" missing_case)
+           "reject_before_write");
+      let required_case = assoc_json "required_case" missing_case in
+      check
+        "missing Q1 repair required case"
+        (String.equal
+           (string_value "case" required_case)
+           "nonfinite_fp16_scale");
+      check
+        "missing Q1 repair required expected"
+        (String.equal
+           (string_value "expected" required_case)
+           "reject_before_write");
+      (match list_value "executable_mutations" required_case with
+       | [`Assoc mutation_fields] ->
+         check
+           "missing Q1 repair mutation"
+           (String.equal
+              (string_value "mutation" mutation_fields)
+              "replace_q1_scale_bits");
+         check
+           "missing Q1 repair mutation target"
+           (String.equal
+              (string_value "target" mutation_fields)
+              "q1_owner[0..2]");
+         check
+           "missing Q1 repair mutation payload"
+           (String.equal
+              (string_value "value_hex_le" mutation_fields)
+              "007c")
+       | _ -> failwith "expected one required mutation");
+      let repaired_code, repaired_report =
+        run_check_index
+          dir
+          (q1_template ~failure_cases:(failure_cases @ [`Assoc required_case]) ())
+          []
+      in
+      check "missing Q1 repair required case checks" (repaired_code = 0);
+      (match repaired_report with
+       | `Assoc repaired_fields ->
+         check
+           "missing Q1 repair required case accepted"
+           (String.equal (string_value "status" repaired_fields) "accepted");
+         check
+           "missing Q1 repair required case has no issues"
+           (int_value "issue_count" repaired_fields = 0)
+       | _ -> failwith "checker report must be object")
      | _ -> failwith "report must be object"))
 
 let check_require_failure_cases_rejects_wrong_q1_expectation () =
@@ -1316,8 +1413,88 @@ let check_require_failure_cases_rejects_wrong_q1_expectation () =
          "wrong Q1 expectation repair prefix"
          (String.equal
             (string_value "expected_prefix" expectation)
-            "reject_before_write")
+           "reject_before_write")
      | _ -> failwith "report must be object"))
+
+let check_q1_repair_payloads_are_checker_valid () =
+  List.iter
+    (fun (case, expected_prefix) ->
+       with_temp_dir (fun dir ->
+         let failure_cases =
+           List.filter
+             (function
+               | `Assoc fields ->
+                 not (String.equal (string_value "case" fields) case)
+               | _ -> true)
+             (q1_failure_cases ())
+         in
+         let code, report =
+           run_conformance
+             dir
+             (q1_template ~failure_cases ())
+             [
+               "--strict-effort";
+               "--include-failures";
+               "--require-failure-cases";
+               "--require-profile-roots-bound";
+             ]
+         in
+         check ("Q1 repair runner exits nonzero: " ^ case) (code = 1);
+         (match report with
+          | `Assoc fields ->
+            let gate = assoc_json "failure_case_gate" fields in
+            check
+              ("Q1 repair gate rejected: " ^ case)
+              (String.equal (string_value "status" gate) "rejected");
+            let repairs = first_repair_hint report |> repair_fields in
+            let repair =
+              repair_for_field
+                ("expected_failure_atomicity_behavior[" ^ case ^ "]")
+                repairs
+            in
+            check
+              ("Q1 repair action: " ^ case)
+              (String.equal
+                 (string_value "action" repair)
+                 "add_required_failure_case");
+            check
+              ("Q1 repair expected prefix: " ^ case)
+              (String.equal
+                 (string_value "expected_prefix" repair)
+                 expected_prefix);
+            let required_fields = assoc_json "required_case" repair in
+            let required_case = `Assoc required_fields in
+            check
+              ("Q1 repair required case: " ^ case)
+              (String.equal
+                 (string_value "case" required_fields)
+                 case);
+            check
+              ("Q1 repair required concrete: " ^ case)
+              (not (has_ref_field required_case));
+            let repaired_cases =
+              failure_cases @ [required_case]
+            in
+            let repaired_code, repaired_report =
+              run_check_index
+                dir
+                (q1_template ~failure_cases:repaired_cases ())
+                []
+            in
+            check ("Q1 repair checks: " ^ case) (repaired_code = 0);
+            (match repaired_report with
+             | `Assoc repaired_fields ->
+               check
+                 ("Q1 repair checker accepted: " ^ case)
+                 (String.equal
+                    (string_value "status" repaired_fields)
+                    "accepted");
+               check
+                 ("Q1 repair checker has no issues: " ^ case)
+                 (int_value "issue_count" repaired_fields = 0)
+             | _ -> failwith "checker report must be object")
+          | _ -> failwith "report must be object")))
+    Template.q1_required_failure_expectations
 
 let check_require_failure_cases_rejects_wrong_q1_mutation_shape () =
   with_temp_dir (fun dir ->
@@ -2775,6 +2952,7 @@ let () =
   check_zero_decoded_input_truncation_is_not_ingress_rejected ();
   check_require_failure_cases_rejects_missing_q1_case ();
   check_require_failure_cases_rejects_wrong_q1_expectation ();
+  check_q1_repair_payloads_are_checker_valid ();
   check_require_failure_cases_rejects_wrong_q1_mutation_shape ();
   check_q1_failure_shape_accepts_input_lhs_alias ();
   check_require_failure_cases_rejects_composite_q1_mutation_shape ();

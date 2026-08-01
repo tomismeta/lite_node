@@ -416,11 +416,15 @@ let abi_declaration_binding_gate_json counts =
 
 let reg_name index = "r" ^ string_of_int index
 
-let repair_field ~field ?case ?expected_prefix ?observed ?expected
+let repair_field ~field ?case ?expected_prefix ?required_case ?observed ?expected
     ?(blockers = []) action =
   let optional_string name = function
     | None -> []
     | Some value -> [name, `String value]
+  in
+  let optional_json name = function
+    | None -> []
+    | Some value -> [name, value]
   in
   `Assoc
     ([
@@ -432,7 +436,8 @@ let repair_field ~field ?case ?expected_prefix ?observed ?expected
        `List (List.map (fun blocker -> `String blocker) blockers);
      ]
      @ optional_string "case" case
-     @ optional_string "expected_prefix" expected_prefix)
+     @ optional_string "expected_prefix" expected_prefix
+     @ optional_json "required_case" required_case)
 
 let binding_repair ~field ~observed_name ~expected_name binding =
   match binding with
@@ -576,7 +581,164 @@ let q1_case_field ?suffix case =
   | None -> ""
   | Some suffix -> "." ^ suffix
 
-let q1_failure_repair blocker =
+let q1_repair_mutation ?value ?value_bits ?value_hex_le ?offset_cells
+    ?truncate_bytes name target =
+  let optional_int name = function
+    | None -> []
+    | Some value -> [name, `Int value]
+  in
+  let optional_intlit name = function
+    | None -> []
+    | Some value -> [name, `Intlit value]
+  in
+  let optional_string name = function
+    | None -> []
+    | Some value -> [name, `String value]
+  in
+  `Assoc
+    ([
+       "mutation", `String name;
+       "target", `String target;
+     ]
+     @ optional_int "value" value
+     @ optional_intlit "value_bits" value_bits
+     @ optional_string "value_hex_le" value_hex_le
+     @ optional_int "offset_cells" offset_cells
+     @ optional_int "truncate_bytes" truncate_bytes)
+
+let q1_repair_span name base cells =
+  `Assoc [
+    "name", `String name;
+    "base_address", `Int base;
+    "length_f64_cells", `Int cells;
+  ]
+
+let q1_repair_context fields =
+  match field "producer_repair_context" fields with
+  | Some (`Assoc context) -> Some context
+  | _ -> None
+
+let q1_required_case_from_context case context =
+  match
+    opt_int_field "output_base" context,
+    opt_int_field "lhs_base" context,
+    opt_int_field "output_cells" context,
+    opt_int_field "expected_effort" context,
+    opt_int_field "q1_owner_source_bytes" context,
+    opt_int_field "q1_required_owner_bytes" context
+  with
+  | Some output_base,
+    Some lhs_base,
+    Some output_cells,
+    Some expected_effort,
+    Some owner_bytes,
+    Some required_owner_bytes ->
+    let reject_case mutation =
+      Some
+        (`Assoc [
+          "case", `String case;
+          "expected", `String "reject_before_write";
+          "executable_mutations", `List [mutation];
+          "unchanged_spans",
+          `List [q1_repair_span "expected" output_base output_cells];
+        ])
+    in
+    (match case with
+     | "nonfinite_input_nan" ->
+       reject_case
+         (q1_repair_mutation
+            ~value_bits:"9221120237041090560"
+            "replace_first_f64_input_cell"
+            "lhs")
+     | "nonfinite_input_infinity" ->
+       reject_case
+         (q1_repair_mutation
+            ~value_bits:"9218868437227405312"
+            "replace_first_f64_input_cell"
+            "lhs")
+     | "output_input_aliasing" ->
+       Some
+         (`Assoc [
+           "case", `String case;
+           "expected", `String "accept_from_snapshot_exact";
+           "executable_mutations",
+           `List [
+             q1_repair_mutation
+               ~offset_cells:0
+               "set_output_base_to_first_input_base_plus"
+               "output.base_address";
+           ];
+           "unchanged_spans",
+           `List [q1_repair_span case lhs_base output_cells];
+         ])
+     | "partial_output_input_aliasing" ->
+       let offset = 1 in
+       Some
+         (`Assoc [
+           "case", `String case;
+           "expected", `String "accept_from_snapshot_partial";
+           "executable_mutations",
+           `List [
+             q1_repair_mutation
+               ~offset_cells:offset
+               "set_output_base_to_first_input_base_plus"
+               "output.base_address";
+           ];
+           "unchanged_spans",
+           `List [q1_repair_span case (lhs_base + offset) output_cells];
+         ])
+     | "k_not_multiple_of_128" ->
+       reject_case
+         (q1_repair_mutation
+            ~value:127
+            "set_scalar_param"
+            "parameter_addresses_and_scalar_params.values.k")
+     | "bad_q1_owner_length" ->
+       reject_case
+         (q1_repair_mutation
+            ~truncate_bytes:1
+            "truncate_input_manifest"
+            "q1_owner")
+     | "negative_byte_offset" ->
+       reject_case
+         (q1_repair_mutation
+            ~value:(-1)
+            "set_scalar_param"
+            "parameter_addresses_and_scalar_params.values.byte_offset")
+     | "byte_offset_out_of_bounds" ->
+       reject_case
+         (q1_repair_mutation
+            ~value:(owner_bytes + 1)
+            "set_scalar_param"
+            "parameter_addresses_and_scalar_params.values.byte_offset")
+     | "byte_offset_truncated_span" ->
+       let value = max 0 (owner_bytes - required_owner_bytes + 1) in
+       reject_case
+         (q1_repair_mutation
+            ~value
+            "set_scalar_param"
+            "parameter_addresses_and_scalar_params.values.byte_offset")
+     | "nonfinite_fp16_scale" ->
+       reject_case
+         (q1_repair_mutation
+            ~value_hex_le:"007c"
+            "replace_q1_scale_bits"
+            "q1_owner[0..2]")
+     | "lower_effort_limit" ->
+       reject_case
+         (q1_repair_mutation
+            ~value:(max 0 (expected_effort - 1))
+            "lower_effort_limit"
+            "effort")
+     | _ -> None)
+  | _ -> None
+
+let q1_required_case_from_result fields case =
+  match q1_repair_context fields with
+  | None -> None
+  | Some context -> q1_required_case_from_context case context
+
+let q1_failure_repair fields blocker =
   let case_repair prefix action ?suffix blocker =
     match strip_prefix prefix blocker with
     | None -> None
@@ -586,6 +748,7 @@ let q1_failure_repair blocker =
            ~field:(q1_case_field ?suffix case)
            ~case
            ?expected_prefix:(q1_expected_prefix case)
+           ?required_case:(q1_required_case_from_result fields case)
            ~blockers:[blocker]
            action)
   in
@@ -647,7 +810,7 @@ let failure_contract_repair result =
     (match field "required_failure_case_contract" fields with
      | Some (`Assoc contract_fields) ->
        let blockers = optional_string_list_field "blockers" contract_fields in
-       let q1_repairs = List.filter_map q1_failure_repair blockers in
+       let q1_repairs = List.filter_map (q1_failure_repair fields) blockers in
        let repaired_blockers =
          List.filter_map
            (fun repair ->
@@ -3246,6 +3409,24 @@ let q1_contract_shape_json opcode template values expected_effort =
       "expected_effort", `Int expected_effort;
     ]
 
+let q1_producer_repair_context_json opcode template values expected_effort =
+  if not (String.equal opcode "LINEAR_Q1_G128_FP") then
+    `Null
+  else
+    let output = assoc_field "output" template in
+    let int_or_null = function
+      | Some value -> `Int value
+      | None -> `Null
+    in
+    `Assoc [
+      "lhs_base", int_or_null (opt_int_field "lhs" values);
+      "output_base", `Int (int_field "base_address" output);
+      "output_cells", int_or_null (q1_output_cell_count values);
+      "expected_effort", `Int expected_effort;
+      "q1_owner_source_bytes", int_or_null (q1_owner_source_bytes template);
+      "q1_required_owner_bytes", int_or_null (q1_required_owner_bytes values);
+    ]
+
 let execute_template root_dir entry =
   let opcode = string_field "opcode" entry in
   let primitive = opt_string_field "primitive" entry in
@@ -3362,6 +3543,8 @@ let execute_template root_dir entry =
     "strict_effort", `Bool !strict_effort;
     "q1_contract_shape",
     q1_contract_shape_json opcode template values expected_effort;
+    "producer_repair_context",
+    q1_producer_repair_context_json opcode template values expected_effort;
     "subspans", `List (List.map snd span_results);
     "failure_cases_included", `Bool !include_failures;
     "required_failure_case_contract",

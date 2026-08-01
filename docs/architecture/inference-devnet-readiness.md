@@ -56,15 +56,15 @@ artifacts. The durable identity of the current local rerun is:
 | --- | --- |
 | LiteNode source state | local report-envelope working tree; identify by runner SHA below |
 | Runner | `_build/default/tools/inference_conformance_run.exe` |
-| Runner SHA-256 | `e08b35b18fc9490ccc647e02e5f33b2d60003fc8a6fc0442ac759e40f0baa751` |
+| Runner SHA-256 | `3891bb360a0468073f374796014c79003ba1bc68e6d13fe906d381e066ab428d` |
 | Platform | `macosx`, `arm64`, OCaml switch `octra-lite-4.14.2`, compiler `4.14.2` |
 | P0 template index SHA-256 | `4e3de9d7ed36b33bf33b54160b431318f474bcdbadf610940039e28f102a5db1` |
-| P0 positive report SHA-256 | `1451255f3b6cd8124483e3f3e469a0b5e9f1cccb0b1d43854fba0971bb96e716` |
-| P0 full failure/profile report SHA-256 | `0222730bda50d95f38e23f92b8dc334ede335d124338bd9c64b39296af20bad3` |
-| P0 repair-hint runner SHA-256 | `e08b35b18fc9490ccc647e02e5f33b2d60003fc8a6fc0442ac759e40f0baa751` |
-| P0 repair-hint report SHA-256 | `c135c3698c2919f3ca92f6830f9c57e57a54c0dd117f7f404c092a2b79381d61` |
+| P0 positive report SHA-256 | `69034cb334be2e5fb49343e17f16a412ac693c2a02fe164484e18f15d5ab2e98` |
+| P0 full failure/profile report SHA-256 | `bd8c0187c6c209f7b7f57b282b3d042cdf28ca53d96c6440c2d2f78c4329bf14` |
+| P0 repair-hint runner SHA-256 | `3891bb360a0468073f374796014c79003ba1bc68e6d13fe906d381e066ab428d` |
+| P0 repair-hint report SHA-256 | `a1dee8cb4f627aee7bccc3f2528dd8417c6440b09fcea543e119c06012ecbfe9` |
 | P0-plus fixture pack SHA-256 | `ccf0a834e55a8c0a25e75f4e3c1fab8392c2a683e11021c69a7dad33bafb203d` |
-| P0-plus diagnostic report SHA-256 | `8c030c26b89c292483ca4f905aaa9348c65ac5f19fdff7c694a09def2c0a8a93` |
+| P0-plus diagnostic report SHA-256 | `c1e043f160a17be3390afd6590c8e72d9cb4571e6b4eb4252dce1c9efa9c6408` |
 
 Rerun shape:
 
