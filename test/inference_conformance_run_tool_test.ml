@@ -538,15 +538,30 @@ let run_conformance dir template args =
   in
   code, Yojson.Safe.from_string raw
 
-let write_p0_plus_softmax_fixture dir case_name expected =
+let write_p0_plus_softmax_fixture
+    ?scores
+    ?expected_values
+    dir
+    case_name
+    expected =
   let root = Filename.concat dir "p0-plus-fixtures" in
   let primitive_dir = Filename.concat root "softmax-fp" in
   let case_dir = Filename.concat primitive_dir case_name in
   mkdir_if_missing root;
   mkdir_if_missing primitive_dir;
   mkdir_if_missing case_dir;
-  let scores = f64_bytes [0.0] in
-  let expected = f64_bytes [expected] in
+  let scores_values =
+    match scores with
+    | Some values -> values
+    | None -> [0.0]
+  in
+  let expected_values =
+    match expected_values with
+    | Some values -> values
+    | None -> [expected]
+  in
+  let scores = f64_bytes scores_values in
+  let expected = f64_bytes expected_values in
   let scores_path =
     Filename.concat "p0-plus-fixtures" ("softmax-fp/" ^ case_name ^ "/scores.f64le.bin")
   in
@@ -568,12 +583,15 @@ let write_p0_plus_softmax_fixture dir case_name expected =
       "case", `String case_name;
       "opcode", `String "SOFTMAX_FP";
       "primitive", `String "softmax_fp";
-      "parameters", `Assoc ["count", `Int 1];
+      "parameters", `Assoc ["count", `Int (List.length scores_values)];
       "input_byte_manifests", `List [manifest "scores" scores_path scores];
       "expected_output_byte_manifests",
       `List [
         expected_manifest
-          ~layout:"f64le[1]"
+          ~layout:
+            (Printf.sprintf
+               "f64le[%d]"
+               (List.length expected_values))
           "expected_probabilities"
           expected_path
           expected;
@@ -2417,6 +2435,16 @@ let check_p0_plus_rejected_results_report_outputs () =
            (String.equal
               (string_value "output_status" rejected_fields)
               "mismatch");
+         check
+           "P0-plus rejected classification"
+           (String.equal
+              (string_value "determinism_classification" rejected_fields)
+              "deterministic_output_mismatch");
+         check
+           "P0-plus rejected next action"
+           (String.equal
+              (string_value "next_action" rejected_fields)
+              "inspect_vm_semantics_or_fixture_authority");
          (match list_value "outputs" rejected_fields with
           | [`Assoc output_fields] ->
             check
@@ -2436,6 +2464,57 @@ let check_p0_plus_rejected_results_report_outputs () =
             check
               "P0-plus rejected f64 cell"
               (int_value "first_mismatch_f64_cell" detail = 0)
+          | _ -> failwith "expected one rejected output")
+       | _ -> failwith "expected one rejected result")
+    | _ -> failwith "report must be object")
+
+let check_p0_plus_softmax_gap_requires_known_fixture_identity () =
+  with_temp_dir (fun dir ->
+    let count = 1024 in
+    let expected = 1.0 /. float_of_int count in
+    let expected_values =
+      List.init
+        count
+        (fun index ->
+           if index = 613 then
+             Int64.float_of_bits
+               (Int64.succ (Int64.bits_of_float expected))
+           else
+             expected)
+    in
+    let fixture =
+      write_p0_plus_softmax_fixture
+        ~scores:(List.init count (fun _ -> 0.0))
+        ~expected_values
+        dir
+        "wide-1024-stable-tail"
+        expected
+    in
+    let code, report = run_p0_plus dir [fixture] in
+    check "Softmax lookalike gap exits nonzero" (code = 1);
+    match report with
+    | `Assoc fields ->
+      (match list_value "rejected_results" fields with
+       | [`Assoc rejected_fields] ->
+         check
+           "Softmax lookalike gap classification"
+           (String.equal
+              (string_value "determinism_classification" rejected_fields)
+              "deterministic_output_mismatch");
+         check
+           "Softmax lookalike gap next action"
+           (String.equal
+              (string_value "next_action" rejected_fields)
+              "inspect_vm_semantics_or_fixture_authority");
+         (match list_value "outputs" rejected_fields with
+          | [`Assoc output_fields] ->
+            let detail = assoc_json "mismatch_detail" output_fields in
+            check
+              "Softmax lookalike gap cell"
+              (int_value "first_mismatch_f64_cell" detail = 613);
+            check
+              "Softmax lookalike gap bit delta"
+              (int_value "raw_u64_bit_delta" detail = 1)
           | _ -> failwith "expected one rejected output")
        | _ -> failwith "expected one rejected result")
     | _ -> failwith "report must be object")
@@ -2469,4 +2548,5 @@ let () =
   check_cross_platform_matrix_rejects_insufficient_row_diversity ();
   check_cross_platform_matrix_forged_row_root_rejects ();
   check_p0_plus_rejected_results_empty_when_accepted ();
-  check_p0_plus_rejected_results_report_outputs ()
+  check_p0_plus_rejected_results_report_outputs ();
+  check_p0_plus_softmax_gap_requires_known_fixture_identity ()

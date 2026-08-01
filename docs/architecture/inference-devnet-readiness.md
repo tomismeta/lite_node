@@ -42,7 +42,7 @@ session/runtime packaging.
 | P0 positive execution and effort authority | `/home/exedev/evidence/octra-inference/determinism-ingestion-corpus-effort-authority-20260730-014647` plus local rerun `/private/tmp/octra-p0-positive-report-envelope.cjson` | positive execution accepted `5/5`; validator readiness still blocked by failure-case/root/matrix gates |
 | P0 punitive failure/profile gate | local rerun `/private/tmp/octra-p0-full-failure-profile-report-envelope.cjson` | positive execution accepted `5/5`, but failure gate rejected: `30/35` counted/accepted; Q1 failure-contract rows need producer repair |
 | P0 producer repair hints | local rerun `/private/tmp/octra-p0-repair-hints-current.cjson` | emits diagnostic producer-side root, ABI, and case-specific Q1 failure-case repair hints; positive execution still accepted `5/5` |
-| P0-plus execution | `/home/exedev/evidence/octra-inference/determinism-p0-plus-corpus-20260730-022653` plus local rerun `/private/tmp/octra-p0-plus-softmax-diagnostic-report-envelope.cjson` | diagnostic execution rejected `8/9`; `SOFTMAX_FP wide-1024-stable-tail` mismatches by one f64 bit pattern |
+| P0-plus execution | `/home/exedev/evidence/octra-inference/determinism-p0-plus-corpus-20260730-022653` plus local rerun `/private/tmp/octra-p0-plus-softmax-diagnostic-report-envelope.cjson` | diagnostic execution rejected `8/9`; `SOFTMAX_FP wide-1024-stable-tail` is classified as `host_transcendental_portability_gap` with a one-bit f64 mismatch |
 | P0-plus top-k boundary | `/home/exedev/evidence/octra-inference/determinism-p0-plus-topk-boundary-20260730-025306` | boundary accepted as product authority classification; top-k remains reference-only and does not qualify P0-plus validator readiness |
 | Recurrent-heavy performance fixture on rebased LiteNode | `/home/exedev/evidence/octra-inference/litenode-recurrent-heavy-reemitted-2ca5dfd-754b0a5-20260729` | accepted |
 | Prefill session bundle shape | `/home/exedev/evidence/octra-inference/prefill-session-bundle-55cd597-20260730-121116` | producer-shaped; not continuous LiteNode execution |
@@ -54,15 +54,15 @@ artifacts. The durable identity of the current local rerun is:
 | --- | --- |
 | LiteNode source state | local report-envelope working tree; identify by runner SHA below |
 | Runner | `_build/default/tools/inference_conformance_run.exe` |
-| Runner SHA-256 | `5b10d1479f667df03a46bb338ebed2125d2005835087fcf053690b4cab235556` |
+| Runner SHA-256 | `9695a91fde5ec94b0fd8666a015729364348ddccf633f316cd74283f8d019557` |
 | Platform | `macosx`, `arm64`, OCaml switch `octra-lite-4.14.2`, compiler `4.14.2` |
 | P0 template index SHA-256 | `4e3de9d7ed36b33bf33b54160b431318f474bcdbadf610940039e28f102a5db1` |
-| P0 positive report SHA-256 | `d0395bdecfb124f7c463e4c250a9394eb3a56fe58f0c75c6a5ee7585c38fb88c` |
-| P0 full failure/profile report SHA-256 | `7dd3d6b1bf39d3bf9988c7deef58634d3f5b814b06cf682f250a2dfe22adcdda` |
-| P0 repair-hint runner SHA-256 | `5b10d1479f667df03a46bb338ebed2125d2005835087fcf053690b4cab235556` |
-| P0 repair-hint report SHA-256 | `9d881a5ef371a57a03711013ca4ffb7d0f78767d8a6a7f98ca0b07e37dbc40b3` |
+| P0 positive report SHA-256 | `bbad13bb8caabc1347c6248c6f2f2248f6597a6c39f5035e4e6fa4013c0e750a` |
+| P0 full failure/profile report SHA-256 | `72a25706f86089c73ba9d6683907af6b46c976f0d86ed4770354adbeac5db52a` |
+| P0 repair-hint runner SHA-256 | `9695a91fde5ec94b0fd8666a015729364348ddccf633f316cd74283f8d019557` |
+| P0 repair-hint report SHA-256 | `6d2d73ade49ab7a3393d3ec729eb3f0e37192d7ade1ccbe1e0662de2a264b6b0` |
 | P0-plus fixture pack SHA-256 | `ccf0a834e55a8c0a25e75f4e3c1fab8392c2a683e11021c69a7dad33bafb203d` |
-| P0-plus diagnostic report SHA-256 | `c3b6d9e0aa1c56a6ed6764b1f610371c2107f7edfc9b857a37efd15b65b9342e` |
+| P0-plus diagnostic report SHA-256 | `e809d2f8ebf2f3c18d18bfb91ed775ac696fa9e5669943b02957963685d8ed17` |
 
 Rerun shape:
 

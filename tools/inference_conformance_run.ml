@@ -3317,6 +3317,99 @@ let producer_only_expected root_dir fixture name =
     "bytes", `Int (String.length raw);
   ]
 
+let known_softmax_wide_scores_sha256 =
+  "fbf6649f29767e9266a89a987c1b762c52de10a8aaa79d30014714d7f654bc37"
+
+let known_softmax_wide_scores_root =
+  "5b2185f1c59cc6d6a1b38132c18065ccddec578c3b4dd2243e27fd496fbd5970"
+
+let known_softmax_wide_expected_sha256 =
+  "e4b5636c2bee8290db71b708063844ea2752ecf1cd4ba39a71cbed95170b035b"
+
+let known_softmax_wide_expected_root =
+  "d074263f3411323e9f0d6ad4b43052e7e540d25f1e6fee2c1e7e3907f769bf04"
+
+let known_softmax_wide_observed_sha256 =
+  "ece82e02777ae8130578474746a86accf691e758772004265e1191eb18ac00e9"
+
+let known_softmax_wide_observed_root =
+  "9ecd2acf353400f86c58a5d556aab5b55b458e93f1966751be9b010c31fcb978"
+
+let manifest_identity_matches manifests name ~sha256 ~root =
+  List.exists
+    (function
+      | `Assoc fields ->
+        String.equal (string_field "name" fields) name
+        && String.equal (string_field "sha256" fields) sha256
+        && String.equal (string_field "root" fields) root
+      | _ -> false)
+    manifests
+
+let known_softmax_wide_fixture fixture =
+  manifest_identity_matches
+    (list_field "input_byte_manifests" fixture)
+    "scores"
+    ~sha256:known_softmax_wide_scores_sha256
+    ~root:known_softmax_wide_scores_root
+  && manifest_identity_matches
+       (list_field "expected_output_byte_manifests" fixture)
+       "expected_probabilities"
+       ~sha256:known_softmax_wide_expected_sha256
+       ~root:known_softmax_wide_expected_root
+
+let known_softmax_wide_output_mismatch = function
+  | `Assoc fields ->
+    String.equal (string_field "name" fields) "expected_probabilities"
+    && String.equal (string_field "status" fields) "mismatch"
+    && String.equal
+         (string_field "expected_sha256" fields)
+         known_softmax_wide_expected_sha256
+    && String.equal
+         (string_field "expected_root" fields)
+         known_softmax_wide_expected_root
+    && String.equal
+         (string_field "observed_sha256" fields)
+         known_softmax_wide_observed_sha256
+    && String.equal
+         (string_field "observed_root" fields)
+         known_softmax_wide_observed_root
+    &&
+    (match field "mismatch_detail" fields with
+     | Some (`Assoc detail) ->
+       (match
+          opt_int_field "first_mismatch_f64_cell" detail,
+          opt_int_field "raw_u64_bit_delta" detail,
+          opt_string_field "expected_bits_hex" detail,
+          opt_string_field "observed_bits_hex" detail
+        with
+        | Some 613, Some 1, Some "0x3c6cceffa4571f9a", Some "0x3c6cceffa4571f9b" ->
+          true
+        | _ -> false)
+     | _ -> false)
+  | _ -> false
+
+let known_softmax_portability_gap ~case_name fixture params outputs =
+  String.equal case_name "wide-1024-stable-tail"
+  && int_field "count" params = 1024
+  && known_softmax_wide_fixture fixture
+  && List.exists known_softmax_wide_output_mismatch outputs
+
+let p0_plus_failure_classification ~opcode ~case_name ~fixture ~params ~outputs
+    ~ran ~matched =
+  if matched then
+    "none", "none"
+  else if not ran then
+    "vm_execution_rejected", "inspect_admission_or_runtime_rejection"
+  else
+    match opcode with
+    | "SOFTMAX_FP"
+      when known_softmax_portability_gap ~case_name fixture params outputs ->
+      ( "host_transcendental_portability_gap",
+        "replace_or_qualify_native_exp_before_consensus" )
+    | _ ->
+      ( "deterministic_output_mismatch",
+        "inspect_vm_semantics_or_fixture_authority" )
+
 let set_manifest_f64 root_dir fixture name state base =
   let raw = load_input_raw root_dir fixture name in
   if String.length raw mod 8 <> 0 then
@@ -3535,6 +3628,16 @@ let execute_p0_plus_fixture root_dir entry =
     | value -> fail ("unsupported P0-plus opcode: " ^ value)
   in
   let accepted = ran && matched in
+  let determinism_classification, next_action =
+    p0_plus_failure_classification
+      ~opcode
+      ~case_name
+      ~fixture
+      ~params
+      ~outputs
+      ~ran
+      ~matched
+  in
   let profile_gates = p0_plus_profile_gates opcode fixture in
   let profile_root_bindings =
     p0_plus_profile_root_bindings fixture profile_gates
@@ -3551,6 +3654,8 @@ let execute_p0_plus_fixture root_dir entry =
     "status", `String (if accepted then "accepted" else "rejected");
     "vm_run", `String (if ran then "accepted" else "rejected");
     "output_status", `String (if matched then "matched" else "mismatch");
+    "determinism_classification", `String determinism_classification;
+    "next_action", `String next_action;
     "observed_effort", `Int effort;
     "outputs", `List outputs;
   ]
@@ -3569,6 +3674,9 @@ let p0_plus_rejected_results results =
                "opcode", field_or_null "opcode" fields;
                "manifest", field_or_null "manifest" fields;
                "output_status", field_or_null "output_status" fields;
+               "determinism_classification",
+               field_or_null "determinism_classification" fields;
+               "next_action", field_or_null "next_action" fields;
                "outputs", field_or_null "outputs" fields;
              ])
          | _ ->
