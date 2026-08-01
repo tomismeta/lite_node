@@ -389,18 +389,33 @@ let q1_contract_shape_consistent fields =
             subspans
         | _ -> false
       in
-      let executable_abi_counts =
+      let executable_abi =
         match opt_assoc_field "executable_abi_binding" fields with
         | Some abi ->
           (match json_int_field "expected_r0" abi,
                  json_int_field "observed_r0" abi,
                  json_int_field "expected_r1" abi,
-                 json_int_field "observed_r1" abi with
+                 json_int_field "observed_r1" abi,
+                 field "registers_match" abi,
+                 opt_string_field "output_payload_status" abi,
+                 field "output_payload_error" abi,
+                 field "output_payload_sha256" abi with
            | Some expected_base,
              Some observed_base,
              Some expected_count,
-             Some observed_count ->
-             Some (expected_base, observed_base, expected_count, observed_count)
+             Some observed_count,
+             Some (`Bool registers_match),
+             Some payload_status,
+             Some `Null,
+             Some (`String payload_sha256) ->
+             Some
+               (expected_base,
+                observed_base,
+                expected_count,
+                observed_count,
+                registers_match,
+                payload_status,
+                payload_sha256)
            | _ -> None)
         | None -> None
       in
@@ -420,7 +435,7 @@ let q1_contract_shape_consistent fields =
          json_int_field "observed_program_effort" fields,
          json_int_field "expected_opcode_effort" fields,
          json_int_field "observed_opcode_effort" fields,
-         executable_abi_counts
+         executable_abi
        with
        | Some m,
          Some k,
@@ -440,7 +455,10 @@ let q1_contract_shape_consistent fields =
          Some (expected_abi_base,
                observed_abi_base,
                expected_abi_count,
-               observed_abi_count) ->
+               observed_abi_count,
+               registers_match,
+               payload_status,
+               payload_sha256) ->
          let expected_required_bytes =
            match checked_mul n (k / 128) with
            | Some blocks -> checked_mul blocks 18
@@ -469,6 +487,9 @@ let q1_contract_shape_consistent fields =
          && checked_mul m k = Some lhs_cells
          && expected_output_cells = Some output_cells
          && expected_abi_base = observed_abi_base
+         && registers_match
+         && String.equal payload_status "accepted"
+         && String.length payload_sha256 = 64
          && output_subspan_has_span expected_abi_base output_cells
          && expected_abi_count = output_cells
          && observed_abi_count = output_cells

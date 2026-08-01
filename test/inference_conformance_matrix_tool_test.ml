@@ -663,6 +663,38 @@ let replace_result_subspan_field name value = function
     replace_assoc_field "results" results report
   | _ -> failwith "report must be object"
 
+let replace_executable_abi_field name value = function
+  | `Assoc fields as report ->
+    let results =
+      match assoc_value "results" fields with
+      | `List results ->
+        `List
+          (List.map
+             (function
+               | `Assoc result_fields ->
+                 let binding =
+                   match assoc_value "executable_abi_binding" result_fields with
+                   | `Assoc binding_fields ->
+                     `Assoc
+                       ((name, value)
+                        :: List.filter
+                             (fun (key, _) -> not (String.equal key name))
+                             binding_fields)
+                   | _ -> failwith "executable_abi_binding must be an object"
+                 in
+                 `Assoc
+                   (("executable_abi_binding", binding)
+                    :: List.filter
+                         (fun (key, _) ->
+                            not (String.equal key "executable_abi_binding"))
+                         result_fields)
+               | value -> value)
+             results)
+      | _ -> failwith "results must be a list"
+    in
+    replace_assoc_field "results" results report
+  | _ -> failwith "report must be object"
+
 let remove_failure_field name = function
   | `Assoc fields ->
     let results =
@@ -1852,6 +1884,63 @@ let check_matrix_rejects_q1_contract_shape_output_span_base_mismatch () =
            (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_q1_executable_abi_payload_contradiction () =
+  with_temp_dir (fun dir ->
+    let forged runner_sha system machine =
+      report ~runner_sha system machine
+      |> replace_executable_abi_field
+           "output_payload_status"
+           (`String "rejected")
+      |> replace_executable_abi_field
+           "output_payload_error"
+           (`String "missing_output_bounds")
+    in
+    let a =
+      write_report dir "a.cjson" (forged (hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (forged (hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "Q1 executable ABI payload contradiction exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "Q1 executable ABI payload contradiction blocker"
+        (List.mem
+           "q1_contract_shape_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_q1_executable_abi_register_contradiction () =
+  with_temp_dir (fun dir ->
+    let forged runner_sha system machine =
+      report ~runner_sha system machine
+      |> replace_executable_abi_field "registers_match" (`Bool false)
+    in
+    let a =
+      write_report dir "a.cjson" (forged (hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (forged (hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "Q1 executable ABI register contradiction exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "Q1 executable ABI register contradiction blocker"
+        (List.mem
+           "q1_contract_shape_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_signs_q1_output_span_base () =
   with_temp_dir (fun dir ->
     let a =
@@ -2091,6 +2180,8 @@ let () =
   check_matrix_rejects_q1_contract_shape_observed_effort_forgery ();
   check_matrix_rejects_q1_contract_shape_output_cells_mismatch ();
   check_matrix_rejects_q1_contract_shape_output_span_base_mismatch ();
+  check_matrix_rejects_q1_executable_abi_payload_contradiction ();
+  check_matrix_rejects_q1_executable_abi_register_contradiction ();
   check_matrix_signs_q1_output_span_base ();
   check_matrix_rejects_q1_contract_shape_oversized_intlit ();
   check_matrix_rejects_q1_failure_contract_not_applicable ();
