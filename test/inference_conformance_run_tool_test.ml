@@ -816,6 +816,43 @@ let check_dynamic_q1_effort_vector () =
       "dynamic Q1 lower effort reaches VM"
       (String.equal (string_value "observed" lower_effort) "vm_rejected"))
 
+let check_q1_reject_failure_requires_full_output_span () =
+  with_temp_dir (fun dir ->
+    let code, report =
+      run_conformance
+        dir
+        (q1_template
+           ~m:2
+           ~n:3
+           ~r1:6
+           ~failure_cases:(q1_failure_cases ~output_cells:1 ())
+           ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "partial output span runner exits nonzero" (code = 1);
+    let result = first_result report in
+    let rejected =
+      failure_case_fields result "nonfinite_input_nan"
+    in
+    check
+      "partial output span failure rejected"
+      (String.equal (string_value "status" rejected) "rejected");
+    check
+      "partial output span marked uncovered"
+      (String.equal
+         (string_value "output_span_status" rejected)
+         "not_covered");
+    check
+      "partial output span blocker"
+      (List.mem
+         "q1_failure_case_output_span_not_covered"
+         (string_list "output_span_blockers" rejected)))
+
 let check_truncated_decoded_input_manifest_reports_ingress_rejected () =
   with_temp_dir (fun dir ->
     let failure_cases =
@@ -1711,10 +1748,10 @@ let check_cross_platform_matrix_forged_runner_count_rejects () =
            "matrix forged count reports row runner count"
            (int_value "row_distinct_runner_executable_count" cross_platform = 2);
          let blockers = string_list "blockers" cross_platform in
-	         check
-	           "matrix forged count blocker"
-	           (List.mem "matrix_runner_executable_count_mismatch" blockers)
-	       | _ -> failwith "report must be object")
+         check
+           "matrix forged count blocker"
+           (List.mem "matrix_runner_executable_count_mismatch" blockers)
+       | _ -> failwith "report must be object")
     | _ -> failwith "seed report must be object")
 
 let check_cross_platform_matrix_forged_observation_count_rejects () =
@@ -1925,6 +1962,7 @@ let check_cross_platform_matrix_forged_row_root_rejects () =
 let () =
   check_good_template_reports_bound_abi ();
   check_dynamic_q1_effort_vector ();
+  check_q1_reject_failure_requires_full_output_span ();
   check_truncated_decoded_input_manifest_reports_ingress_rejected ();
   check_zero_decoded_input_truncation_is_not_ingress_rejected ();
   check_require_failure_cases_rejects_missing_q1_case ();

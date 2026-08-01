@@ -2217,6 +2217,12 @@ let capture_span state span =
 let capture_existing_span state name base cells =
   name, base, cells, output_bytes state base cells
 
+let span_covers base cells (_, span_base, span_cells, _) =
+  span_base <= base
+  && cells >= 0
+  && span_cells >= 0
+  && span_base + span_cells >= base + cells
+
 let unchanged_result state (name, base, cells, before) =
   let after = output_bytes state base cells in
   let matched = String.equal before after in
@@ -2248,6 +2254,10 @@ let expected_output_subspan template =
   match list_field "subspans" output with
   | `Assoc fields :: _ -> Some fields
   | _ -> None
+
+let template_output_span template =
+  let output = assoc_field "output" template in
+  int_field "base_address" output, int_field "length_f64_cells" output
 
 let snapshot_output_result template state active_before =
   match active_before, expected_output_subspan template with
@@ -2366,6 +2376,14 @@ let failure_case_result root_dir opcode template registers values op case =
       list_field "unchanged_spans" fields
       |> List.map (capture_span state)
     in
+    let output_span_covered =
+      if String.equal opcode "LINEAR_Q1_G128_FP"
+         && starts_with "reject_before_write" expected then
+        let base, cells = template_output_span template in
+        List.exists (span_covers base cells) unchanged_spans
+      else
+        true
+    in
     let active_before = active_output_span state registers unchanged_spans in
     let ran = if ingress_rejected then false else VM.run state [|op; VM.STOP|] in
     let unchanged =
@@ -2406,7 +2424,7 @@ let failure_case_result root_dir opcode template registers values op case =
     let expectation = failure_expectation expected in
     let counted, passed =
       match expectation with
-      | `Must_reject -> true, ((not ran) && unchanged_ok)
+      | `Must_reject -> true, ((not ran) && unchanged_ok && output_span_covered)
       | `Must_accept_changed_finite ->
         true,
         (if snapshot_required then
@@ -2438,6 +2456,14 @@ let failure_case_result root_dir opcode template registers values op case =
       "observed_effort", `Int state.VM.effort_used;
       "unchanged_status",
       `String (if unchanged_ok then "matched" else "changed");
+      "output_span_status",
+      `String (if output_span_covered then "covered" else "not_covered");
+      "output_span_blockers",
+      `List
+        (if output_span_covered then
+           []
+         else
+           [`String "q1_failure_case_output_span_not_covered"]);
       "changed_status",
       `String (if changed_ok then "changed" else "not_changed");
       "finite_status",

@@ -722,6 +722,42 @@ let unchanged_span_ok = function
      | _ -> false)
   | _ -> false
 
+let span_covers base cells = function
+  | `Assoc span_fields ->
+    (match json_int_field "base_address" span_fields,
+           json_int_field "length_f64_cells" span_fields with
+     | Some span_base, Some span_cells ->
+       span_base <= base
+       && cells >= 0
+       && span_cells >= 0
+       && span_base + span_cells >= base + cells
+     | _ -> false)
+  | _ -> false
+
+let q1_result_output_span fields =
+  match opt_assoc_field "executable_abi_binding" fields,
+        opt_assoc_field "q1_contract_shape" fields with
+  | Some abi_fields, Some shape_fields ->
+    (match json_int_field "expected_r0" abi_fields,
+           json_int_field "output_cells" shape_fields with
+     | Some base, Some cells -> Some (base, cells)
+     | _ -> None)
+  | _ -> None
+
+let q1_failure_output_span_covered result_fields case_fields =
+  match q1_result_output_span result_fields with
+  | Some (base, cells) ->
+    opt_string_field "output_span_status" case_fields = Some "covered"
+    &&
+    (match field "output_span_blockers" case_fields with
+     | Some (`List []) -> true
+     | _ -> false)
+    &&
+    (match field "unchanged_spans" case_fields with
+     | Some (`List spans) -> List.exists (span_covers base cells) spans
+     | _ -> false)
+  | None -> false
+
 let changed_span_ok = function
   | `Assoc span_fields ->
     span_positive_cells span_fields
@@ -775,7 +811,7 @@ let snapshot_output_matched fields =
          "observed_sha256"
   | None -> false
 
-let q1_failure_observed_behavior_ok case_fields =
+let q1_failure_observed_behavior_ok result_fields case_fields =
   let expected = string_field "expected" case_fields in
   let observed = string_field "observed" case_fields in
   if starts_with "reject_before_write" expected then
@@ -784,6 +820,7 @@ let q1_failure_observed_behavior_ok case_fields =
     && opt_string_field "unchanged_status" case_fields = Some "matched"
     && opt_string_field "snapshot_output_status" case_fields = Some "not_required"
     && nonempty_list_all "unchanged_spans" case_fields unchanged_span_ok
+    && q1_failure_output_span_covered result_fields case_fields
     && snapshot_output_not_required case_fields
   else if starts_with "accept_from_snapshot" expected then
     String.equal observed "vm_accepted"
@@ -834,7 +871,7 @@ let q1_required_failure_rows_accepted fields =
               | Some (`List (_ :: _)) -> true
               | _ -> false)
              && q1_failure_mutation_payload_shape_ok fields case_fields
-             && q1_failure_observed_behavior_ok case_fields
+             && q1_failure_observed_behavior_ok fields case_fields
            | _ -> false)
         Template.q1_required_failure_expectations
     | _ -> false

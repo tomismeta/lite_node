@@ -185,6 +185,8 @@ let failure_case
     `List (List.map (fun blocker -> `String blocker) mutation_shape_blockers);
     "observed_effort", `Int observed_effort;
     "unchanged_status", `String "matched";
+    "output_span_status", `String "covered";
+    "output_span_blockers", `List [];
     "changed_status", `String "not_changed";
     "finite_status", `String "finite";
     "active_changed_status", `String active_changed_status;
@@ -1594,6 +1596,53 @@ let check_matrix_rejects_forged_reject_failure_changed_span () =
            (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_forged_reject_failure_partial_output_span () =
+  with_temp_dir (fun dir ->
+    let forged =
+      failure_case
+        ~case:"nonfinite_input_nan"
+        ~expected:"reject_before_write"
+        ~observed:"vm_rejected"
+        ~unchanged_spans:
+          (`List [
+            `Assoc [
+              "name", `String "output";
+              "base_address", `Int 10000;
+              "length_f64_cells", `Int 1;
+              "before_sha256", `String (hex_root 'a');
+              "after_sha256", `String (hex_root 'a');
+              "unchanged", `Bool true;
+            ];
+          ])
+        ~executable_mutations:[executable_mutation_for_case "nonfinite_input_nan"]
+        ()
+    in
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') ~failure:forged "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') ~failure:forged "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "forged reject partial output span exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "forged reject partial output span top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      check
+        "forged reject partial output span validator blocker"
+        (List.mem
+           "required_q1_failure_cases_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_forged_snapshot_failure_unchanged_active_span () =
   with_temp_dir (fun dir ->
     let forged =
@@ -2920,6 +2969,7 @@ let () =
   check_matrix_rejects_forged_reject_failure_observed_accepted ();
   check_matrix_rejects_forged_snapshot_failure_observed_rejected ();
   check_matrix_rejects_forged_reject_failure_changed_span ();
+  check_matrix_rejects_forged_reject_failure_partial_output_span ();
   check_matrix_rejects_forged_snapshot_failure_unchanged_active_span ();
   check_matrix_accepts_nonfinite_fp16_nan_scale_payload ();
   check_matrix_rejects_partial_alias_payload_outside_lhs ();
