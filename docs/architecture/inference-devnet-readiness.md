@@ -56,15 +56,15 @@ artifacts. The durable identity of the current local rerun is:
 | --- | --- |
 | LiteNode source state | local report-envelope working tree; identify by runner SHA below |
 | Runner | `_build/default/tools/inference_conformance_run.exe` |
-| Runner SHA-256 | `9695a91fde5ec94b0fd8666a015729364348ddccf633f316cd74283f8d019557` |
+| Runner SHA-256 | `e08b35b18fc9490ccc647e02e5f33b2d60003fc8a6fc0442ac759e40f0baa751` |
 | Platform | `macosx`, `arm64`, OCaml switch `octra-lite-4.14.2`, compiler `4.14.2` |
 | P0 template index SHA-256 | `4e3de9d7ed36b33bf33b54160b431318f474bcdbadf610940039e28f102a5db1` |
-| P0 positive report SHA-256 | `bbad13bb8caabc1347c6248c6f2f2248f6597a6c39f5035e4e6fa4013c0e750a` |
-| P0 full failure/profile report SHA-256 | `72a25706f86089c73ba9d6683907af6b46c976f0d86ed4770354adbeac5db52a` |
-| P0 repair-hint runner SHA-256 | `9695a91fde5ec94b0fd8666a015729364348ddccf633f316cd74283f8d019557` |
-| P0 repair-hint report SHA-256 | `6d2d73ade49ab7a3393d3ec729eb3f0e37192d7ade1ccbe1e0662de2a264b6b0` |
+| P0 positive report SHA-256 | `1451255f3b6cd8124483e3f3e469a0b5e9f1cccb0b1d43854fba0971bb96e716` |
+| P0 full failure/profile report SHA-256 | `0222730bda50d95f38e23f92b8dc334ede335d124338bd9c64b39296af20bad3` |
+| P0 repair-hint runner SHA-256 | `e08b35b18fc9490ccc647e02e5f33b2d60003fc8a6fc0442ac759e40f0baa751` |
+| P0 repair-hint report SHA-256 | `c135c3698c2919f3ca92f6830f9c57e57a54c0dd117f7f404c092a2b79381d61` |
 | P0-plus fixture pack SHA-256 | `ccf0a834e55a8c0a25e75f4e3c1fab8392c2a683e11021c69a7dad33bafb203d` |
-| P0-plus diagnostic report SHA-256 | `e809d2f8ebf2f3c18d18bfb91ed775ac696fa9e5669943b02957963685d8ed17` |
+| P0-plus diagnostic report SHA-256 | `8c030c26b89c292483ca4f905aaa9348c65ac5f19fdff7c694a09def2c0a8a93` |
 
 Rerun shape:
 
@@ -149,9 +149,13 @@ d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
 
 4. Multi-platform conformance.
    Strict P0 reports must run across the intended validator platforms and
-   build modes before a consensus claim. P0-plus matrixing is intentionally not
-   supported yet; its host-transcendental surfaces need deterministic
-   replacement or narrower qualification first.
+   build modes before a consensus claim. When a strict P0 runner report is
+   missing the cross-platform matrix, its `cross_platform_evidence` now emits
+   an actionable `matrix_request` with the required opcode scope, catalog
+   roots, local result signature, and structured runner/matrix/rerun argv
+   templates. P0-plus matrixing is intentionally not supported yet; its
+   host-transcendental surfaces need deterministic replacement or narrower
+   qualification first.
 
 5. Resource isolation.
    Inference must remain outside consensus proposal, epoch apply, finality, and

@@ -129,7 +129,9 @@
  (name inference_conformance_run_tool_test)
  (modules inference_conformance_run_tool_test)
  (libraries octra_vm yojson unix digestif digestif.c)
- (deps ../tools/inference_conformance_run.exe))
+ (deps
+  ../tools/inference_conformance_run.exe
+  ../tools/inference_conformance_matrix.exe))
 
 (test
  (name inference_conformance_matrix_tool_test)

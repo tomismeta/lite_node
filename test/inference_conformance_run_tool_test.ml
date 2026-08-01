@@ -89,6 +89,17 @@ let tool_path () =
   | Some path -> path
   | None -> failwith "missing inference_conformance_run.exe"
 
+let matrix_tool_path () =
+  let candidates =
+    [
+      "_build/default/tools/inference_conformance_matrix.exe";
+      "../tools/inference_conformance_matrix.exe";
+    ]
+  in
+  match List.find_opt Sys.file_exists candidates with
+  | Some path -> path
+  | None -> failwith "missing inference_conformance_matrix.exe"
+
 let sha256 raw =
   Digestif.SHA256.(digest_string raw |> to_hex)
 
@@ -513,6 +524,13 @@ let write_fixture dir template =
   write_json (Filename.concat dir "q1.cjson") template;
   write_json (Filename.concat dir "index.cjson") index_json
 
+let replace_assoc_field name value = function
+  | `Assoc fields ->
+    `Assoc
+      ((name, value)
+       :: List.filter (fun (key, _) -> not (String.equal key name)) fields)
+  | _ -> failwith "json value must be an object"
+
 let run_conformance dir template args =
   write_fixture dir template;
   let command =
@@ -537,6 +555,41 @@ let run_conformance dir template args =
     | Unix.WSTOPPED signal -> 128 + signal
   in
   code, Yojson.Safe.from_string raw
+
+let run_matrix runner_reports args =
+  let command =
+    String.concat
+      " "
+      (List.map
+         Filename.quote
+         ((matrix_tool_path () :: [])
+          @ (runner_reports
+             |> List.map (fun path -> ["--runner-report"; path])
+             |> List.concat)
+          @ args))
+  in
+  let input = Unix.open_process_in command in
+  let raw = read_all input in
+  let status = Unix.close_process_in input in
+  let code =
+    match status with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED signal -> 128 + signal
+    | Unix.WSTOPPED signal -> 128 + signal
+  in
+  code, Yojson.Safe.from_string raw
+
+let replace_platform_observation report ~system_name ~machine ~runner_sha =
+  match report with
+  | `Assoc fields ->
+    let platform =
+      assoc_value "platform" fields
+      |> replace_assoc_field "system_name" (`String system_name)
+      |> replace_assoc_field "machine" (`String machine)
+      |> replace_assoc_field "runner_executable_sha256" (`String runner_sha)
+    in
+    replace_assoc_field "platform" platform report
+  | _ -> failwith "report must be object"
 
 let write_p0_plus_softmax_fixture
     ?scores
@@ -745,13 +798,6 @@ let write_matrix dir matrix =
   let raw = Yojson.Safe.to_string matrix in
   write_file path raw;
   path, sha256 raw
-
-let replace_assoc_field name value = function
-  | `Assoc fields ->
-    `Assoc
-      ((name, value)
-       :: List.filter (fun (key, _) -> not (String.equal key name)) fields)
-  | _ -> failwith "json value must be an object"
 
 let replace_first_report_field name value = function
   | `Assoc fields as matrix ->
@@ -1705,6 +1751,208 @@ let check_missing_output_subspan_reports_rejected () =
            "missing output cell: base 10001 index 0")
     | _ -> failwith "expected one subspan")
 
+let check_missing_cross_platform_matrix_request_is_actionable () =
+  with_temp_dir (fun dir ->
+    let code, report =
+      run_conformance
+        dir
+        (q1_template ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+          "--require-validator-readiness";
+        ]
+    in
+    check "missing matrix readiness exits nonzero" (code = 1);
+    match report with
+    | `Assoc fields ->
+      let readiness = assoc_json "validator_readiness_gate" fields in
+      let cross_platform = assoc_json "cross_platform_evidence" readiness in
+      check
+        "missing matrix status"
+        (String.equal (string_value "status" cross_platform) "missing");
+      check
+        "missing matrix blocker"
+        (List.mem
+           "missing_cross_platform_matrix"
+           (string_list "blockers" cross_platform));
+      let request = assoc_json "matrix_request" cross_platform in
+      check
+        "matrix request schema"
+        (String.equal
+           (string_value "schema" request)
+           "octra.inference.conformance.matrix.request.v1");
+      check
+        "matrix request no authority"
+        (String.equal (string_value "authority" request) "none");
+      check
+        "matrix request evidence scope"
+        (String.equal
+           (string_value "evidence_scope" request)
+           "diagnostic_collection_request");
+      check
+        "matrix request platform identity"
+        (String.equal
+           (string_value "platform_identity" request)
+           "unsigned_self_reported_observation");
+      check
+        "matrix request min platform observations"
+        (int_value "minimum_distinct_platform_observation_count" request = 2);
+      check
+        "matrix request opcode scope"
+        (string_list "required_opcodes" request = [opcode]);
+      check
+        "matrix request profile root"
+        (String.equal
+           (string_value "required_profile_catalog_root" request)
+           (string_value "profile_catalog_root" fields));
+      check
+        "matrix request template corpus root"
+        (String.equal
+           (string_value "required_template_corpus_root" request)
+           (string_value "template_corpus_root" fields));
+      check
+        "matrix request local signature"
+        (String.equal
+           (string_value "local_result_signature_sha256" request)
+           (string_value "result_signature_sha256" fields));
+      let platform = assoc_json "local_platform_observation" request in
+      check
+        "matrix request omits runner executable path"
+        (not (List.mem_assoc "runner_executable" platform));
+      let expected_per_report_requirements =
+        `Assoc [
+          "execution_mode", `String "positive_template_vm_execution";
+          "top_level_status", `String "accepted";
+          "execution_status", `String "accepted";
+          "result_signature_schema",
+          `String "octra.inference.conformance.result-signature.v6";
+          "result_signature_source", `String "recomputed_from_results";
+          "has_results", `Bool true;
+          "failure_case_gate_status", `String "accepted";
+          "required_failure_case_contracts_status", `String "accepted";
+          "q1_contract_shape_status", `String "accepted";
+          "required_q1_failure_rows_status", `String "accepted";
+          "q1_failure_mutation_shape_status", `String "accepted";
+          "q1_failure_mutation_payloads_present", `Bool true;
+          "result_status", `String "accepted";
+          "vm_run_status", `String "accepted";
+          "strict_effort", `Bool true;
+          "output_status", `String "matched";
+          "effort_match", `Bool true;
+          "opcode_effort_match", `Bool true;
+          "profile_root_binding_status", `String "accepted";
+          "vm_semantics_binding_status", `String "accepted";
+          "abi_declaration_binding_status", `String "accepted";
+          "profile_root_binding_result_status", `String "matched";
+          "vm_semantics_binding_result_status", `String "matched";
+          "abi_declaration_binding_result_status", `String "matched";
+          "executable_abi_binding_status", `String "matched";
+          "profile_catalog_root", `String "valid_sha256";
+          "template_corpus_root", `String "valid_sha256";
+          "runner_executable_sha256", `String "valid_sha256";
+        ]
+      in
+      check
+        "matrix request per-report requirements"
+        (assoc_value "per_report_requirements" request =
+         expected_per_report_requirements);
+      let command_templates = assoc_json "command_templates" request in
+      let expected_runner_argv =
+        [
+          "inference_conformance_run";
+          "--template-index";
+          "P0_TEMPLATE_INDEX";
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+          "--opcode";
+          opcode;
+        ]
+      in
+      let expected_matrix_argv =
+        [
+          "inference_conformance_matrix";
+          "--runner-report";
+          "LOCAL_RUNNER_REPORT";
+          "--runner-report";
+          "REMOTE_RUNNER_REPORT";
+          "--min-platforms";
+          "2";
+          "--opcode";
+          opcode;
+        ]
+      in
+      let expected_final_argv =
+        expected_runner_argv
+        @ [
+          "--require-validator-readiness";
+          "--cross-platform-matrix";
+          "CROSS_PLATFORM_MATRIX";
+          "--expected-cross-platform-matrix-sha256";
+          "MATRIX_SHA256";
+        ]
+      in
+      check
+        "matrix request local collection argv"
+        (string_list "local_runner_report" command_templates = expected_runner_argv);
+      check
+        "matrix request remote collection argv"
+        (string_list "remote_runner_report" command_templates = expected_runner_argv);
+      check
+        "matrix request matrix argv"
+        (string_list "matrix" command_templates = expected_matrix_argv);
+      check
+        "matrix request final rerun argv"
+        (string_list "final_readiness_rerun" command_templates = expected_final_argv)
+    | _ -> failwith "report must be object")
+
+let check_matrix_request_seed_reports_are_matrix_inputs () =
+  with_temp_dir (fun dir ->
+    let code, seed_report =
+      run_conformance
+        dir
+        (q1_template ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "matrix seed collection exits zero" (code = 0);
+    let local_report = Filename.concat dir "local-runner-report.cjson" in
+    let remote_report = Filename.concat dir "remote-runner-report.cjson" in
+    write_json local_report seed_report;
+    write_json
+      remote_report
+      (replace_platform_observation
+         seed_report
+         ~system_name:"Linux"
+         ~machine:"x86_64"
+         ~runner_sha:(hex_root '9'));
+    let code, matrix =
+      run_matrix
+        [local_report; remote_report]
+        ["--min-platforms"; "2"; "--opcode"; opcode]
+    in
+    check "seed reports are accepted by matrix" (code = 0);
+    match matrix with
+    | `Assoc fields ->
+      check
+        "seed matrix accepted"
+        (String.equal (string_value "status" fields) "accepted");
+      check
+        "seed matrix has two platform observations"
+        (int_value "distinct_platform_count" fields = 2);
+      check
+        "seed matrix has two runner observations"
+        (int_value "distinct_runner_executable_count" fields = 2)
+    | _ -> failwith "matrix must be object")
+
 let check_pinned_cross_platform_matrix_is_consumed () =
   with_temp_dir (fun dir ->
     let code, seed_report =
@@ -2537,6 +2785,8 @@ let () =
   check_readiness_gate_rejects_stale_abi ();
   check_readiness_gate_reports_executable_abi_mismatch ();
   check_missing_output_subspan_reports_rejected ();
+  check_missing_cross_platform_matrix_request_is_actionable ();
+  check_matrix_request_seed_reports_are_matrix_inputs ();
   check_pinned_cross_platform_matrix_is_consumed ();
   check_cross_platform_matrix_without_pin_rejects ();
   check_cross_platform_matrix_sha_mismatch_rejects ();

@@ -980,6 +980,142 @@ let profile_catalog_root_option = function
   | `String value -> Some value
   | _ -> None
 
+let json_string_list values =
+  `List (List.map (fun value -> `String value) values)
+
+let cross_platform_opcode_argv required_opcodes =
+  List.concat (List.map (fun opcode -> ["--opcode"; opcode]) required_opcodes)
+
+let json_argv values = json_string_list values
+
+let matrix_request_platform_json () =
+  `Assoc [
+    "ocaml_version", `String Sys.ocaml_version;
+    "os_type", `String Sys.os_type;
+    "system_name", string_or_null (command_line "uname -s");
+    "system_release", string_or_null (command_line "uname -r");
+    "machine", string_or_null (command_line "uname -m");
+    "word_size", `Int Sys.word_size;
+    "big_endian", `Bool Sys.big_endian;
+    "backend_type", `String (backend_type_string Sys.backend_type);
+    "runner_executable_sha256", string_or_null (current_executable_sha256 ());
+  ]
+
+let cross_platform_matrix_request
+    ~required_opcodes
+    ~profile_catalog_root
+    ~template_corpus_root
+    ~local_result_signature_sha256 =
+  let opcode_argv = cross_platform_opcode_argv required_opcodes in
+  let runner_collection_argv template_path =
+    [
+      "inference_conformance_run";
+      "--template-index";
+      template_path;
+      "--strict-effort";
+      "--include-failures";
+      "--require-failure-cases";
+      "--require-profile-roots-bound";
+    ] @ opcode_argv
+  in
+  let final_readiness_argv =
+    runner_collection_argv "P0_TEMPLATE_INDEX"
+    @ [
+      "--require-validator-readiness";
+      "--cross-platform-matrix";
+      "CROSS_PLATFORM_MATRIX";
+      "--expected-cross-platform-matrix-sha256";
+      "MATRIX_SHA256";
+    ]
+  in
+  `Assoc [
+    "schema", `String "octra.inference.conformance.matrix.request.v1";
+    "diagnostic_only", `Bool true;
+    "authority", `String "none";
+    "evidence_scope", `String "diagnostic_collection_request";
+    "platform_identity", `String "unsigned_self_reported_observation";
+    "minimum_distinct_platform_observation_count", `Int 2;
+    "minimum_distinct_runner_executable_observation_count", `Int 2;
+    "minimum_distinct_platform_runner_observation_count", `Int 2;
+    "required_result_signature_schema",
+    `String cross_platform_result_signature_schema;
+    "required_opcodes", json_string_list required_opcodes;
+    "required_profile_catalog_root",
+    (match profile_catalog_root with
+     | Some root -> `String root
+     | None -> `Null);
+    "required_template_corpus_root",
+    (match template_corpus_root with
+     | Some root -> `String root
+     | None -> `Null);
+    "local_result_signature_sha256",
+    (match local_result_signature_sha256 with
+     | Some signature -> `String signature
+     | None -> `Null);
+    "local_platform_observation", matrix_request_platform_json ();
+    "per_report_requirements",
+    `Assoc [
+      "execution_mode", `String "positive_template_vm_execution";
+      "top_level_status", `String "accepted";
+      "execution_status", `String "accepted";
+      "result_signature_schema",
+      `String cross_platform_result_signature_schema;
+      "result_signature_source", `String "recomputed_from_results";
+      "has_results", `Bool true;
+      "failure_case_gate_status", `String "accepted";
+      "required_failure_case_contracts_status", `String "accepted";
+      "q1_contract_shape_status", `String "accepted";
+      "required_q1_failure_rows_status", `String "accepted";
+      "q1_failure_mutation_shape_status", `String "accepted";
+      "q1_failure_mutation_payloads_present", `Bool true;
+      "result_status", `String "accepted";
+      "vm_run_status", `String "accepted";
+      "strict_effort", `Bool true;
+      "output_status", `String "matched";
+      "effort_match", `Bool true;
+      "opcode_effort_match", `Bool true;
+      "profile_root_binding_status", `String "accepted";
+      "vm_semantics_binding_status", `String "accepted";
+      "abi_declaration_binding_status", `String "accepted";
+      "profile_root_binding_result_status", `String "matched";
+      "vm_semantics_binding_result_status", `String "matched";
+      "abi_declaration_binding_result_status", `String "matched";
+      "executable_abi_binding_status", `String "matched";
+      "profile_catalog_root", `String "valid_sha256";
+      "template_corpus_root", `String "valid_sha256";
+      "runner_executable_sha256", `String "valid_sha256";
+    ];
+    "aggregate_requirements",
+    `Assoc [
+      "result_signatures", `String "one_normalized_signature";
+      "profile_catalog_roots", `String "one_shared_root";
+      "template_corpus_roots", `String "one_shared_root";
+      "opcode_coverage", `String "all_required_opcodes_per_report";
+      "platform_observations", `String "at_least_two_distinct";
+      "runner_executable_observations", `String "at_least_two_distinct";
+      "platform_runner_observations", `String "at_least_two_disjoint";
+    ];
+    "command_templates",
+    `Assoc [
+      "local_runner_report",
+      json_argv (runner_collection_argv "P0_TEMPLATE_INDEX");
+      "remote_runner_report",
+      json_argv (runner_collection_argv "P0_TEMPLATE_INDEX");
+      "matrix",
+      json_argv
+        ([
+          "inference_conformance_matrix";
+          "--runner-report";
+          "LOCAL_RUNNER_REPORT";
+          "--runner-report";
+          "REMOTE_RUNNER_REPORT";
+          "--min-platforms";
+          "2";
+        ] @ opcode_argv);
+      "final_readiness_rerun", json_argv final_readiness_argv;
+    ];
+  ]
+
 let report_row_is_bound = function
   | `Assoc fields ->
     Option.value ~default:false (opt_bool_field "accepted" fields)
@@ -1069,6 +1205,12 @@ let cross_platform_evidence
        | Some signature -> `String signature
        | None -> `Null);
       "local_result_signature_status", `String "missing";
+      "matrix_request",
+      cross_platform_matrix_request
+        ~required_opcodes
+        ~profile_catalog_root
+        ~template_corpus_root
+        ~local_result_signature_sha256;
       "blockers", `List [`String "missing_cross_platform_matrix"];
     ]
   | Some path ->
