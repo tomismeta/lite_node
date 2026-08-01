@@ -104,9 +104,16 @@ type batch = {
   stages : batch_stage list;
 }
 
+type output_contract =
+  | Selected_index of {
+      output_base : int;
+      output_count : int;
+    }
+
 type session_transition = {
   transition_id : string;
   phase : string;
+  output_contract : output_contract option;
   stage : batch_stage;
 }
 
@@ -135,8 +142,11 @@ type batch_stage_result = {
 
 type session_stage_result = {
   session_stage_json : Yojson.Safe.t;
+  session_stage_phase : string;
   session_stage_output_payload : string;
   session_stage_output_root : string;
+  session_stage_output_contract_mismatch : bool;
+  session_stage_decode_token_contract_bound : bool;
   session_stage_reference_mismatch : bool;
   session_stage_unsupported_opcodes : string list;
   session_stage_missing_capabilities : string list;
@@ -1019,6 +1029,41 @@ let rec parse_batch_range_sources ~base acc = function
      | Error error -> Error error
      | Ok range -> parse_batch_range_sources ~base (range :: acc) rest)
 
+let parse_output_contract = function
+  | `Assoc fields ->
+    (match
+       check_known fields ["kind"; "output_base"; "output_count"]
+     with
+     | Error error -> Error error
+     | Ok () ->
+       (match
+          string_field "kind" fields,
+          int_field "output_base" fields,
+          int_field "output_count" fields
+        with
+        | Error error, _, _
+        | _, Error error, _
+        | _, _, Error error -> Error error
+        | Ok "selected_index", Ok output_base, Ok output_count ->
+          if output_base < 0 || output_count < 0 then
+            Error "output_contract bounds must be non-negative"
+          else if output_count <> 1 then
+            Error "selected_index output_contract requires output_count = 1"
+          else Ok (Selected_index { output_base; output_count })
+        | Ok kind, Ok _, Ok _ ->
+          Error ("unsupported output_contract kind: " ^ kind)))
+  | _ -> Error "output_contract must be an object"
+
+let optional_output_contract fields =
+  match optional_field "output_contract" fields with
+  | Ok None -> Ok None
+  | Ok (Some `Null) -> Ok None
+  | Ok (Some value) ->
+    (match parse_output_contract value with
+     | Ok contract -> Ok (Some contract)
+     | Error error -> Error error)
+  | Error error -> Error error
+
 let path_field ~base name fields =
   match string_field name fields with
   | Ok path -> Ok (resolve_path ~base path)
@@ -1260,15 +1305,18 @@ let valid_session_phase = function
 
 let parse_session_transition ~bundle_base ~top_support = function
   | `Assoc fields ->
-    (match check_known fields ["transition_id"; "phase"; "stage"] with
+    (match
+       check_known fields ["transition_id"; "phase"; "output_contract"; "stage"]
+     with
      | Error error -> Error error
      | Ok () ->
        (match
           string_field "transition_id" fields,
           string_field "phase" fields,
+          optional_output_contract fields,
           field "stage" fields
         with
-        | Ok transition_id, Ok phase, Ok stage_json ->
+        | Ok transition_id, Ok phase, Ok output_contract, Ok stage_json ->
           if transition_id = "" then Error "transition_id must not be empty"
           else if not (valid_session_phase phase) then
             Error ("unsupported session transition phase: " ^ phase)
@@ -1280,10 +1328,11 @@ let parse_session_transition ~bundle_base ~top_support = function
                  stage_json
              with
              | Error error -> Error error
-             | Ok stage -> Ok { transition_id; phase; stage })
-        | Error error, _, _
-        | _, Error error, _
-        | _, _, Error error -> Error error))
+             | Ok stage -> Ok { transition_id; phase; output_contract; stage })
+        | Error error, _, _, _
+        | _, Error error, _, _
+        | _, _, Error error, _
+        | _, _, _, Error error -> Error error))
   | _ -> Error "session transition must be an object"
 
 let parse_session_bundle_json session_path (json : Yojson.Safe.t) =
@@ -1425,6 +1474,149 @@ let session_bundle_file path =
   with
   | Yojson.Json_error error -> fail (path ^ ": " ^ error)
   | Sys_error error -> fail error
+
+let output_contract_declared_json = function
+  | None -> `Null
+  | Some (Selected_index { output_base; output_count }) ->
+    `Assoc [
+      "kind", `String "selected_index";
+      "output_base", `Int output_base;
+      "output_count", `Int output_count;
+    ]
+
+let string_starts_with ~prefix value =
+  let prefix_length = String.length prefix in
+  String.length value >= prefix_length
+  && String.equal
+       (String.sub value 0 prefix_length)
+       prefix
+
+let decimal_digits value =
+  let length = String.length value in
+  length > 0
+  && Seq.for_all
+       (function
+         | '0' .. '9' -> true
+         | _ -> false)
+       (String.to_seq value)
+
+let parse_output_payload_integer value =
+  let parse prefix =
+    if string_starts_with ~prefix value then
+      let offset = String.length prefix in
+      let digits =
+        String.sub value offset (String.length value - offset)
+      in
+      if decimal_digits digits then Some digits else None
+    else None
+  in
+  match parse "int:" with
+  | Some digits -> Ok digits
+  | None ->
+    (match parse "u64:" with
+     | Some digits -> Ok digits
+     | None -> Error "selected output value is not a non-negative integer")
+
+let parse_token_output_payload payload =
+  match String.split_on_char '|' payload with
+  | [base_field; length_field; values_field] ->
+    let parse_int_field name prefix field =
+      if string_starts_with ~prefix field then
+        let value =
+          String.sub
+            field
+            (String.length prefix)
+            (String.length field - String.length prefix)
+        in
+        if decimal_digits value then Ok (int_of_string value)
+        else Error (name ^ " must be a non-negative integer")
+      else Error ("missing output payload field: " ^ name)
+    in
+    let parse_values field =
+      let prefix = "values=" in
+      if string_starts_with ~prefix field then
+        Ok
+          (String.sub
+             field
+             (String.length prefix)
+             (String.length field - String.length prefix)
+           |> String.split_on_char ',')
+      else Error "missing output payload field: values"
+    in
+    (match
+       parse_int_field "base" "base=" base_field,
+       parse_int_field "length" "length=" length_field,
+       parse_values values_field
+     with
+     | Ok base, Ok length, Ok values -> Ok (base, length, values)
+     | Error error, _, _
+     | _, Error error, _
+     | _, _, Error error -> Error error)
+  | _ -> Error "output payload is not the fixed span encoding"
+
+type output_contract_check = {
+  output_contract_json : Yojson.Safe.t;
+  output_contract_mismatch : bool;
+  decode_token_contract_bound : bool;
+}
+
+let output_contract_check transition output_payload =
+  let decode_phase = String.equal transition.phase "decode" in
+  match transition.output_contract with
+  | None ->
+    {
+      output_contract_json =
+        `Assoc [
+          "status", `String "not_declared";
+          "kind", `Null;
+        ];
+      output_contract_mismatch = false;
+      decode_token_contract_bound = not decode_phase;
+    }
+  | Some (Selected_index { output_base; output_count }) ->
+    let declared =
+      [
+        "kind", `String "selected_index";
+        "output_base", `Int output_base;
+        "output_count", `Int output_count;
+      ]
+    in
+    let mismatch reason =
+      {
+        output_contract_json =
+          `Assoc
+            ([
+              "status", `String "mismatch";
+              "reason", `String reason;
+            ]
+             @ declared);
+        output_contract_mismatch = true;
+        decode_token_contract_bound = false;
+      }
+    in
+    (match parse_token_output_payload output_payload with
+     | Error reason -> mismatch reason
+     | Ok (base, length, values) ->
+       if base <> output_base then mismatch "output_base_mismatch"
+       else if length <> output_count then mismatch "output_count_mismatch"
+       else
+         match values with
+         | [value] ->
+           (match parse_output_payload_integer value with
+            | Error reason -> mismatch reason
+            | Ok selected_index ->
+              {
+                output_contract_json =
+                  `Assoc
+                    ([
+                      "status", `String "matched";
+                      "selected_index", `String selected_index;
+                    ]
+                     @ declared);
+                output_contract_mismatch = false;
+                decode_token_contract_bound = true;
+              })
+         | _ -> mismatch "output_value_count_mismatch")
 
 let batch_cache () =
   {
@@ -1789,6 +1981,9 @@ let run_prepared_session_transition session prepared_transition =
     | Some payload -> payload
     | None -> fail "missing advanced session output payload"
   in
+  let output_contract =
+    output_contract_check transition output_payload
+  in
   let output_root = Session.output_root advanced in
   let reference_status, reference_mismatch, root_match =
     match transition.stage.expected_output_root with
@@ -1803,7 +1998,10 @@ let run_prepared_session_transition session prepared_transition =
       (if matched then "matched" else "mismatch"), not matched, fields
   in
   let stage_status =
-    if reference_mismatch then "reference_mismatch" else "accepted"
+    if output_contract.output_contract_mismatch then
+      "output_contract_mismatch"
+    else if reference_mismatch then "reference_mismatch"
+    else "accepted"
   in
   let unsupported = unsupported_opcode_names prepared.prepared_violations in
   let missing = missing_capability_names prepared.prepared_violations in
@@ -1831,6 +2029,7 @@ let run_prepared_session_transition session prepared_transition =
         "prior_session_root", `String prior_session_root;
         "advanced_session_root", `String (Session.root advanced);
         "advance_receipt_root", `String (Receipt.root advance_receipt);
+        "output_contract", output_contract.output_contract_json;
         "output_payload", `String output_payload;
         "output_payload_sha256", `String (sha256 output_payload);
         "output_root", `String output_root;
@@ -1847,8 +2046,13 @@ let run_prepared_session_transition session prepared_transition =
   advanced,
   {
     session_stage_json = transition_json;
+    session_stage_phase = transition.phase;
     session_stage_output_payload = output_payload;
     session_stage_output_root = output_root;
+    session_stage_output_contract_mismatch =
+      output_contract.output_contract_mismatch;
+    session_stage_decode_token_contract_bound =
+      output_contract.decode_token_contract_bound;
     session_stage_reference_mismatch = reference_mismatch;
     session_stage_unsupported_opcodes = unsupported;
     session_stage_missing_capabilities = missing;
@@ -2009,6 +2213,8 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
                  "index", `Int index;
                  "transition_id", `String transition.transition_id;
                  "phase", `String transition.phase;
+                 "output_contract",
+                 output_contract_declared_json transition.output_contract;
                ]
                 @ fields)
            | value -> value
@@ -2215,14 +2421,17 @@ let missing_resident_runtime_capabilities =
     `String "resident_session";
     `String "multi_advance_state_carry";
     `String "prefill_decode_phase_contract";
-    `String "decode_loop_argmax_session_output";
-  ]
-
-let remaining_v2_runtime_capabilities =
-  `List [
-    `String "committed_target_state_payload_transport";
     `String "decode_loop_token_contract";
   ]
+
+let remaining_v2_runtime_capabilities ~decode_token_contract_bound =
+  `List
+    ([
+      `String "committed_target_state_payload_transport";
+    ]
+     @
+     if decode_token_contract_bound then []
+     else [`String "decode_loop_token_contract"])
 
 let independent_batch_runtime_semantics =
   `Assoc [
@@ -2248,6 +2457,8 @@ let session_runtime_semantics
     ~transition_count
     ~runtime_readiness_status
     ~next_runtime_blocker
+    ~decode_token_contract_status
+    ~missing_runtime_capabilities
     ~continuation_supported =
   let single_transition = transition_count = 1 in
   `Assoc [
@@ -2269,19 +2480,25 @@ let session_runtime_semantics
      else `List []);
     "runtime_readiness_status", `String runtime_readiness_status;
     "next_runtime_blocker", `String next_runtime_blocker;
+    "decode_token_contract_status", `String decode_token_contract_status;
     "missing_runtime_capabilities",
-    (if continuation_supported then remaining_v2_runtime_capabilities
-     else missing_resident_runtime_capabilities);
+    missing_runtime_capabilities;
   ]
 
-let transition_report_json transition stage_json =
+let transition_report_json ?output_contract transition stage_json =
   match stage_json with
   | `Assoc fields ->
+    let contract_fields =
+      match output_contract with
+      | None -> []
+      | Some value -> ["output_contract", value]
+    in
     `Assoc (
       [
         "transition_id", `String transition.transition_id;
         "phase", `String transition.phase;
       ]
+      @ contract_fields
       @ fields)
   | value -> value
 
@@ -2396,8 +2613,38 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       (fun result -> result.session_stage_reference_mismatch)
       results
   in
+  let output_contract_mismatch =
+    List.exists
+      (fun result -> result.session_stage_output_contract_mismatch)
+      results
+  in
+  let decode_results =
+    List.filter
+      (fun result -> String.equal result.session_stage_phase "decode")
+      results
+  in
+  let decode_token_contract_bound =
+    decode_results <> []
+    && List.for_all
+         (fun result -> result.session_stage_decode_token_contract_bound)
+         decode_results
+  in
+  let decode_token_contract_status =
+    if output_contract_mismatch then "mismatch"
+    else if decode_token_contract_bound then "bound"
+    else "not_bound"
+  in
+  let next_runtime_blocker =
+    if output_contract_mismatch then "decode_loop_token_contract_mismatch"
+    else "committed_target_state_payload_transport_not_bound"
+  in
+  let missing_runtime_capabilities =
+    remaining_v2_runtime_capabilities ~decode_token_contract_bound
+  in
   let status =
-    if reference_mismatch then "reference_mismatch" else "accepted"
+    if output_contract_mismatch then "output_contract_mismatch"
+    else if reference_mismatch then "reference_mismatch"
+    else "accepted"
   in
   let last_transition_output_root =
     results
@@ -2413,8 +2660,9 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     session_runtime_semantics
       ~transition_count:(List.length bundle.transitions)
       ~runtime_readiness_status:"resident_session_candidate"
-      ~next_runtime_blocker:
-        "committed_target_state_payload_transport_not_bound"
+      ~next_runtime_blocker
+      ~decode_token_contract_status
+      ~missing_runtime_capabilities
       ~continuation_supported:true
   in
   let payload =
@@ -2424,8 +2672,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       ~transition_count:(List.length bundle.transitions)
       ~decode_steps:bundle.decode_steps
       ~runtime_semantics
-      ~next_runtime_blocker:
-        "committed_target_state_payload_transport_not_bound"
+      ~next_runtime_blocker
       ~opened_session_root:(Some (Session.root opened))
       ~final_session_root:(Some (Session.root finalized))
       ~final_receipt_root:(Some (Receipt.root final_receipt))
@@ -2446,8 +2693,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       "decode_steps", `Int bundle.decode_steps;
       "session_report_sha256", `String (session_report_sha256 payload);
       "runtime_semantics", runtime_semantics;
-      "next_runtime_blocker",
-      `String "committed_target_state_payload_transport_not_bound";
+      "next_runtime_blocker", `String next_runtime_blocker;
       "opened_session_root", `String (Session.root opened);
       "final_session_root", `String (Session.root finalized);
       "final_receipt_root", `String (Receipt.root final_receipt);
@@ -2469,7 +2715,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     ]
   in
   print_endline (Yojson.Safe.pretty_to_string report);
-  if reference_mismatch then 1 else 0
+  if output_contract_mismatch || reference_mismatch then 1 else 0
 
 let run_inference_session_file ~timing_mode path =
   let bundle = session_bundle_file path in
@@ -2501,6 +2747,8 @@ let run_inference_session_file ~timing_mode path =
         ~runtime_readiness_status:
           preflight.continuation_runtime_readiness_status
         ~next_runtime_blocker:preflight.continuation_next_runtime_blocker
+        ~decode_token_contract_status:"not_bound"
+        ~missing_runtime_capabilities:missing_resident_runtime_capabilities
         ~continuation_supported:false
     in
     let status = "rejected" in
@@ -2555,14 +2803,6 @@ let run_inference_session_file ~timing_mode path =
     end
   end
   else
-    let runtime_semantics =
-      session_runtime_semantics
-        ~transition_count
-        ~runtime_readiness_status:"partial_single_transition"
-        ~next_runtime_blocker:
-          "session_continuation_state_carry_not_supported"
-        ~continuation_supported:false
-    in
     let cache = batch_cache () in
     let transition =
       match bundle.transitions with
@@ -2572,11 +2812,36 @@ let run_inference_session_file ~timing_mode path =
     let result =
       run_batch_stage ~cache ~timing_mode transition.stage
     in
+    let output_contract =
+      output_contract_check transition result.stage_output_payload
+    in
     let transition_json =
-      transition_report_json transition result.stage_json
+      transition_report_json
+        ~output_contract:output_contract.output_contract_json
+        transition
+        result.stage_json
+    in
+    let output_contract_mismatch =
+      output_contract.output_contract_mismatch
+    in
+    let decode_token_contract_status =
+      if output_contract_mismatch then "mismatch"
+      else if output_contract.decode_token_contract_bound then "bound"
+      else "not_bound"
+    in
+    let runtime_semantics =
+      session_runtime_semantics
+        ~transition_count
+        ~runtime_readiness_status:"partial_single_transition"
+        ~next_runtime_blocker:
+          "session_continuation_state_carry_not_supported"
+        ~decode_token_contract_status
+        ~missing_runtime_capabilities:missing_resident_runtime_capabilities
+        ~continuation_supported:false
     in
     let status =
-      if result.stage_reference_mismatch then "reference_mismatch"
+      if output_contract_mismatch then "output_contract_mismatch"
+      else if result.stage_reference_mismatch then "reference_mismatch"
       else "accepted"
     in
     let payload =
@@ -2630,7 +2895,7 @@ let run_inference_session_file ~timing_mode path =
       ]
     in
     print_endline (Yojson.Safe.pretty_to_string report);
-    if result.stage_reference_mismatch then 1 else 0
+    if output_contract_mismatch || result.stage_reference_mismatch then 1 else 0
 
 let run_batch_file ~timing_mode path =
   let batch = batch_file path in

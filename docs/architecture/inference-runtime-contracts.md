@@ -245,6 +245,21 @@ decode target that writes a single `ARGMAX_FP` selected index through this ABI
 can therefore return a root-bound token id without adding tokenizer or
 model-family knowledge to LiteNode.
 
+Session bundles may declare a transition-level `output_contract`:
+
+```json
+{"kind":"selected_index","output_base":200,"output_count":1}
+```
+
+For a `decode` transition this binds the generic token-output contract. The
+runner checks that the canonical output payload uses the declared base, contains
+one initialized integer cell, and reports the selected index. The contract does
+not by itself prove which opcode produced the cell; ARGMAX provenance comes from
+the admitted program and opcode evidence. A mismatch is an execution-contract
+failure; an absent decode contract leaves the session accepted as a resident
+candidate but keeps `decode_loop_token_contract` in
+`missing_runtime_capabilities`.
+
 This is an execution boundary, not a model-format contract. Token sequences,
 logits, tensor layouts, and sampling behavior remain target-owned.
 

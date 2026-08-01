@@ -217,13 +217,14 @@ ABI-v2 continuation context for repeated advances, and
 `--run-inference-session` can route uniform ABI-v2 multi-transition bundles
 through one opened session, repeated advance, and one finalization. The batch
 harness still opens an independent session for each stage. The product runtime
-must now bind committed state payload transport and the decode-loop token
-contract while avoiding caller-selected layer orchestration. The generic phase
-sequence is bound as `prefill*` followed by `decode*`, with `decode_steps`
-matching the declared decode transition count. Session reports include each
-canonical output payload and payload digest next to `output_root`, so a
-target-owned decode transition can expose a root-bound `ARGMAX_FP` selected
-index as its one-cell token output.
+must now bind committed state payload transport while avoiding caller-selected
+layer orchestration. The generic phase sequence is bound as `prefill*` followed
+by `decode*`, with `decode_steps` matching the declared decode transition count.
+Session reports include each canonical output payload and payload digest next to
+`output_root`, and a target-owned decode transition can declare an
+`selected_index` `output_contract` to expose a root-bound one-cell token output.
+When the decode program uses `ARGMAX_FP`, opcode evidence supplies the ARGMAX
+provenance.
 
 Compatibility checks:
 

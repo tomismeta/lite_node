@@ -218,11 +218,12 @@ top-level request/deployment claims are reported. The remaining product
 blocker is no longer repeated advance or phase ordering itself; ABI-v2
 multi-transition bundles must declare a `prefill*` then `decode*` phase order
 with `decode_steps` bound to the declared decode count. The remaining product
-blockers are committed state payload transport and the decode-loop token
-contract. Session reports now include the canonical transition output payload
-and its SHA-256 next to `output_root`; a decode transition can therefore expose
-a VM-owned `ARGMAX_FP` selected-index payload once the target program declares
-that one-cell output as the token contract.
+blocker is committed state payload transport. Session reports now include the
+canonical transition output payload and its SHA-256 next to `output_root`; a
+decode transition may declare a `selected_index` `output_contract` so LiteNode
+can report a root-bound selected index without tokenizer or model-family
+knowledge. If the target program uses `ARGMAX_FP`, opcode evidence provides the
+ARGMAX provenance.
 `--scan-policy` is the faster frontier-discovery mode. It decodes the program
 envelope and reports every visible inference opcode-policy violation as JSON,
 without admitting new opcodes or running a session. It cannot be combined with

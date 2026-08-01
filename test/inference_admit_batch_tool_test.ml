@@ -256,6 +256,23 @@ let continuation_code =
     VM.STOP;
   |]
 
+let continuation_token_code =
+  [|
+    VM.JDEST Abi.advance_label;
+    VM.MLOAD (2, Abi.sequence_cell);
+    VM.MSTORE (10, 2);
+    VM.LDI (0, VM.VInt (Z.of_int 10));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+  |]
+
+let selected_index_contract ?(output_base = 10) () =
+  `Assoc [
+    "kind", `String "selected_index";
+    "output_base", `Int output_base;
+    "output_count", `Int 1;
+  ]
+
 let write_batch_fixture
     ?(session_abi_root = Abi.v1_root)
     ?code
@@ -425,6 +442,7 @@ let write_session_bundle_fixture
     ?session_abi_root
     ?code
     ?phase_for_index
+    ?output_contract_for_index
     ?request_root
     ?model_deployment_root
     ?second_request_nonce
@@ -457,18 +475,30 @@ let write_session_bundle_fixture
     List.init
       transition_count
       (fun index ->
-         `Assoc [
-           "transition_id", `String (Printf.sprintf "token-%03d" index);
-           "phase",
-           `String
-             (match phase_for_index with
-              | Some phase -> phase index
-              | None ->
-                if transition_count = 1 then "decode"
-                else if index = 0 then "prefill"
-                else "decode");
-           "stage", (if index = 1 then second_stage else stage);
-         ])
+         let output_contract_fields =
+           match output_contract_for_index with
+           | None -> []
+           | Some output_contract ->
+             (match output_contract index with
+              | None -> []
+              | Some value -> ["output_contract", value])
+         in
+         `Assoc
+           ([
+             "transition_id", `String (Printf.sprintf "token-%03d" index);
+             "phase",
+             `String
+               (match phase_for_index with
+                | Some phase -> phase index
+                | None ->
+                  if transition_count = 1 then "decode"
+                  else if index = 0 then "prefill"
+                  else "decode");
+           ]
+            @ output_contract_fields
+            @ [
+              "stage", (if index = 1 then second_stage else stage);
+            ]))
   in
   let bundle_path = Filename.concat dir "session-bundle.cjson" in
   let schema_fields =
@@ -589,7 +619,7 @@ let check_runtime_semantics report =
          `String "resident_session";
          `String "multi_advance_state_carry";
          `String "prefill_decode_phase_contract";
-         `String "decode_loop_argmax_session_output";
+         `String "decode_loop_token_contract";
        ])
   | _ -> failwith "report must be an object"
 
@@ -1101,6 +1131,11 @@ let check_session_bundle_accepts_v2_multi_transition () =
          `String "committed_target_state_payload_transport";
          `String "decode_loop_token_contract";
        ]);
+    check
+      "v2 decode token contract not bound"
+      (String.equal
+         (string_json "decode_token_contract_status" semantics)
+         "not_bound");
     check_session_hash report;
     (match list_json "transitions" fields with
      | [`Assoc first; `Assoc second] ->
@@ -1186,6 +1221,157 @@ let check_session_bundle_accepts_v2_multi_transition () =
             (String.equal
                (string_json "output_payload" first)
                (string_json "output_payload" second)))
+     | _ -> failwith "expected two resident transitions")
+  | _ -> failwith "report must be an object"
+
+let check_session_bundle_binds_decode_token_contract () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~session_abi_root:Abi.v2_root
+      ~code:continuation_token_code
+      ~output_contract_for_index:(fun index ->
+        if index = 1 then Some (selected_index_contract ())
+        else None)
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "token-contract bundle exits cleanly" (code = 0);
+  match report with
+  | `Assoc fields ->
+    check
+      "token-contract bundle accepted"
+      (String.equal (string_json "status" fields) "accepted");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "decode token contract bound"
+      (String.equal
+         (string_json "decode_token_contract_status" semantics)
+         "bound");
+    check
+      "token contract clears decode blocker"
+      (list_json "missing_runtime_capabilities" semantics
+       = [`String "committed_target_state_payload_transport"]);
+    check
+      "token contract next blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "committed_target_state_payload_transport_not_bound");
+    check_session_hash report;
+    (match list_json "transitions" fields with
+     | [`Assoc first; `Assoc second] ->
+       check
+         "prefill contract absent"
+         (String.equal
+            (string_json
+               "status"
+               (assoc_json "output_contract" first))
+            "not_declared");
+       let contract = assoc_json "output_contract" second in
+       check
+         "decode contract matched"
+         (String.equal (string_json "status" contract) "matched");
+       check
+         "decode contract kind"
+         (String.equal
+            (string_json "kind" contract)
+            "selected_index");
+       check
+         "decode selected index"
+         (String.equal (string_json "selected_index" contract) "1");
+       check
+         "decode payload"
+         (String.equal
+            (string_json "output_payload" second)
+            "base=10|length=1|values=int:1")
+     | _ -> failwith "expected two resident transitions")
+  | _ -> failwith "report must be an object"
+
+let check_session_bundle_prefill_only_keeps_decode_token_contract () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~decode_steps:(Some 0)
+      ~session_abi_root:Abi.v2_root
+      ~code:continuation_token_code
+      ~phase_for_index:(fun _ -> "prefill")
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "prefill-only bundle exits cleanly" (code = 0);
+  match report with
+  | `Assoc fields ->
+    check
+      "prefill-only bundle accepted"
+      (String.equal (string_json "status" fields) "accepted");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "prefill-only decode token contract not bound"
+      (String.equal
+         (string_json "decode_token_contract_status" semantics)
+         "not_bound");
+    check
+      "prefill-only keeps decode blocker"
+      (list_json "missing_runtime_capabilities" semantics
+       = [
+         `String "committed_target_state_payload_transport";
+         `String "decode_loop_token_contract";
+       ]);
+    check_session_hash report
+  | _ -> failwith "report must be an object"
+
+let check_session_bundle_rejects_decode_token_contract_mismatch () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~session_abi_root:Abi.v2_root
+      ~code:continuation_token_code
+      ~output_contract_for_index:(fun index ->
+        if index = 1 then
+          Some (selected_index_contract ~output_base:11 ())
+        else None)
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "token-contract mismatch exits nonzero" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check
+      "token-contract mismatch status"
+      (String.equal
+         (string_json "status" fields)
+         "output_contract_mismatch");
+    check
+      "token-contract mismatch blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "decode_loop_token_contract_mismatch");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "decode token contract mismatch status"
+      (String.equal
+         (string_json "decode_token_contract_status" semantics)
+         "mismatch");
+    check_session_hash report;
+    (match list_json "transitions" fields with
+     | [_; `Assoc second] ->
+       check
+         "decode transition contract mismatch status"
+         (String.equal
+            (string_json "status" second)
+            "output_contract_mismatch");
+       let contract = assoc_json "output_contract" second in
+       check
+         "decode contract mismatch"
+         (String.equal (string_json "status" contract) "mismatch");
+       check
+         "decode contract mismatch reason"
+         (String.equal
+            (string_json "reason" contract)
+            "output_base_mismatch")
      | _ -> failwith "expected two resident transitions")
   | _ -> failwith "report must be an object"
 
@@ -1394,6 +1580,9 @@ let () =
   check_session_bundle_hash_binds_decode_steps ();
   check_session_bundle_rejects_multi_transition ();
   check_session_bundle_accepts_v2_multi_transition ();
+  check_session_bundle_binds_decode_token_contract ();
+  check_session_bundle_prefill_only_keeps_decode_token_contract ();
+  check_session_bundle_rejects_decode_token_contract_mismatch ();
   check_session_bundle_rejects_invalid_phase_order ();
   check_session_bundle_reports_top_level_claim_mismatch ();
   check_session_bundle_reports_identity_mismatch ();
