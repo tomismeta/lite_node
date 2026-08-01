@@ -60,6 +60,9 @@ let requirement =
     limits;
   }
 
+let committed_state_capability =
+  capability "session.committed-state" (hex_root '6')
+
 let support =
   Req.{
     support_vm_semantics_root = hex_root 'a';
@@ -100,6 +103,38 @@ let check_supported () =
 let check_supported_v2_session_abi () =
   let admitted = admitted () in
   match Target.check ~admitted (target ~session_abi_root:Abi.v2_root admitted) with
+  | Ok () -> ()
+  | Error error -> failwith (Target.error_message error)
+
+let check_committed_state_session_abi_requires_capability () =
+  let admitted = admitted () in
+  match
+    Target.check
+      ~admitted
+      (target ~session_abi_root:Abi.committed_state_root admitted)
+  with
+  | Error (Target.Missing_required_capability "session.committed-state") -> ()
+  | _ -> failwith "expected committed-state capability requirement"
+
+let check_committed_state_session_abi_supported_with_capability () =
+  let requirement =
+    Req.{
+      requirement with
+      capabilities = requirement.capabilities @ [committed_state_capability];
+    }
+  in
+  let support =
+    Req.{ support with support_capabilities = requirement.capabilities }
+  in
+  let admitted = Inference_cert.admit ~support ~requirement code in
+  match
+    Target.check
+      ~admitted
+      Target.{
+        (target ~session_abi_root:Abi.committed_state_root admitted) with
+        requirement_root = Req.root requirement;
+      }
+  with
   | Ok () -> ()
   | Error error -> failwith (Target.error_message error)
 
@@ -227,6 +262,8 @@ let check_missing_entrypoint_label () =
 let () =
   check_supported ();
   check_supported_v2_session_abi ();
+  check_committed_state_session_abi_requires_capability ();
+  check_committed_state_session_abi_supported_with_capability ();
   check_program_root_mismatch ();
   check_requirement_root_mismatch ();
   check_missing_requirement ();

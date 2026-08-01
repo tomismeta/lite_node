@@ -40,6 +40,7 @@ type error =
   | Program_root_mismatch of string * string
   | Missing_requirement
   | Requirement_root_mismatch of string * string
+  | Missing_required_capability of string
 
 val program_root : Admission.t -> string
 val root : t -> string

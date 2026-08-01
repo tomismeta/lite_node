@@ -141,6 +141,12 @@
  (deps ../tools/inference_conformance_matrix.exe))
 
 (test
+ (name inference_profile_catalog_tool_test)
+ (modules inference_profile_catalog_tool_test)
+ (libraries octra_vm yojson unix)
+ (deps ../tools/inference_profile_catalog.exe))
+
+(test
  (name inference_admit_batch_tool_test)
  (modules inference_admit_batch_tool_test)
  (libraries octra_vm inference_test_support yojson unix digestif digestif.c)

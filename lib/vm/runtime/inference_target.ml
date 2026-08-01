@@ -40,6 +40,7 @@ type error =
   | Program_root_mismatch of string * string
   | Missing_requirement
   | Requirement_root_mismatch of string * string
+  | Missing_required_capability of string
 
 let hex = function
   | '0' .. '9'
@@ -196,6 +197,23 @@ let check_advance_label code =
          (Inference_session_abi.advance_entrypoint,
           Inference_session_abi.advance_label))
 
+let has_capability capabilities name =
+  List.exists
+    (fun capability ->
+       String.equal capability.Execution_requirement.name name)
+    capabilities
+
+let check_session_capabilities target requirement =
+  let committed_state_capability = "session.committed-state" in
+  if
+    Inference_session_abi.committed_state_supported target.session_abi_root
+    && not
+      (has_capability
+         requirement.Execution_requirement.capabilities
+         committed_state_capability)
+  then Error (Missing_required_capability committed_state_capability)
+  else Ok ()
+
 let check ~admitted target =
   match validate target with
   | Error error -> Error error
@@ -212,12 +230,15 @@ let check ~admitted target =
           Error (Requirement_root_mismatch
                    (target.requirement_root, actual_requirement_root))
         else
-          match Admission.provenance admitted with
-          | Admission.Raw_code ->
-            Error (Program_provenance_unsupported Admission.Raw_code)
-          | Admission.Checked_envelope
-          | Admission.Attested_envelope ->
-            check_advance_label (Admission.code admitted)
+          match check_session_capabilities target requirement with
+          | Error error -> Error error
+          | Ok () ->
+            match Admission.provenance admitted with
+            | Admission.Raw_code ->
+              Error (Program_provenance_unsupported Admission.Raw_code)
+            | Admission.Checked_envelope
+            | Admission.Attested_envelope ->
+              check_advance_label (Admission.code admitted)
 
 let error_message = function
   | Bad_root root -> Printf.sprintf "invalid root: %s" root
@@ -250,3 +271,5 @@ let error_message = function
     Printf.sprintf
       "target requirement root mismatch: expected %s actual %s"
       expected actual
+  | Missing_required_capability capability ->
+    Printf.sprintf "missing inference target capability: %s" capability

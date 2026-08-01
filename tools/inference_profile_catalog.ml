@@ -12,6 +12,7 @@ Include at startup:
 - gRPC (version 9738fdy44-2025)
 *)
 
+module Abi = Octra_vm.Inference_session_abi
 module Profile = Octra_vm.Inference_numerical_profile
 module Template = Octra_vm.Inference_conformance_template
 
@@ -94,15 +95,50 @@ let vm_semantics_catalog_root catalog =
     ("octra:inference:vm-semantics-catalog\000"
      ^ Yojson.Safe.to_string catalog)
 
-let attach_vm_semantics_catalog opcodes = function
+let session_abi_entry ~name ~role ~root abi =
+  `Assoc [
+    "name", `String name;
+    "role", `String role;
+    "status", `String "supported";
+    "session_abi_root", `String root;
+    "session_abi", abi;
+  ]
+
+let session_abi_catalog_json =
+  `List [
+    session_abi_entry
+      ~name:"v1"
+      ~role:"positive_template_conformance"
+      ~root:Abi.v1_root
+      Abi.v1_json;
+    session_abi_entry
+      ~name:"v2"
+      ~role:"continued_session_progress"
+      ~root:Abi.v2_root
+      Abi.v2_json;
+    session_abi_entry
+      ~name:"committed-state"
+      ~role:"resident_committed_state_transport"
+      ~root:Abi.committed_state_root
+      Abi.committed_state_json;
+  ]
+
+let session_abi_catalog_root =
+  sha256
+    ("octra:inference:session-abi-catalog\000"
+     ^ Yojson.Safe.to_string session_abi_catalog_json)
+
+let attach_authority_catalogs opcodes = function
   | `Assoc fields ->
-    let catalog = vm_semantics_catalog_json opcodes in
+    let vm_semantics_catalog = vm_semantics_catalog_json opcodes in
     `Assoc
       (fields
        @ [
-         "vm_semantics_root_catalog", catalog;
+         "vm_semantics_root_catalog", vm_semantics_catalog;
          "vm_semantics_catalog_root",
-         `String (vm_semantics_catalog_root catalog);
+         `String (vm_semantics_catalog_root vm_semantics_catalog);
+         "session_abi_root_catalog", session_abi_catalog_json;
+         "session_abi_catalog_root", `String session_abi_catalog_root;
        ])
   | value -> value
 
@@ -113,4 +149,4 @@ let () =
   print_endline
     (Yojson.Safe.pretty_to_string
        (Profile.current_runtime_profile_catalog_json ~opcodes
-        |> attach_vm_semantics_catalog opcodes))
+        |> attach_authority_catalogs opcodes))
