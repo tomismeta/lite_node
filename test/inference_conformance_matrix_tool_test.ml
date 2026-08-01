@@ -573,6 +573,7 @@ let report
     ?required_failure_contract_blockers
     ?include_required_contract_payload
     ?required_failure_contract_payload
+    ?(transcendental_dependency_catalog_root = hex_root 'f')
     ?(validator_readiness_blockers = ["cross_platform_conformance_missing"])
     ?(result_signature_schema = "octra.inference.conformance.result-signature.v6")
     ?failure
@@ -587,6 +588,8 @@ let report
     "selected_opcodes", `List [`String opcode];
     "template_corpus_root", `String corpus;
     "profile_catalog_root", `String (hex_root 'c');
+    "transcendental_dependency_catalog_root",
+    `String transcendental_dependency_catalog_root;
     "failure_case_gate", `Assoc ["status", `String "accepted"];
     "profile_root_binding_gate", `Assoc ["status", `String profile_gate_status];
     "vm_semantics_binding_gate", `Assoc ["status", `String vm_semantics_gate_status];
@@ -921,6 +924,10 @@ let check_matrix_accepts_bound_reports () =
       check
         "matrix carries runner hashes"
         (List.length (string_list_value "runner_executable_sha256s" fields) = 2);
+      check
+        "matrix carries one transcendental dependency catalog root"
+        (string_list_value "transcendental_dependency_catalog_roots" fields =
+         [hex_root 'f']);
       check
         "matrix carries platform runner observation count"
         (match assoc_value "distinct_platform_runner_observation_count" fields with
@@ -1437,6 +1444,135 @@ let check_matrix_rejects_invalid_profile_catalog_root () =
          check
            "source row invalid profile catalog blocker"
            (List.mem "invalid_profile_catalog_root" (blockers report_fields))
+      | _ -> failwith "missing report rows")
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_transcendental_dependency_catalog_mismatch () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~transcendental_dependency_catalog_root:(hex_root 'e')
+           "Linux"
+           "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "transcendental catalog mismatch matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "transcendental catalog mismatch blocker"
+        (List.mem
+           "transcendental_dependency_catalog_mismatch"
+           (blockers fields));
+      check
+        "transcendental catalog status rejected"
+        (match assoc_value "validator_readiness_gate" fields with
+         | `Assoc gate_fields ->
+           String.equal
+             (string_value "transcendental_dependency_catalog_status" gate_fields)
+             "rejected"
+         | _ -> false)
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_missing_transcendental_dependency_catalog_root () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64"
+         |> remove_assoc_field "transcendental_dependency_catalog_root")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "missing transcendental catalog matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "missing transcendental catalog top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      check
+        "missing transcendental catalog aggregate blocker"
+        (List.mem
+           "missing_transcendental_dependency_catalog_root"
+           (blockers fields));
+      check
+        "missing transcendental catalog status rejected"
+        (match assoc_value "validator_readiness_gate" fields with
+         | `Assoc gate_fields ->
+           String.equal
+             (string_value "transcendental_dependency_catalog_status" gate_fields)
+             "rejected"
+         | _ -> false);
+      (match assoc_value "reports" fields with
+       | `List (`Assoc report_fields :: _) ->
+         check
+           "source row missing transcendental catalog blocker"
+           (List.mem
+              "missing_transcendental_dependency_catalog_root"
+              (blockers report_fields))
+       | _ -> failwith "missing report rows")
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_invalid_transcendental_dependency_catalog_root () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64"
+         |> replace_assoc_field
+              "transcendental_dependency_catalog_root"
+              (`String (String.make 64 'z')))
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "invalid transcendental catalog matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "invalid transcendental catalog top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      check
+        "invalid transcendental catalog aggregate blocker"
+        (List.mem
+           "invalid_transcendental_dependency_catalog_root"
+           (blockers fields));
+      check
+        "invalid transcendental catalog status rejected"
+        (match assoc_value "validator_readiness_gate" fields with
+         | `Assoc gate_fields ->
+           String.equal
+             (string_value "transcendental_dependency_catalog_status" gate_fields)
+             "rejected"
+         | _ -> false);
+      (match assoc_value "reports" fields with
+       | `List (`Assoc report_fields :: _) ->
+         check
+           "source row invalid transcendental catalog blocker"
+           (List.mem
+              "invalid_transcendental_dependency_catalog_root"
+              (blockers report_fields))
        | _ -> failwith "missing report rows")
     | _ -> failwith "matrix output must be object")
 
@@ -3070,6 +3206,9 @@ let () =
   check_matrix_rejects_corpus_mismatch ();
   check_matrix_rejects_invalid_template_corpus_root ();
   check_matrix_rejects_invalid_profile_catalog_root ();
+  check_matrix_rejects_transcendental_dependency_catalog_mismatch ();
+  check_matrix_rejects_missing_transcendental_dependency_catalog_root ();
+  check_matrix_rejects_invalid_transcendental_dependency_catalog_root ();
   check_matrix_rejects_failure_case_mismatch ();
   check_matrix_rejects_failure_mutation_payload_mismatch ();
   check_matrix_rejects_forged_failure_mutation_payload_shape ();

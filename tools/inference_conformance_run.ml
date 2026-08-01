@@ -1214,6 +1214,7 @@ let matrix_request_platform_json () =
 let cross_platform_matrix_request
     ~required_opcodes
     ~profile_catalog_root
+    ~transcendental_dependency_catalog_root
     ~template_corpus_root
     ~local_result_signature_sha256 =
   let opcode_argv = cross_platform_opcode_argv required_opcodes in
@@ -1254,6 +1255,10 @@ let cross_platform_matrix_request
     (match profile_catalog_root with
      | Some root -> `String root
      | None -> `Null);
+    "required_transcendental_dependency_catalog_root",
+    (match transcendental_dependency_catalog_root with
+     | Some root -> `String root
+     | None -> `Null);
     "required_template_corpus_root",
     (match template_corpus_root with
      | Some root -> `String root
@@ -1292,6 +1297,7 @@ let cross_platform_matrix_request
       "abi_declaration_binding_result_status", `String "matched";
       "executable_abi_binding_status", `String "matched";
       "profile_catalog_root", `String "valid_sha256";
+      "transcendental_dependency_catalog_root", `String "valid_sha256";
       "template_corpus_root", `String "valid_sha256";
       "runner_executable_sha256", `String "valid_sha256";
     ];
@@ -1299,6 +1305,7 @@ let cross_platform_matrix_request
     `Assoc [
       "result_signatures", `String "one_normalized_signature";
       "profile_catalog_roots", `String "one_shared_root";
+      "transcendental_dependency_catalog_roots", `String "one_shared_root";
       "template_corpus_roots", `String "one_shared_root";
       "opcode_coverage", `String "all_required_opcodes_per_report";
       "platform_observations", `String "at_least_two_distinct";
@@ -1342,6 +1349,9 @@ let report_row_is_bound = function
         | Some value -> not (String.equal value "")
         | None -> false)
     && (match opt_string_field "profile_catalog_root" fields with
+        | Some value -> not (String.equal value "")
+        | None -> false)
+    && (match opt_string_field "transcendental_dependency_catalog_root" fields with
         | Some value -> not (String.equal value "")
         | None -> false)
     && (match opt_string_field "template_corpus_root" fields with
@@ -1390,6 +1400,7 @@ let max_distinct_platform_runner_observations observations =
 let cross_platform_evidence
     ~required_opcodes
     ~profile_catalog_root
+    ~transcendental_dependency_catalog_root
     ~template_corpus_root
     ~local_result_signature_sha256 =
   match !cross_platform_matrix with
@@ -1405,6 +1416,11 @@ let cross_platform_evidence
        | Some root -> `String root
        | None -> `Null);
       "matrix_profile_catalog_roots", `List [];
+      "required_transcendental_dependency_catalog_root",
+      (match transcendental_dependency_catalog_root with
+       | Some root -> `String root
+       | None -> `Null);
+      "matrix_transcendental_dependency_catalog_roots", `List [];
       "required_template_corpus_root",
       (match template_corpus_root with
        | Some root -> `String root
@@ -1419,6 +1435,7 @@ let cross_platform_evidence
       cross_platform_matrix_request
         ~required_opcodes
         ~profile_catalog_root
+        ~transcendental_dependency_catalog_root
         ~template_corpus_root
         ~local_result_signature_sha256;
       "blockers", `List [`String "missing_cross_platform_matrix"];
@@ -1476,6 +1493,11 @@ let cross_platform_evidence
        let matrix_profile_catalog_roots =
          optional_string_list_field "profile_catalog_roots" fields
        in
+       let matrix_transcendental_dependency_catalog_roots =
+         optional_string_list_field
+           "transcendental_dependency_catalog_roots"
+           fields
+       in
        let matrix_template_corpus_roots =
          optional_string_list_field "template_corpus_roots" fields
        in
@@ -1527,6 +1549,12 @@ let cross_platform_evidence
          |> List.filter_map (report_row_string_field "profile_catalog_root")
          |> unique
        in
+       let row_transcendental_dependency_catalog_roots =
+         report_rows
+         |> List.filter_map
+              (report_row_string_field "transcendental_dependency_catalog_root")
+         |> unique
+       in
        let row_template_corpus_roots =
          report_rows
          |> List.filter_map (report_row_string_field "template_corpus_root")
@@ -1545,6 +1573,14 @@ let cross_platform_evidence
        in
        let profile_catalog_accepted =
          match profile_catalog_root, matrix_profile_catalog_roots with
+         | Some root, [matrix_root] -> String.equal root matrix_root
+         | _ -> false
+       in
+       let transcendental_dependency_catalog_accepted =
+         match
+           transcendental_dependency_catalog_root,
+           matrix_transcendental_dependency_catalog_roots
+         with
          | Some root, [matrix_root] -> String.equal root matrix_root
          | _ -> false
        in
@@ -1595,6 +1631,10 @@ let cross_platform_evidence
        let row_profile_catalog_accepted =
          row_profile_catalog_roots = matrix_profile_catalog_roots
        in
+       let row_transcendental_dependency_catalog_accepted =
+         row_transcendental_dependency_catalog_roots =
+         matrix_transcendental_dependency_catalog_roots
+       in
        let row_template_corpus_accepted =
          row_template_corpus_roots = matrix_template_corpus_roots
        in
@@ -1626,6 +1666,9 @@ let cross_platform_evidence
          |> add_blocker
               (not profile_catalog_accepted)
               "matrix_profile_catalog_mismatch"
+         |> add_blocker
+              (not transcendental_dependency_catalog_accepted)
+              "matrix_transcendental_dependency_catalog_mismatch"
          |> add_blocker
               (not template_corpus_accepted)
               "matrix_template_corpus_mismatch"
@@ -1662,6 +1705,9 @@ let cross_platform_evidence
          |> add_blocker
               (not row_profile_catalog_accepted)
               "matrix_row_profile_catalog_mismatch"
+         |> add_blocker
+              (not row_transcendental_dependency_catalog_accepted)
+              "matrix_row_transcendental_dependency_catalog_mismatch"
          |> add_blocker
               (not row_template_corpus_accepted)
               "matrix_row_template_corpus_mismatch"
@@ -1710,6 +1756,21 @@ let cross_platform_evidence
               matrix_profile_catalog_roots);
          "profile_catalog_status",
          `String (if profile_catalog_accepted then "accepted" else "rejected");
+         "required_transcendental_dependency_catalog_root",
+         (match transcendental_dependency_catalog_root with
+          | Some root -> `String root
+          | None -> `Null);
+         "matrix_transcendental_dependency_catalog_roots",
+         `List
+           (List.map
+              (fun root -> `String root)
+              matrix_transcendental_dependency_catalog_roots);
+         "transcendental_dependency_catalog_status",
+         `String
+           (if transcendental_dependency_catalog_accepted then
+              "accepted"
+            else
+              "rejected");
          "required_template_corpus_root",
          (match template_corpus_root with
           | Some root -> `String root
@@ -1766,6 +1827,11 @@ let cross_platform_evidence
            (List.map
               (fun root -> `String root)
               row_profile_catalog_roots);
+         "row_transcendental_dependency_catalog_roots",
+         `List
+           (List.map
+              (fun root -> `String root)
+              row_transcendental_dependency_catalog_roots);
          "row_template_corpus_roots",
          `List
            (List.map
@@ -1783,6 +1849,7 @@ let cross_platform_evidence
                && row_signature_accepted
                && local_result_signature_accepted
                && row_profile_catalog_accepted
+               && row_transcendental_dependency_catalog_accepted
                && row_template_corpus_accepted then
               "accepted"
             else
@@ -4474,16 +4541,22 @@ let run_index path =
   let local_result_signature_sha256 =
     Some (sha256 (Signature.signature_json (List.map snd results)))
   in
+  let transcendental_dependency_catalog =
+    Profile.transcendental_dependency_catalog_json
+      ~opcodes:(profile_gate_opcodes profile_gates)
+  in
+  let transcendental_dependency_catalog_root =
+    Some
+      (Profile.transcendental_dependency_catalog_root
+         transcendental_dependency_catalog)
+  in
   let cross_platform_evidence_json =
     cross_platform_evidence
       ~required_opcodes
       ~profile_catalog_root
+      ~transcendental_dependency_catalog_root
       ~template_corpus_root
       ~local_result_signature_sha256
-  in
-  let transcendental_dependency_catalog =
-    Profile.transcendental_dependency_catalog_json
-      ~opcodes:(profile_gate_opcodes profile_gates)
   in
   let accepted =
     execution_accepted

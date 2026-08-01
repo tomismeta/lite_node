@@ -879,6 +879,7 @@ let check_q1_contract_visible gate =
 
 let bound_matrix_report_row
     ~profile_catalog_root
+    ~transcendental_dependency_catalog_root
     ~template_corpus_root
     ~result_signature_sha256
     platform_key runner_sha =
@@ -892,11 +893,14 @@ let bound_matrix_report_row
     "platform_key", `String platform_key;
     "runner_executable_sha256", `String runner_sha;
     "profile_catalog_root", `String profile_catalog_root;
+    "transcendental_dependency_catalog_root",
+    `String transcendental_dependency_catalog_root;
     "template_corpus_root", `String template_corpus_root;
   ]
 
 let accepted_matrix
     ~profile_catalog_root
+    ~transcendental_dependency_catalog_root
     ~template_corpus_root
     ~result_signature_sha256 =
   `Assoc [
@@ -912,17 +916,21 @@ let accepted_matrix
     "distinct_platform_runner_observation_count", `Int 2;
     "result_signature_count", `Int 1;
     "profile_catalog_roots", `List [`String profile_catalog_root];
+    "transcendental_dependency_catalog_roots",
+    `List [`String transcendental_dependency_catalog_root];
     "template_corpus_roots", `List [`String template_corpus_root];
     "reports",
     `List [
       bound_matrix_report_row
         ~profile_catalog_root
+        ~transcendental_dependency_catalog_root
         ~template_corpus_root
         ~result_signature_sha256
         "4.14.2|Unix|Darwin|1.0|arm64|64|false|native"
         (hex_root '1');
       bound_matrix_report_row
         ~profile_catalog_root
+        ~transcendental_dependency_catalog_root
         ~template_corpus_root
         ~result_signature_sha256
         "4.14.2|Unix|Linux|1.0|x86_64|64|false|native"
@@ -2104,6 +2112,11 @@ let check_missing_cross_platform_matrix_request_is_actionable () =
            (string_value "required_profile_catalog_root" request)
            (string_value "profile_catalog_root" fields));
       check
+        "matrix request transcendental dependency root"
+        (String.equal
+           (string_value "required_transcendental_dependency_catalog_root" request)
+           (string_value "transcendental_dependency_catalog_root" fields));
+      check
         "matrix request template corpus root"
         (String.equal
            (string_value "required_template_corpus_root" request)
@@ -2146,6 +2159,7 @@ let check_missing_cross_platform_matrix_request_is_actionable () =
           "abi_declaration_binding_result_status", `String "matched";
           "executable_abi_binding_status", `String "matched";
           "profile_catalog_root", `String "valid_sha256";
+          "transcendental_dependency_catalog_root", `String "valid_sha256";
           "template_corpus_root", `String "valid_sha256";
           "runner_executable_sha256", `String "valid_sha256";
         ]
@@ -2267,6 +2281,8 @@ let check_pinned_cross_platform_matrix_is_consumed () =
       let matrix =
         accepted_matrix
           ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~transcendental_dependency_catalog_root:
+            (string_value "transcendental_dependency_catalog_root" seed_fields)
           ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
           ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
       in
@@ -2356,6 +2372,8 @@ let check_cross_platform_matrix_without_pin_rejects () =
       let matrix =
         accepted_matrix
           ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~transcendental_dependency_catalog_root:
+            (string_value "transcendental_dependency_catalog_root" seed_fields)
           ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
           ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
       in
@@ -2411,6 +2429,8 @@ let check_cross_platform_matrix_sha_mismatch_rejects () =
       let matrix =
         accepted_matrix
           ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~transcendental_dependency_catalog_root:
+            (string_value "transcendental_dependency_catalog_root" seed_fields)
           ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
           ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
       in
@@ -2468,6 +2488,8 @@ let check_cross_platform_matrix_signature_schema_mismatch_rejects () =
       let matrix =
         accepted_matrix
           ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~transcendental_dependency_catalog_root:
+            (string_value "transcendental_dependency_catalog_root" seed_fields)
           ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
           ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
         |> replace_assoc_field
@@ -2528,6 +2550,8 @@ let check_cross_platform_matrix_row_envelope_mismatch_rejects () =
       let matrix =
         accepted_matrix
           ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~transcendental_dependency_catalog_root:
+            (string_value "transcendental_dependency_catalog_root" seed_fields)
           ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
           ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
         |> replace_report_field
@@ -2600,6 +2624,8 @@ let check_cross_platform_matrix_local_signature_mismatch_rejects () =
       let matrix =
         accepted_matrix
           ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~transcendental_dependency_catalog_root:
+            (string_value "transcendental_dependency_catalog_root" seed_fields)
           ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
           ~result_signature_sha256:
             (different_sha (string_value "result_signature_sha256" seed_fields))
@@ -2658,6 +2684,8 @@ let check_cross_platform_matrix_forged_runner_count_rejects () =
       let matrix =
         accepted_matrix
           ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~transcendental_dependency_catalog_root:
+            (string_value "transcendental_dependency_catalog_root" seed_fields)
           ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
           ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
         |> replace_assoc_field "distinct_runner_executable_count" (`Int 3)
@@ -2722,6 +2750,8 @@ let check_cross_platform_matrix_forged_observation_count_rejects () =
       let matrix =
         accepted_matrix
           ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~transcendental_dependency_catalog_root:
+            (string_value "transcendental_dependency_catalog_root" seed_fields)
           ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
           ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
         |> replace_assoc_field
@@ -2788,6 +2818,8 @@ let check_cross_platform_matrix_rejects_insufficient_row_diversity () =
       let matrix =
         accepted_matrix
           ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~transcendental_dependency_catalog_root:
+            (string_value "transcendental_dependency_catalog_root" seed_fields)
           ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
           ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
         |> replace_assoc_field "distinct_platform_count" (`Int 1)
@@ -2869,6 +2901,8 @@ let check_cross_platform_matrix_forged_row_root_rejects () =
       let matrix =
         accepted_matrix
           ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~transcendental_dependency_catalog_root:
+            (string_value "transcendental_dependency_catalog_root" seed_fields)
           ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
           ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
         |> replace_first_report_field "profile_catalog_root" (`String (hex_root '9'))

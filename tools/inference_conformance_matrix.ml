@@ -369,6 +369,7 @@ type report_summary = {
   result_opcodes : string list;
   selected_opcodes : string list;
   profile_catalog_root : string option;
+  transcendental_dependency_catalog_root : string option;
   template_corpus_root : string option;
   validator_readiness_blockers : string list;
   blockers : string list;
@@ -1027,6 +1028,9 @@ let report_summary path =
     let profile_catalog_root =
       opt_string_field "profile_catalog_root" fields
     in
+    let transcendental_dependency_catalog_root =
+      opt_string_field "transcendental_dependency_catalog_root" fields
+    in
     let template_corpus_root =
       opt_string_field "template_corpus_root" fields
     in
@@ -1101,6 +1105,9 @@ let report_summary path =
       opt_string_from_assoc "runner_executable_sha256" platform
     in
     let profile_catalog_root_valid = opt_hex_string profile_catalog_root in
+    let transcendental_dependency_catalog_root_valid =
+      opt_hex_string transcendental_dependency_catalog_root
+    in
     let template_corpus_root_valid = opt_hex_string template_corpus_root in
     let runner_executable_sha256_valid =
       opt_hex_string runner_executable_sha256
@@ -1133,6 +1140,7 @@ let report_summary path =
       && abi_declaration_bindings_matched
       && executable_abi_bindings_matched
       && profile_catalog_root_valid
+      && transcendental_dependency_catalog_root_valid
       && template_corpus_root_valid
       && runner_executable_sha256_valid
     in
@@ -1209,6 +1217,13 @@ let report_summary path =
            (Option.is_some profile_catalog_root && not profile_catalog_root_valid)
            "invalid_profile_catalog_root"
       |> add_if
+           (Option.is_none transcendental_dependency_catalog_root)
+           "missing_transcendental_dependency_catalog_root"
+      |> add_if
+           (Option.is_some transcendental_dependency_catalog_root
+            && not transcendental_dependency_catalog_root_valid)
+           "invalid_transcendental_dependency_catalog_root"
+      |> add_if
            (Option.is_none runner_executable_sha256)
            "missing_runner_executable_sha256"
       |> add_if
@@ -1235,6 +1250,7 @@ let report_summary path =
       result_opcodes;
       selected_opcodes;
       profile_catalog_root;
+      transcendental_dependency_catalog_root;
       template_corpus_root;
       validator_readiness_blockers;
       blockers;
@@ -1292,6 +1308,10 @@ let report_summary path =
            "rejected");
       "profile_catalog_root",
       (match profile_catalog_root with
+       | Some root -> `String root
+       | None -> `Null);
+      "transcendental_dependency_catalog_root",
+      (match transcendental_dependency_catalog_root with
        | Some root -> `String root
        | None -> `Null);
       "template_corpus_root",
@@ -1379,6 +1399,28 @@ let matrix_report paths =
     |> List.filter_map (fun summary -> summary.template_corpus_root)
     |> unique
   in
+  let transcendental_dependency_catalog_roots =
+    summaries
+    |> List.filter_map
+         (fun summary -> summary.transcendental_dependency_catalog_root)
+    |> unique
+  in
+  let missing_transcendental_dependency_catalog_root_count =
+    List.length
+      (List.filter
+         (fun summary ->
+            summary.transcendental_dependency_catalog_root = None)
+         summaries)
+  in
+  let invalid_transcendental_dependency_catalog_root_count =
+    List.length
+      (List.filter
+         (fun summary ->
+            match summary.transcendental_dependency_catalog_root with
+            | Some root -> not (hex_string root)
+            | None -> false)
+         summaries)
+  in
   let missing_template_corpus_root_count =
     List.length
       (List.filter
@@ -1446,6 +1488,9 @@ let matrix_report paths =
     && List.length signatures = 1
     && missing_profile_catalog_root_count = 0
     && List.length profile_catalog_roots = 1
+    && missing_transcendental_dependency_catalog_root_count = 0
+    && invalid_transcendental_dependency_catalog_root_count = 0
+    && List.length transcendental_dependency_catalog_roots = 1
     && missing_template_corpus_root_count = 0
     && List.length template_corpus_roots = 1
     && per_report_opcode_coverage_ready
@@ -1477,6 +1522,15 @@ let matrix_report paths =
     |> add_if
          (List.length profile_catalog_roots > 1)
          "profile_catalog_mismatch"
+    |> add_if
+         (missing_transcendental_dependency_catalog_root_count > 0)
+         "missing_transcendental_dependency_catalog_root"
+    |> add_if
+         (invalid_transcendental_dependency_catalog_root_count > 0)
+         "invalid_transcendental_dependency_catalog_root"
+    |> add_if
+         (List.length transcendental_dependency_catalog_roots > 1)
+         "transcendental_dependency_catalog_mismatch"
     |> add_if
          (missing_template_corpus_root_count > 0)
          "missing_template_corpus_root"
@@ -1534,6 +1588,14 @@ let matrix_report paths =
       `String
         (if missing_profile_catalog_root_count = 0
             && List.length profile_catalog_roots = 1 then
+           "accepted"
+         else
+           "rejected");
+      "transcendental_dependency_catalog_status",
+      `String
+        (if missing_transcendental_dependency_catalog_root_count = 0
+            && invalid_transcendental_dependency_catalog_root_count = 0
+            && List.length transcendental_dependency_catalog_roots = 1 then
            "accepted"
          else
            "rejected");
@@ -1608,6 +1670,13 @@ let matrix_report paths =
     "profile_catalog_root_count", `Int (List.length profile_catalog_roots);
     "profile_catalog_roots",
     `List (List.map (fun value -> `String value) profile_catalog_roots);
+    "transcendental_dependency_catalog_root_count",
+    `Int (List.length transcendental_dependency_catalog_roots);
+    "transcendental_dependency_catalog_roots",
+    `List
+      (List.map
+         (fun value -> `String value)
+         transcendental_dependency_catalog_roots);
     "template_corpus_root_count", `Int (List.length template_corpus_roots);
     "template_corpus_roots",
     `List (List.map (fun value -> `String value) template_corpus_roots);
