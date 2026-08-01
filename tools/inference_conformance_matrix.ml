@@ -255,6 +255,10 @@ let opt_string_from_assoc name fields =
   | Some (`String value) -> Some value
   | _ -> None
 
+let opt_hex_string = function
+  | Some value -> hex_string value
+  | None -> false
+
 let unique values =
   List.sort_uniq String.compare values
 
@@ -837,6 +841,11 @@ let report_summary path =
     let runner_executable_sha256 =
       opt_string_from_assoc "runner_executable_sha256" platform
     in
+    let profile_catalog_root_valid = opt_hex_string profile_catalog_root in
+    let template_corpus_root_valid = opt_hex_string template_corpus_root in
+    let runner_executable_sha256_valid =
+      opt_hex_string runner_executable_sha256
+    in
     let accepted =
       String.equal execution_mode "positive_template_vm_execution"
       && opt_status_is_accepted "status" fields
@@ -861,8 +870,9 @@ let report_summary path =
       && abi_declaration_binding_accepted
       && abi_declaration_bindings_matched
       && executable_abi_bindings_matched
-      && Option.is_some template_corpus_root
-      && Option.is_some runner_executable_sha256
+      && profile_catalog_root_valid
+      && template_corpus_root_valid
+      && runner_executable_sha256_valid
     in
     let blockers =
       []
@@ -923,8 +933,21 @@ let report_summary path =
            (Option.is_none template_corpus_root)
            "missing_template_corpus_root"
       |> add_if
+           (Option.is_some template_corpus_root && not template_corpus_root_valid)
+           "invalid_template_corpus_root"
+      |> add_if
+           (Option.is_none profile_catalog_root)
+           "missing_profile_catalog_root"
+      |> add_if
+           (Option.is_some profile_catalog_root && not profile_catalog_root_valid)
+           "invalid_profile_catalog_root"
+      |> add_if
            (Option.is_none runner_executable_sha256)
            "missing_runner_executable_sha256"
+      |> add_if
+           (Option.is_some runner_executable_sha256
+            && not runner_executable_sha256_valid)
+           "invalid_runner_executable_sha256"
     in
     let signature = Signature.signature_json results in
     let signature_sha256 = sha256 signature in

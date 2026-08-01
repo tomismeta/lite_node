@@ -945,6 +945,37 @@ let check_matrix_rejects_missing_runner_hash () =
        | _ -> failwith "missing report rows")
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_invalid_runner_hash () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(String.make 64 'z') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "invalid hash matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "invalid hash blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      (match assoc_value "reports" fields with
+       | `List (`Assoc report_fields :: _) ->
+         check
+           "source row invalid hash blocker"
+           (List.mem
+              "invalid_runner_executable_sha256"
+              (blockers report_fields))
+       | _ -> failwith "missing report rows")
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_corpus_mismatch () =
   with_temp_dir (fun dir ->
     let a =
@@ -970,6 +1001,69 @@ let check_matrix_rejects_corpus_mismatch () =
       check
         "corpus mismatch blocker"
         (List.mem "template_corpus_mismatch" (blockers fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_invalid_template_corpus_root () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report
+           ~runner_sha:(hex_root '1')
+           ~corpus:(String.make 64 'z')
+           "Darwin"
+           "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "invalid corpus root matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "invalid corpus root blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      (match assoc_value "reports" fields with
+       | `List (`Assoc report_fields :: _) ->
+         check
+           "source row invalid corpus blocker"
+           (List.mem "invalid_template_corpus_root" (blockers report_fields))
+       | _ -> failwith "missing report rows")
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_invalid_profile_catalog_root () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64"
+         |> replace_assoc_field "profile_catalog_root" (`String (String.make 64 'z')))
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "invalid profile catalog root matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "invalid profile catalog root blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      (match assoc_value "reports" fields with
+       | `List (`Assoc report_fields :: _) ->
+         check
+           "source row invalid profile catalog blocker"
+           (List.mem "invalid_profile_catalog_root" (blockers report_fields))
+       | _ -> failwith "missing report rows")
     | _ -> failwith "matrix output must be object")
 
 let check_matrix_rejects_failure_case_mismatch () =
@@ -2182,7 +2276,10 @@ let () =
   check_matrix_accepts_required_opcode_reports ();
   check_matrix_rejects_missing_required_opcode ();
   check_matrix_rejects_missing_runner_hash ();
+  check_matrix_rejects_invalid_runner_hash ();
   check_matrix_rejects_corpus_mismatch ();
+  check_matrix_rejects_invalid_template_corpus_root ();
+  check_matrix_rejects_invalid_profile_catalog_root ();
   check_matrix_rejects_failure_case_mismatch ();
   check_matrix_rejects_failure_mutation_payload_mismatch ();
   check_matrix_rejects_forged_failure_mutation_payload_shape ();
