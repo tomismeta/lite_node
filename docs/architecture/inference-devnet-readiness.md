@@ -183,9 +183,10 @@ d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
    `session_report_sha256`. That preflight reads request input, pins
    authenticated ranges, creates the same execution plan used by the normal
    stage runner, reports target/request/model-range/model-deployment/session-ABI
-   root uniformity, validates top-level request/deployment root claims when
-   present, and records that no session execution was attempted. The label is
-   not yet a VM-proven prefill/decode phase contract.
+   root uniformity, emits explicit `identity_blockers`, validates top-level
+   request/deployment root claims when present, and records that no session
+   execution was attempted. The label is not yet a VM-proven prefill/decode
+   phase contract.
 6. Re-run one Bonsai prompt-to-token proof under the target-owned session shape.
 7. Re-run recurrent-heavy and logits-tail performance gates against that shape.
 8. Only then prepare the mergeable branch by reducing evidence-only scaffolding

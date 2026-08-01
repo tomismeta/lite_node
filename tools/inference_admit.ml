@@ -1716,6 +1716,9 @@ let run_batch_stage ~cache ~timing_mode stage =
 let unique_json_strings values =
   values |> unique_strings |> list_json
 
+let add_if condition value values =
+  if condition then value :: values else values
+
 let all_same_string = function
   | []
   | [_] -> true
@@ -1744,6 +1747,32 @@ let declared_option_string_status declared derived =
         derived
     then "matched"
     else "mismatch"
+
+let preflight_identity_blockers
+    ~target_root_uniform
+    ~request_root_uniform
+    ~model_ranges_root_uniform
+    ~model_deployment_root_uniform
+    ~session_abi_root_uniform
+    ~request_root_status
+    ~model_deployment_root_status
+    ~decode_steps_match =
+  []
+  |> add_if (not target_root_uniform) "target_root_mismatch"
+  |> add_if (not request_root_uniform) "request_root_mismatch"
+  |> add_if (not model_ranges_root_uniform) "model_ranges_root_mismatch"
+  |> add_if
+       (not model_deployment_root_uniform)
+       "model_deployment_root_mismatch"
+  |> add_if (not session_abi_root_uniform) "session_abi_root_mismatch"
+  |> add_if
+       (String.equal request_root_status "mismatch")
+       "declared_request_root_mismatch"
+  |> add_if
+       (String.equal model_deployment_root_status "mismatch")
+       "declared_model_deployment_root_mismatch"
+  |> add_if (not decode_steps_match) "decode_steps_mismatch"
+  |> List.rev
 
 let preflight_transition_stage ~cache stage =
   let timer = start_timer Timing_none in
@@ -1867,6 +1896,33 @@ let continuation_preflight_for_bundle bundle =
   let transition_plan =
     List.map (fun (_, _, json) -> json) preflight
   in
+  let target_root_uniform = all_same_string target_roots in
+  let request_root_uniform = all_same_string request_roots in
+  let model_ranges_root_uniform = all_same_string model_ranges_roots in
+  let model_deployment_root_uniform =
+    all_same_option_string model_deployment_roots
+  in
+  let session_abi_root_uniform = all_same_string session_abi_roots in
+  let decode_steps_match = decode_transitions = bundle.decode_steps in
+  let request_root_status =
+    declared_string_status bundle.declared_request_root request_roots
+  in
+  let model_deployment_root_status =
+    declared_option_string_status
+      bundle.declared_model_deployment_root
+      model_deployment_roots
+  in
+  let identity_blockers =
+    preflight_identity_blockers
+      ~target_root_uniform
+      ~request_root_uniform
+      ~model_ranges_root_uniform
+      ~model_deployment_root_uniform
+      ~session_abi_root_uniform
+      ~request_root_status
+      ~model_deployment_root_status
+      ~decode_steps_match
+  in
   let json =
     `Assoc [
       "status", `String "blocked";
@@ -1879,32 +1935,25 @@ let continuation_preflight_for_bundle bundle =
       "continuation_output_prefix_supported", `Bool false;
       "declared_phase_sequence", list_json phases;
       "declared_decode_transitions", `Int decode_transitions;
-      "decode_steps_match", `Bool (decode_transitions = bundle.decode_steps);
+      "decode_steps_match", `Bool decode_steps_match;
       "identity_checks",
       `Assoc [
-        "target_root_uniform", `Bool (all_same_string target_roots);
-        "request_root_uniform", `Bool (all_same_string request_roots);
-        "model_ranges_root_uniform", `Bool (all_same_string model_ranges_roots);
-        "model_deployment_root_uniform",
-        `Bool (all_same_option_string model_deployment_roots);
-        "session_abi_root_uniform", `Bool (all_same_string session_abi_roots);
+        "target_root_uniform", `Bool target_root_uniform;
+        "request_root_uniform", `Bool request_root_uniform;
+        "model_ranges_root_uniform", `Bool model_ranges_root_uniform;
+        "model_deployment_root_uniform", `Bool model_deployment_root_uniform;
+        "session_abi_root_uniform", `Bool session_abi_root_uniform;
       ];
       "top_level_claims",
       `Assoc [
         "request_root", nullable_string_json bundle.declared_request_root;
-        "request_root_status",
-        `String
-          (declared_string_status
-             bundle.declared_request_root
-             request_roots);
+        "request_root_status", `String request_root_status;
         "model_deployment_root",
         nullable_string_json bundle.declared_model_deployment_root;
         "model_deployment_root_status",
-        `String
-          (declared_option_string_status
-             bundle.declared_model_deployment_root
-             model_deployment_roots);
+        `String model_deployment_root_status;
       ];
+      "identity_blockers", list_json identity_blockers;
       "blockers",
       `List [
         `String "session_abi_continuation_input_not_defined";

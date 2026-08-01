@@ -207,6 +207,29 @@ let drop_assoc_fields names = function
          fields)
   | value -> value
 
+let replace_assoc_field name replacement = function
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (field, value) ->
+            if String.equal field name then field, replacement
+            else field, value)
+         fields)
+  | _ -> failwith "expected object"
+
+let request_from_json = function
+  | `Assoc fields ->
+    Request.{
+      schema = int_json "schema" fields;
+      target_root = string_json "target_root" fields;
+      entrypoint = string_json "entrypoint" fields;
+      input_root = string_json "input_root" fields;
+      request_nonce = string_json "request_nonce" fields;
+      max_output_bytes = int_json "max_output_bytes" fields;
+      max_advance_effort = int_json "max_advance_effort" fields;
+    }
+  | _ -> failwith "request must be an object"
+
 let write_batch_fixture dir =
   let stage_dir = Filename.concat dir "stage" in
   Unix.mkdir stage_dir 0o700;
@@ -366,10 +389,30 @@ let write_session_bundle_fixture
     ?(decode_steps = Some 1)
     ?request_root
     ?model_deployment_root
+    ?second_request_nonce
     ?(transition_count = 1)
     dir =
   let batch_path = write_batch_fixture dir in
   let stage = stage_json_from_batch batch_path in
+  let second_stage =
+    match second_request_nonce with
+    | None -> stage
+    | Some request_nonce ->
+      let request_path = Filename.concat dir "stage/request.json" in
+      let request =
+        request_from_json (Yojson.Safe.from_file request_path)
+      in
+      let second_request =
+        Request.{ request with request_nonce }
+      in
+      write_json
+        (Filename.concat dir "stage/request-second.json")
+        (request_json second_request);
+      replace_assoc_field
+        "request"
+        (`String "stage/request-second.json")
+        stage
+  in
   let transitions =
     List.init
       transition_count
@@ -377,7 +420,7 @@ let write_session_bundle_fixture
          `Assoc [
            "transition_id", `String (Printf.sprintf "token-%03d" index);
            "phase", `String (if index = 0 then "decode" else "prefill");
-           "stage", stage;
+           "stage", (if index = 1 then second_stage else stage);
          ])
   in
   let bundle_path = Filename.concat dir "session-bundle.cjson" in
@@ -796,6 +839,9 @@ let check_session_bundle_rejects_multi_transition () =
       (String.equal
          (string_json "model_deployment_root_status" claims)
          "not_declared");
+    check
+      "no identity blockers"
+      (list_json "identity_blockers" preflight = []);
     let blockers = list_json "blockers" preflight in
     List.iter
       (fun expected ->
@@ -899,6 +945,36 @@ let check_session_bundle_reports_top_level_claim_mismatch () =
          "mismatch")
   | _ -> failwith "report must be an object"
 
+let check_session_bundle_reports_identity_mismatch () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~second_request_nonce:(hex_root '6')
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "identity mismatch bundle exits nonzero" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check_session_hash report;
+    let preflight = assoc_json "continuation_preflight" fields in
+    let identities = assoc_json "identity_checks" preflight in
+    check
+      "request root not uniform"
+      (not (bool_json "request_root_uniform" identities));
+    check
+      "other roots still uniform"
+      (bool_json "target_root_uniform" identities
+       && bool_json "model_ranges_root_uniform" identities
+       && bool_json "model_deployment_root_uniform" identities
+       && bool_json "session_abi_root_uniform" identities);
+    let blockers = list_json "identity_blockers" preflight in
+    check
+      "request identity blocker"
+      (blockers = [`String "request_root_mismatch"])
+  | _ -> failwith "report must be an object"
+
 let check_session_bundle_preflight_checks_input_payload () =
   with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
   let bundle_path = write_session_bundle_fixture ~transition_count:2 dir in
@@ -935,5 +1011,6 @@ let () =
   check_session_bundle_hash_binds_decode_steps ();
   check_session_bundle_rejects_multi_transition ();
   check_session_bundle_reports_top_level_claim_mismatch ();
+  check_session_bundle_reports_identity_mismatch ();
   check_session_bundle_preflight_checks_input_payload ();
   check_session_bundle_requires_schema_and_decode_steps ()
