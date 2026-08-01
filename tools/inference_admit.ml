@@ -158,6 +158,10 @@ type transition_preflight_result = {
 
 type continuation_preflight = {
   continuation_preflight_json : Yojson.Safe.t;
+  continuation_identity_blockers : string list;
+  continuation_declaration_blockers : string list;
+  continuation_runtime_readiness_status : string;
+  continuation_next_runtime_blocker : string;
   continuation_unsupported_opcodes : string list;
   continuation_missing_capabilities : string list;
   continuation_policy_violations : Yojson.Safe.t list;
@@ -1755,8 +1759,7 @@ let preflight_identity_blockers
     ~model_deployment_root_uniform
     ~session_abi_root_uniform
     ~request_root_status
-    ~model_deployment_root_status
-    ~decode_steps_match =
+    ~model_deployment_root_status =
   []
   |> add_if (not target_root_uniform) "target_root_mismatch"
   |> add_if (not request_root_uniform) "request_root_mismatch"
@@ -1771,8 +1774,21 @@ let preflight_identity_blockers
   |> add_if
        (String.equal model_deployment_root_status "mismatch")
        "declared_model_deployment_root_mismatch"
+  |> List.rev
+
+let preflight_declaration_blockers ~decode_steps_match =
+  []
   |> add_if (not decode_steps_match) "decode_steps_mismatch"
   |> List.rev
+
+let continuation_runtime_status identity_blockers declaration_blockers =
+  match identity_blockers, declaration_blockers with
+  | [], [] ->
+    "rejected", "session_continuation_state_carry_not_supported"
+  | blocker :: _, _ ->
+    "identity_rejected", blocker
+  | [], blocker :: _ ->
+    "declaration_rejected", blocker
 
 let preflight_transition_stage ~cache stage =
   let timer = start_timer Timing_none in
@@ -1921,11 +1937,18 @@ let continuation_preflight_for_bundle bundle =
       ~session_abi_root_uniform
       ~request_root_status
       ~model_deployment_root_status
-      ~decode_steps_match
+  in
+  let declaration_blockers =
+    preflight_declaration_blockers ~decode_steps_match
+  in
+  let runtime_readiness_status, next_runtime_blocker =
+    continuation_runtime_status identity_blockers declaration_blockers
   in
   let json =
     `Assoc [
       "status", `String "blocked";
+      "runtime_readiness_status", `String runtime_readiness_status;
+      "next_runtime_blocker", `String next_runtime_blocker;
       "execution_attempted", `Bool false;
       "phase_contract", `String "labels_only_unverified";
       "continuation_basis", `String "undefined";
@@ -1954,6 +1977,7 @@ let continuation_preflight_for_bundle bundle =
         `String model_deployment_root_status;
       ];
       "identity_blockers", list_json identity_blockers;
+      "declaration_blockers", list_json declaration_blockers;
       "blockers",
       `List [
         `String "session_abi_continuation_input_not_defined";
@@ -1966,6 +1990,10 @@ let continuation_preflight_for_bundle bundle =
   in
   {
     continuation_preflight_json = json;
+    continuation_identity_blockers = identity_blockers;
+    continuation_declaration_blockers = declaration_blockers;
+    continuation_runtime_readiness_status = runtime_readiness_status;
+    continuation_next_runtime_blocker = next_runtime_blocker;
     continuation_unsupported_opcodes = unsupported;
     continuation_missing_capabilities = missing;
     continuation_policy_violations = policy_violations;
@@ -2023,7 +2051,10 @@ let independent_batch_runtime_semantics =
     "missing_runtime_capabilities", missing_resident_runtime_capabilities;
   ]
 
-let session_runtime_semantics ~transition_count =
+let session_runtime_semantics
+    ~transition_count
+    ~runtime_readiness_status
+    ~next_runtime_blocker =
   let single_transition = transition_count = 1 in
   `Assoc [
     "diagnostic_only", `Bool true;
@@ -2036,10 +2067,8 @@ let session_runtime_semantics ~transition_count =
     "continuation_supported", `Bool false;
     "state_carry", `String "not_supported";
     "resident_cache_scope", `List [];
-    "runtime_readiness_status",
-    `String (if single_transition then "partial_single_transition" else "rejected");
-    "next_runtime_blocker",
-    `String "session_continuation_state_carry_not_supported";
+    "runtime_readiness_status", `String runtime_readiness_status;
+    "next_runtime_blocker", `String next_runtime_blocker;
     "missing_runtime_capabilities", missing_resident_runtime_capabilities;
   ]
 
@@ -2063,6 +2092,7 @@ let session_report_payload
     ~transition_count
     ~decode_steps
     ~runtime_semantics
+    ~next_runtime_blocker
     ~last_transition_output_root
     ~unsupported_opcodes
     ~missing_capabilities
@@ -2074,6 +2104,7 @@ let session_report_payload
     "transition_count", `Int transition_count;
     "decode_steps", `Int decode_steps;
     "runtime_semantics", runtime_semantics;
+    "next_runtime_blocker", `String next_runtime_blocker;
     "last_transition_output_root",
     nullable_string_json last_transition_output_root;
     "unsupported_opcodes", unique_json_strings unsupported_opcodes;
@@ -2094,9 +2125,15 @@ let session_report_sha256 payload =
 let run_inference_session_file ~timing_mode path =
   let bundle = session_bundle_file path in
   let transition_count = List.length bundle.transitions in
-  let runtime_semantics = session_runtime_semantics ~transition_count in
   if transition_count <> 1 then begin
     let preflight = continuation_preflight_for_bundle bundle in
+    let runtime_semantics =
+      session_runtime_semantics
+        ~transition_count
+        ~runtime_readiness_status:
+          preflight.continuation_runtime_readiness_status
+        ~next_runtime_blocker:preflight.continuation_next_runtime_blocker
+    in
     let status = "rejected" in
     let payload =
       session_report_payload
@@ -2105,6 +2142,7 @@ let run_inference_session_file ~timing_mode path =
         ~transition_count
         ~decode_steps:bundle.decode_steps
         ~runtime_semantics
+        ~next_runtime_blocker:preflight.continuation_next_runtime_blocker
         ~last_transition_output_root:None
         ~unsupported_opcodes:preflight.continuation_unsupported_opcodes
         ~missing_capabilities:preflight.continuation_missing_capabilities
@@ -2122,7 +2160,7 @@ let run_inference_session_file ~timing_mode path =
         "runtime_semantics", runtime_semantics;
         "last_transition_output_root", `Null;
         "next_runtime_blocker",
-        `String "session_continuation_state_carry_not_supported";
+        `String preflight.continuation_next_runtime_blocker;
         "unsupported_opcodes",
         unique_json_strings preflight.continuation_unsupported_opcodes;
         "missing_capabilities",
@@ -2136,6 +2174,13 @@ let run_inference_session_file ~timing_mode path =
     1
   end
   else
+    let runtime_semantics =
+      session_runtime_semantics
+        ~transition_count
+        ~runtime_readiness_status:"partial_single_transition"
+        ~next_runtime_blocker:
+          "session_continuation_state_carry_not_supported"
+    in
     let cache = batch_cache () in
     let transition =
       match bundle.transitions with
@@ -2159,6 +2204,8 @@ let run_inference_session_file ~timing_mode path =
         ~transition_count
         ~decode_steps:bundle.decode_steps
         ~runtime_semantics
+        ~next_runtime_blocker:
+          "session_continuation_state_carry_not_supported"
         ~last_transition_output_root:(Some result.stage_output_root)
         ~unsupported_opcodes:result.stage_unsupported_opcodes
         ~missing_capabilities:result.stage_missing_capabilities
@@ -2174,6 +2221,8 @@ let run_inference_session_file ~timing_mode path =
         "decode_steps", `Int bundle.decode_steps;
         "session_report_sha256", `String (session_report_sha256 payload);
         "runtime_semantics", runtime_semantics;
+        "next_runtime_blocker",
+        `String "session_continuation_state_carry_not_supported";
         "last_transition_output_root", `String result.stage_output_root;
         "unsupported_opcodes",
         unique_json_strings result.stage_unsupported_opcodes;

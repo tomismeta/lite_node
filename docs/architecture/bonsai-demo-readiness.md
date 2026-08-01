@@ -210,8 +210,9 @@ semantics. Multi-transition bundles are intentionally rejected with
 implemented. The rejection includes a hash-bound `continuation_preflight`
 diagnostic plan: each requested transition is prepared through the same
 input/range/plan-creation path as the stage runner, root uniformity and
-explicit `identity_blockers` plus top-level request/deployment claims are
-reported, and
+explicit `identity_blockers`, `declaration_blockers`, and top-level
+request/deployment claims are reported. Identity failures become the immediate
+`next_runtime_blocker`, followed by declaration failures, then state carry;
 `execution_attempted=false` remains explicit.
 `--scan-policy` is the faster frontier-discovery mode. It decodes the program
 envelope and reports every visible inference opcode-policy violation as JSON,

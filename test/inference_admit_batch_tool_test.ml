@@ -613,6 +613,7 @@ let check_session_hash report =
         "transition_count", `Int (int_json "transition_count" fields);
         "decode_steps", `Int (int_json "decode_steps" fields);
         "runtime_semantics", assoc_value "runtime_semantics" fields;
+        "next_runtime_blocker", assoc_value "next_runtime_blocker" fields;
         "last_transition_output_root",
         assoc_value "last_transition_output_root" fields;
         "unsupported_opcodes", assoc_value "unsupported_opcodes" fields;
@@ -778,6 +779,16 @@ let check_session_bundle_rejects_multi_transition () =
       "preflight blocked"
       (String.equal (string_json "status" preflight) "blocked");
     check
+      "preflight readiness rejected"
+      (String.equal
+         (string_json "runtime_readiness_status" preflight)
+         "rejected");
+    check
+      "preflight next blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" preflight)
+         "session_continuation_state_carry_not_supported");
+    check
       "preflight did not execute"
       (not (bool_json "execution_attempted" preflight));
     check
@@ -842,6 +853,9 @@ let check_session_bundle_rejects_multi_transition () =
     check
       "no identity blockers"
       (list_json "identity_blockers" preflight = []);
+    check
+      "no declaration blockers"
+      (list_json "declaration_blockers" preflight = []);
     let blockers = list_json "blockers" preflight in
     List.iter
       (fun expected ->
@@ -958,7 +972,33 @@ let check_session_bundle_reports_identity_mismatch () =
   match report with
   | `Assoc fields ->
     check_session_hash report;
+    check
+      "identity mismatch top-level blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "request_root_mismatch");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "identity mismatch readiness"
+      (String.equal
+         (string_json "runtime_readiness_status" semantics)
+         "identity_rejected");
+    check
+      "identity mismatch runtime blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" semantics)
+         "request_root_mismatch");
     let preflight = assoc_json "continuation_preflight" fields in
+    check
+      "identity mismatch preflight readiness"
+      (String.equal
+         (string_json "runtime_readiness_status" preflight)
+         "identity_rejected");
+    check
+      "identity mismatch preflight blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" preflight)
+         "request_root_mismatch");
     let identities = assoc_json "identity_checks" preflight in
     check
       "request root not uniform"
@@ -972,7 +1012,49 @@ let check_session_bundle_reports_identity_mismatch () =
     let blockers = list_json "identity_blockers" preflight in
     check
       "request identity blocker"
-      (blockers = [`String "request_root_mismatch"])
+      (blockers = [`String "request_root_mismatch"]);
+    check
+      "no declaration blocker for identity mismatch"
+      (list_json "declaration_blockers" preflight = [])
+  | _ -> failwith "report must be an object"
+
+let check_session_bundle_reports_declaration_mismatch () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~decode_steps:(Some 2)
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "declaration mismatch bundle exits nonzero" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check_session_hash report;
+    check
+      "declaration mismatch top-level blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "decode_steps_mismatch");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "declaration mismatch readiness"
+      (String.equal
+         (string_json "runtime_readiness_status" semantics)
+         "declaration_rejected");
+    let preflight = assoc_json "continuation_preflight" fields in
+    check
+      "declaration mismatch preflight readiness"
+      (String.equal
+         (string_json "runtime_readiness_status" preflight)
+         "declaration_rejected");
+    check
+      "declaration mismatch blocker"
+      (list_json "declaration_blockers" preflight
+       = [`String "decode_steps_mismatch"]);
+    check
+      "declaration mismatch has no identity blockers"
+      (list_json "identity_blockers" preflight = [])
   | _ -> failwith "report must be an object"
 
 let check_session_bundle_preflight_checks_input_payload () =
@@ -1012,5 +1094,6 @@ let () =
   check_session_bundle_rejects_multi_transition ();
   check_session_bundle_reports_top_level_claim_mismatch ();
   check_session_bundle_reports_identity_mismatch ();
+  check_session_bundle_reports_declaration_mismatch ();
   check_session_bundle_preflight_checks_input_payload ();
   check_session_bundle_requires_schema_and_decode_steps ()
