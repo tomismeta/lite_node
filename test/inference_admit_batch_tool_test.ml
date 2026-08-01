@@ -364,6 +364,8 @@ let stage_json_from_batch batch_path =
 let write_session_bundle_fixture
     ?(schema = Some "octra.inference.session.bundle")
     ?(decode_steps = Some 1)
+    ?request_root
+    ?model_deployment_root
     ?(transition_count = 1)
     dir =
   let batch_path = write_batch_fixture dir in
@@ -389,11 +391,21 @@ let write_session_bundle_fixture
     | None -> []
     | Some value -> ["decode_steps", `Int value]
   in
+  let declared_root_fields =
+    (match request_root with
+     | None -> []
+     | Some value -> ["request_root", `String value])
+    @
+    (match model_deployment_root with
+     | None -> []
+     | Some value -> ["model_deployment_root", `String value])
+  in
   write_json
     bundle_path
     (`Assoc
        (schema_fields
         @ decode_fields
+        @ declared_root_fields
         @ [
           "transitions", `List transitions;
         ]));
@@ -552,8 +564,7 @@ let check_session_hash report =
            (drop_assoc_fields ["timing"; "execution_timing"; "opcode_timing"])
            transitions)
     in
-    let sanitized_envelope =
-      `Assoc [
+    let envelope_fields = [
         "schema", `String (string_json "schema" fields);
         "status", `String (string_json "status" fields);
         "transition_count", `Int (int_json "transition_count" fields);
@@ -566,6 +577,13 @@ let check_session_hash report =
         "policy_violations", assoc_value "policy_violations" fields;
         "transitions", sanitized;
       ]
+    in
+    let envelope_fields =
+      match List.assoc_opt "continuation_preflight" fields with
+      | None -> envelope_fields
+      | Some value -> envelope_fields @ ["continuation_preflight", value]
+    in
+    let sanitized_envelope = `Assoc envelope_fields
     in
     let payload =
       "octra.inference.run_inference_session.report.v1:"
@@ -710,8 +728,184 @@ let check_session_bundle_rejects_multi_transition () =
       (String.equal
          (string_json "next_runtime_blocker" fields)
          "session_continuation_state_carry_not_supported");
-    check "no executed transitions" (list_json "transitions" fields = [])
+    check "no executed transitions" (list_json "transitions" fields = []);
+    check_session_hash report;
+    let preflight = assoc_json "continuation_preflight" fields in
+    check
+      "preflight blocked"
+      (String.equal (string_json "status" preflight) "blocked");
+    check
+      "preflight did not execute"
+      (not (bool_json "execution_attempted" preflight));
+    check
+      "preflight labels only"
+      (String.equal
+         (string_json "phase_contract" preflight)
+         "labels_only_unverified");
+    check
+      "preflight continuation undefined"
+      (String.equal
+         (string_json "continuation_basis" preflight)
+         "undefined");
+    check
+      "preflight no state payload"
+      (not (bool_json "state_payload_available" preflight));
+    check
+      "preflight no repeated advance"
+      (not (bool_json "repeated_advance_supported" preflight));
+    check
+      "preflight has output-prefix hash primitive"
+      (bool_json "output_prefix_hash_primitive_available" preflight);
+    check
+      "preflight no continuation output-prefix support"
+      (not (bool_json "continuation_output_prefix_supported" preflight));
+    check
+      "preflight phase sequence"
+      (list_json "declared_phase_sequence" preflight
+       = [`String "decode"; `String "prefill"]);
+    check
+      "preflight decode transition count"
+      (int_json "declared_decode_transitions" preflight = 1);
+    check
+      "preflight decode steps match"
+      (bool_json "decode_steps_match" preflight);
+    let identities = assoc_json "identity_checks" preflight in
+    check
+      "preflight target root uniform"
+      (bool_json "target_root_uniform" identities);
+    check
+      "preflight request root uniform"
+      (bool_json "request_root_uniform" identities);
+    check
+      "preflight model ranges root uniform"
+      (bool_json "model_ranges_root_uniform" identities);
+    check
+      "preflight model deployment root uniform"
+      (bool_json "model_deployment_root_uniform" identities);
+    check
+      "preflight session abi root uniform"
+      (bool_json "session_abi_root_uniform" identities);
+    let claims = assoc_json "top_level_claims" preflight in
+    check
+      "request root not declared"
+      (String.equal
+         (string_json "request_root_status" claims)
+         "not_declared");
+    check
+      "model deployment root not declared"
+      (String.equal
+         (string_json "model_deployment_root_status" claims)
+         "not_declared");
+    let blockers = list_json "blockers" preflight in
+    List.iter
+      (fun expected ->
+         check
+           ("preflight blocker " ^ expected)
+           (List.exists (( = ) (`String expected)) blockers))
+      [
+        "session_abi_continuation_input_not_defined";
+        "execution_state_payload_not_available";
+        "repeated_advance_not_supported";
+        "atomic_state_commit_not_implemented";
+      ];
+    (match list_json "transition_plan" preflight with
+     | [`Assoc first; `Assoc second] ->
+       let check_plan_entry expected_index expected_id expected_phase entry =
+         check
+           ("plan index " ^ expected_id)
+           (int_json "index" entry = expected_index);
+         check
+           ("plan transition id " ^ expected_id)
+           (String.equal
+              (string_json "transition_id" entry)
+              expected_id);
+         check
+           ("plan phase " ^ expected_id)
+           (String.equal (string_json "phase" entry) expected_phase);
+         check
+           ("plan stage id " ^ expected_id)
+           (String.equal (string_json "stage_id" entry) "unit-stage");
+         check
+           ("plan not run " ^ expected_id)
+           (String.equal
+              (string_json "execution_status" entry)
+              "not_run");
+         check
+           ("plan created " ^ expected_id)
+           (bool_json "plan_created" entry);
+         check
+           ("plan input checked " ^ expected_id)
+           (bool_json "input_payload_checked" entry);
+         check
+           ("plan ranges checked " ^ expected_id)
+           (bool_json "range_payloads_checked" entry);
+         check
+           ("plan preflight status " ^ expected_id)
+           (String.equal
+              (string_json "preflight_status" entry)
+              "plan_created");
+         List.iter
+           (fun field ->
+              check
+                (Printf.sprintf "plan %s root %s" expected_id field)
+                (String.length (string_json field entry) = 64))
+           [
+             "program_root";
+             "requirement_root";
+             "target_root";
+             "request_root";
+             "model_ranges_root";
+             "session_abi_root";
+           ];
+         List.iter
+           (fun field ->
+              check
+                (Printf.sprintf "plan %s has no %s" expected_id field)
+                (List.assoc_opt field entry = None))
+           [
+             "opened_session_root";
+             "advanced_session_root";
+             "final_session_root";
+             "advance_receipt_root";
+             "candidate_root";
+             "output_prefix_root";
+             "output_root";
+           ]
+       in
+       check_plan_entry 0 "token-000" "decode" first;
+       check_plan_entry 1 "token-001" "prefill" second
+     | _ -> failwith "expected two preflight transitions")
   | _ -> failwith "report must be an object"
+
+let check_session_bundle_reports_top_level_claim_mismatch () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~request_root:(hex_root '9')
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "claim mismatch bundle exits nonzero" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check_session_hash report;
+    let preflight = assoc_json "continuation_preflight" fields in
+    let claims = assoc_json "top_level_claims" preflight in
+    check
+      "request root mismatch"
+      (String.equal
+         (string_json "request_root_status" claims)
+         "mismatch")
+  | _ -> failwith "report must be an object"
+
+let check_session_bundle_preflight_checks_input_payload () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path = write_session_bundle_fixture ~transition_count:2 dir in
+  write_file (Filename.concat dir "stage/request-input.json") "corrupt";
+  let code, raw = run_session_bundle_raw bundle_path in
+  check "corrupt input bundle exits nonzero" (code = 1);
+  check "corrupt input emits no checked preflight report" (raw = "")
 
 let check_session_bundle_requires_schema_and_decode_steps () =
   with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
@@ -740,4 +934,6 @@ let () =
   check_session_bundle_single_transition ();
   check_session_bundle_hash_binds_decode_steps ();
   check_session_bundle_rejects_multi_transition ();
+  check_session_bundle_reports_top_level_claim_mismatch ();
+  check_session_bundle_preflight_checks_input_payload ();
   check_session_bundle_requires_schema_and_decode_steps ()

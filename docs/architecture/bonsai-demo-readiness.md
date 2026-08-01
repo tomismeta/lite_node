@@ -207,7 +207,11 @@ through the same open/advance/finalize machinery and reports
 `session_report_sha256`, transition roots, receipts, and diagnostic runtime
 semantics. Multi-transition bundles are intentionally rejected with
 `session_continuation_state_carry_not_supported` until resident state carry is
-implemented.
+implemented. The rejection includes a hash-bound `continuation_preflight`
+diagnostic plan: each requested transition is prepared through the same
+input/range/plan-creation path as the stage runner, root uniformity and
+top-level request/deployment claims are reported, and
+`execution_attempted=false` remains explicit.
 `--scan-policy` is the faster frontier-discovery mode. It decodes the program
 envelope and reports every visible inference opcode-policy violation as JSON,
 without admitting new opcodes or running a session. It cannot be combined with

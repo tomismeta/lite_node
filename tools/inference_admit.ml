@@ -111,6 +111,8 @@ type session_transition = {
 
 type session_bundle = {
   session_path : string;
+  declared_request_root : string option;
+  declared_model_deployment_root : string option;
   decode_steps : int;
   transitions : session_transition list;
 }
@@ -127,6 +129,38 @@ type batch_stage_result = {
   stage_unsupported_opcodes : string list;
   stage_missing_capabilities : string list;
   stage_policy_violations : Yojson.Safe.t list;
+}
+
+type prepared_stage = {
+  prepared_plan : Plan.t;
+  prepared_admitted : Admission.t;
+  prepared_program_root : string;
+  prepared_requirement_root : string;
+  prepared_target_root : string;
+  prepared_request_root : string;
+  prepared_model_ranges_root : string;
+  prepared_model_deployment_root : string option;
+  prepared_session_abi_root : string;
+  prepared_violations : Inference_opcode_policy.violation list;
+}
+
+type transition_preflight_result = {
+  transition_preflight_json : Yojson.Safe.t;
+  transition_target_root : string;
+  transition_request_root : string;
+  transition_model_ranges_root : string;
+  transition_model_deployment_root : string option;
+  transition_session_abi_root : string;
+  transition_unsupported_opcodes : string list;
+  transition_missing_capabilities : string list;
+  transition_policy_violations : Yojson.Safe.t list;
+}
+
+type continuation_preflight = {
+  continuation_preflight_json : Yojson.Safe.t;
+  continuation_unsupported_opcodes : string list;
+  continuation_missing_capabilities : string list;
+  continuation_policy_violations : Yojson.Safe.t list;
 }
 
 let max_batch_stages = 256
@@ -1290,11 +1324,23 @@ let parse_session_bundle_json session_path (json : Yojson.Safe.t) =
          | Ok _ -> Error "decode_steps must be non-negative"
          | Error error -> Error error
        in
-       (match top_support, decode_steps, list_field "transitions" fields with
-        | Error error, _, _
-        | _, Error error, _
-        | _, _, Error error -> Error error
-        | Ok top_support, Ok decode_steps, Ok transitions ->
+       (match
+          top_support,
+          decode_steps,
+          optional_string_field "request_root" fields,
+          optional_string_field "model_deployment_root" fields,
+          list_field "transitions" fields
+        with
+        | Error error, _, _, _, _
+        | _, Error error, _, _, _
+        | _, _, Error error, _, _
+        | _, _, _, Error error, _
+        | _, _, _, _, Error error -> Error error
+        | Ok top_support,
+          Ok decode_steps,
+          Ok declared_request_root,
+          Ok declared_model_deployment_root,
+          Ok transitions ->
           if List.length transitions = 0 then
             Error "session bundle must contain at least one transition"
           else if List.length transitions > max_batch_stages then
@@ -1308,6 +1354,8 @@ let parse_session_bundle_json session_path (json : Yojson.Safe.t) =
               | [] ->
                 Ok {
                   session_path;
+                  declared_request_root;
+                  declared_model_deployment_root;
                   decode_steps;
                   transitions = List.rev acc;
                 }
@@ -1401,8 +1449,7 @@ let batch_pins cache ~limits ~read model =
        Hashtbl.replace cache.pins_by_ranges_root_and_limit cache_key pins;
        Ok pins)
 
-let run_batch_stage ~cache ~timing_mode stage =
-  let timer = start_timer timing_mode in
+let prepare_batch_stage ~cache ~timer stage =
   let raw_program =
     try read_file stage.program_path with Sys_error error -> fail error
   in
@@ -1493,9 +1540,9 @@ let run_batch_stage ~cache ~timing_mode stage =
               "declared model deployment root"
               packet.declared_root
               model_deployment_root
-          with
+         with
           | Error error -> fail error
-          | Ok () -> Some packet.deployment))
+          | Ok () -> Some (packet.deployment, model_deployment_root)))
   in
   (match
      Request.check
@@ -1524,6 +1571,9 @@ let run_batch_stage ~cache ~timing_mode stage =
     | Ok pins -> pins
   in
   timing_mark timer "pin_model_ranges";
+  let deployment_root =
+    Option.map snd deployment
+  in
   let plan =
     match deployment with
     | None ->
@@ -1534,7 +1584,7 @@ let run_batch_stage ~cache ~timing_mode stage =
         ~model:model_packet.model
         ~pins
         ~input
-    | Some deployment ->
+    | Some (deployment, _) ->
       Plan.create_with_deployment
         ~deployment
         ~admitted
@@ -1550,6 +1600,23 @@ let run_batch_stage ~cache ~timing_mode stage =
     | Ok plan -> plan
   in
   timing_mark timer "plan_create";
+  {
+    prepared_plan = plan;
+    prepared_admitted = admitted;
+    prepared_program_root = Target.program_root admitted;
+    prepared_requirement_root = requirement_root;
+    prepared_target_root = target_root;
+    prepared_request_root = request_root;
+    prepared_model_ranges_root = model_ranges_root;
+    prepared_model_deployment_root = deployment_root;
+    prepared_session_abi_root = target_packet.target.Target.session_abi_root;
+    prepared_violations = violations;
+  }
+
+let run_batch_stage ~cache ~timing_mode stage =
+  let timer = start_timer timing_mode in
+  let prepared = prepare_batch_stage ~cache ~timer stage in
+  let plan = prepared.prepared_plan in
   let opened =
     match Session.open_session ~plan with
     | Error error -> fail (Session.error_message error)
@@ -1601,9 +1668,11 @@ let run_batch_stage ~cache ~timing_mode stage =
   let stage_status =
     if reference_mismatch then "reference_mismatch" else "accepted"
   in
-  let unsupported = unsupported_opcode_names violations in
-  let missing = missing_capability_names violations in
-  let violation_values = List.map violation_json violations in
+  let unsupported = unsupported_opcode_names prepared.prepared_violations in
+  let missing = missing_capability_names prepared.prepared_violations in
+  let violation_values =
+    List.map violation_json prepared.prepared_violations
+  in
   {
     stage_json =
       `Assoc (
@@ -1612,11 +1681,12 @@ let run_batch_stage ~cache ~timing_mode stage =
           "status", `String stage_status;
           "session_status", `String "accepted";
           "reference_status", `String reference_status;
-          "program_root", `String (Target.program_root admitted);
-          "target_root", `String target_root;
-          "request_root", `String request_root;
-          "model_ranges_root", `String model_ranges_root;
-          "program_instructions", `Int (Array.length (Admission.code admitted));
+          "program_root", `String prepared.prepared_program_root;
+          "target_root", `String prepared.prepared_target_root;
+          "request_root", `String prepared.prepared_request_root;
+          "model_ranges_root", `String prepared.prepared_model_ranges_root;
+          "program_instructions",
+          `Int (Array.length (Admission.code prepared.prepared_admitted));
           "unsupported_opcodes", list_json unsupported;
           "missing_capabilities", list_json missing;
           "policy_violations", `List violation_values;
@@ -1645,6 +1715,212 @@ let run_batch_stage ~cache ~timing_mode stage =
 
 let unique_json_strings values =
   values |> unique_strings |> list_json
+
+let all_same_string = function
+  | []
+  | [_] -> true
+  | first :: rest -> List.for_all (String.equal first) rest
+
+let all_same_option_string = function
+  | []
+  | [_] -> true
+  | first :: rest -> List.for_all (( = ) first) rest
+
+let declared_string_status declared derived =
+  match declared with
+  | None -> "not_declared"
+  | Some root ->
+    if List.for_all (String.equal root) derived then "matched" else "mismatch"
+
+let declared_option_string_status declared derived =
+  match declared with
+  | None -> "not_declared"
+  | Some root ->
+    if
+      List.for_all
+        (function
+          | Some actual -> String.equal root actual
+          | None -> false)
+        derived
+    then "matched"
+    else "mismatch"
+
+let preflight_transition_stage ~cache stage =
+  let timer = start_timer Timing_none in
+  let prepared = prepare_batch_stage ~cache ~timer stage in
+  let unsupported =
+    unsupported_opcode_names prepared.prepared_violations
+  in
+  let missing =
+    missing_capability_names prepared.prepared_violations
+  in
+  let policy_violations =
+    List.map violation_json prepared.prepared_violations
+  in
+  {
+    transition_preflight_json =
+      `Assoc [
+        "stage_id", `String stage.stage_id;
+        "preflight_status",
+        `String
+          (if prepared.prepared_violations = [] then "plan_created"
+           else "policy_issues");
+        "input_payload_checked", `Bool true;
+        "range_payloads_checked", `Bool true;
+        "plan_created", `Bool true;
+        "execution_status", `String "not_run";
+        "program_root", `String prepared.prepared_program_root;
+        "requirement_root", `String prepared.prepared_requirement_root;
+        "target_root", `String prepared.prepared_target_root;
+        "request_root", `String prepared.prepared_request_root;
+        "model_ranges_root", `String prepared.prepared_model_ranges_root;
+        "model_deployment_root",
+        nullable_string_json prepared.prepared_model_deployment_root;
+        "session_abi_root", `String prepared.prepared_session_abi_root;
+        "unsupported_opcodes", list_json unsupported;
+        "missing_capabilities", list_json missing;
+        "policy_violations", `List policy_violations;
+      ];
+    transition_target_root = prepared.prepared_target_root;
+    transition_request_root = prepared.prepared_request_root;
+    transition_model_ranges_root = prepared.prepared_model_ranges_root;
+    transition_model_deployment_root = prepared.prepared_model_deployment_root;
+    transition_session_abi_root = prepared.prepared_session_abi_root;
+    transition_unsupported_opcodes = unsupported;
+    transition_missing_capabilities = missing;
+    transition_policy_violations = policy_violations;
+  }
+
+let continuation_preflight_for_bundle bundle =
+  let cache = batch_cache () in
+  let preflight =
+    List.mapi
+      (fun index transition ->
+         let result = preflight_transition_stage ~cache transition.stage in
+         let transition_json =
+           match result.transition_preflight_json with
+           | `Assoc fields ->
+             `Assoc
+               ([
+                 "index", `Int index;
+                 "transition_id", `String transition.transition_id;
+                 "phase", `String transition.phase;
+               ]
+                @ fields)
+           | value -> value
+         in
+         transition, result, transition_json)
+      bundle.transitions
+  in
+  let target_roots =
+    List.map
+      (fun (_, result, _) -> result.transition_target_root)
+      preflight
+  in
+  let request_roots =
+    List.map
+      (fun (_, result, _) -> result.transition_request_root)
+      preflight
+  in
+  let model_ranges_roots =
+    List.map
+      (fun (_, result, _) -> result.transition_model_ranges_root)
+      preflight
+  in
+  let model_deployment_roots =
+    List.map
+      (fun (_, result, _) -> result.transition_model_deployment_root)
+      preflight
+  in
+  let session_abi_roots =
+    List.map
+      (fun (_, result, _) -> result.transition_session_abi_root)
+      preflight
+  in
+  let phases =
+    List.map
+      (fun (transition, _, _) -> transition.phase)
+      preflight
+  in
+  let decode_transitions =
+    List.fold_left
+      (fun count phase ->
+         if String.equal phase "decode" then count + 1 else count)
+      0
+      phases
+  in
+  let unsupported =
+    List.concat_map
+      (fun (_, result, _) -> result.transition_unsupported_opcodes)
+      preflight
+  in
+  let missing =
+    List.concat_map
+      (fun (_, result, _) -> result.transition_missing_capabilities)
+      preflight
+  in
+  let policy_violations =
+    List.concat_map
+      (fun (_, result, _) -> result.transition_policy_violations)
+      preflight
+  in
+  let transition_plan =
+    List.map (fun (_, _, json) -> json) preflight
+  in
+  let json =
+    `Assoc [
+      "status", `String "blocked";
+      "execution_attempted", `Bool false;
+      "phase_contract", `String "labels_only_unverified";
+      "continuation_basis", `String "undefined";
+      "state_payload_available", `Bool false;
+      "repeated_advance_supported", `Bool false;
+      "output_prefix_hash_primitive_available", `Bool true;
+      "continuation_output_prefix_supported", `Bool false;
+      "declared_phase_sequence", list_json phases;
+      "declared_decode_transitions", `Int decode_transitions;
+      "decode_steps_match", `Bool (decode_transitions = bundle.decode_steps);
+      "identity_checks",
+      `Assoc [
+        "target_root_uniform", `Bool (all_same_string target_roots);
+        "request_root_uniform", `Bool (all_same_string request_roots);
+        "model_ranges_root_uniform", `Bool (all_same_string model_ranges_roots);
+        "model_deployment_root_uniform",
+        `Bool (all_same_option_string model_deployment_roots);
+        "session_abi_root_uniform", `Bool (all_same_string session_abi_roots);
+      ];
+      "top_level_claims",
+      `Assoc [
+        "request_root", nullable_string_json bundle.declared_request_root;
+        "request_root_status",
+        `String
+          (declared_string_status
+             bundle.declared_request_root
+             request_roots);
+        "model_deployment_root",
+        nullable_string_json bundle.declared_model_deployment_root;
+        "model_deployment_root_status",
+        `String
+          (declared_option_string_status
+             bundle.declared_model_deployment_root
+             model_deployment_roots);
+      ];
+      "blockers",
+      `List [
+        `String "session_abi_continuation_input_not_defined";
+        `String "execution_state_payload_not_available";
+        `String "repeated_advance_not_supported";
+        `String "atomic_state_commit_not_implemented";
+      ];
+      "transition_plan", `List transition_plan;
+    ]
+  in
+  {
+    continuation_preflight_json = json;
+    continuation_unsupported_opcodes = unsupported;
+    continuation_missing_capabilities = missing;
+    continuation_policy_violations = policy_violations;
+  }
 
 let drop_assoc_fields names = function
   | `Assoc fields ->
@@ -1733,6 +2009,7 @@ let sanitized_transition_json value =
   drop_assoc_fields ["timing"; "execution_timing"; "opcode_timing"] value
 
 let session_report_payload
+    ~continuation_preflight
     ~status
     ~transition_count
     ~decode_steps
@@ -1742,7 +2019,7 @@ let session_report_payload
     ~missing_capabilities
     ~policy_violations
     ~transitions =
-  `Assoc [
+  let fields = [
     "schema", `String "octra.inference.session.report";
     "status", `String status;
     "transition_count", `Int transition_count;
@@ -1755,7 +2032,10 @@ let session_report_payload
     "policy_violations", `List policy_violations;
     "transitions",
     `List (List.map sanitized_transition_json transitions);
-  ]
+  ] in
+  match continuation_preflight with
+  | None -> `Assoc fields
+  | Some value -> `Assoc (fields @ ["continuation_preflight", value])
 
 let session_report_sha256 payload =
   sha256
@@ -1767,17 +2047,19 @@ let run_inference_session_file ~timing_mode path =
   let transition_count = List.length bundle.transitions in
   let runtime_semantics = session_runtime_semantics ~transition_count in
   if transition_count <> 1 then begin
+    let preflight = continuation_preflight_for_bundle bundle in
     let status = "rejected" in
     let payload =
       session_report_payload
+        ~continuation_preflight:(Some preflight.continuation_preflight_json)
         ~status
         ~transition_count
         ~decode_steps:bundle.decode_steps
         ~runtime_semantics
         ~last_transition_output_root:None
-        ~unsupported_opcodes:[]
-        ~missing_capabilities:[]
-        ~policy_violations:[]
+        ~unsupported_opcodes:preflight.continuation_unsupported_opcodes
+        ~missing_capabilities:preflight.continuation_missing_capabilities
+        ~policy_violations:preflight.continuation_policy_violations
         ~transitions:[]
     in
     let report =
@@ -1792,10 +2074,13 @@ let run_inference_session_file ~timing_mode path =
         "last_transition_output_root", `Null;
         "next_runtime_blocker",
         `String "session_continuation_state_carry_not_supported";
-        "unsupported_opcodes", `List [];
-        "missing_capabilities", `List [];
-        "policy_violations", `List [];
+        "unsupported_opcodes",
+        unique_json_strings preflight.continuation_unsupported_opcodes;
+        "missing_capabilities",
+        unique_json_strings preflight.continuation_missing_capabilities;
+        "policy_violations", `List preflight.continuation_policy_violations;
         "transitions", `List [];
+        "continuation_preflight", preflight.continuation_preflight_json;
       ]
     in
     print_endline (Yojson.Safe.pretty_to_string report);
@@ -1820,6 +2105,7 @@ let run_inference_session_file ~timing_mode path =
     in
     let payload =
       session_report_payload
+        ~continuation_preflight:None
         ~status
         ~transition_count
         ~decode_steps:bundle.decode_steps
