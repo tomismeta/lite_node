@@ -933,6 +933,11 @@ let check_matrix_accepts_bound_reports () =
     | `Assoc fields ->
       check "matrix accepted" (String.equal (string_value "status" fields) "accepted");
       check
+        "matrix schema v2"
+        (String.equal
+           (string_value "schema" fields)
+           "octra.inference.conformance.matrix.v2");
+      check
         "matrix carries q1 opcode"
         (string_list_value "result_opcodes" fields = ["LINEAR_Q1_G128_FP"]);
       check

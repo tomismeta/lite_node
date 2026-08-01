@@ -905,7 +905,7 @@ let accepted_matrix
     ~result_signature_sha256 =
   `Assoc [
     "status", `String "accepted";
-    "schema", `String "octra.inference.conformance.matrix.v1";
+    "schema", `String "octra.inference.conformance.matrix.v2";
     "cross_platform_status", `String "accepted";
     "blockers", `List [];
     "result_opcodes", `List [`String opcode];
@@ -2086,7 +2086,7 @@ let check_missing_cross_platform_matrix_request_is_actionable () =
         "matrix request schema"
         (String.equal
            (string_value "schema" request)
-           "octra.inference.conformance.matrix.request.v1");
+           "octra.inference.conformance.matrix.request.v2");
       check
         "matrix request no authority"
         (String.equal (string_value "authority" request) "none");
@@ -2469,6 +2469,68 @@ let check_cross_platform_matrix_sha_mismatch_rejects () =
        | _ -> failwith "report must be object")
     | _ -> failwith "seed report must be object")
 
+let check_cross_platform_matrix_schema_mismatch_rejects () =
+  with_temp_dir (fun dir ->
+    let code, seed_report =
+      run_conformance
+        dir
+        (q1_template ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "matrix envelope schema mismatch seed run exits zero" (code = 0);
+    match seed_report with
+    | `Assoc seed_fields ->
+      let matrix =
+        accepted_matrix
+          ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~transcendental_dependency_catalog_root:
+            (string_value "transcendental_dependency_catalog_root" seed_fields)
+          ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
+          ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
+        |> replace_assoc_field
+             "schema"
+             (`String "octra.inference.conformance.matrix.v1")
+      in
+      let matrix_path, matrix_sha = write_matrix dir matrix in
+      let code, report =
+        run_conformance
+          dir
+          (q1_template ())
+          [
+            "--strict-effort";
+            "--include-failures";
+            "--require-failure-cases";
+            "--require-profile-roots-bound";
+            "--cross-platform-matrix";
+            Filename.quote matrix_path;
+            "--expected-cross-platform-matrix-sha256";
+            matrix_sha;
+            "--require-validator-readiness";
+          ]
+      in
+      check "matrix envelope schema mismatch exits nonzero" (code = 1);
+      (match report with
+       | `Assoc fields ->
+         let readiness = assoc_json "validator_readiness_gate" fields in
+         let cross_platform = assoc_json "cross_platform_evidence" readiness in
+         check
+           "matrix envelope schema rejected"
+           (String.equal
+              (string_value "schema_status" cross_platform)
+              "rejected");
+         check
+           "matrix envelope schema blocker"
+           (List.mem
+              "matrix_schema_mismatch"
+              (string_list "blockers" cross_platform))
+       | _ -> failwith "report must be object")
+    | _ -> failwith "seed report must be object")
+
 let check_cross_platform_matrix_signature_schema_mismatch_rejects () =
   with_temp_dir (fun dir ->
     let code, seed_report =
@@ -2482,7 +2544,7 @@ let check_cross_platform_matrix_signature_schema_mismatch_rejects () =
           "--require-profile-roots-bound";
         ]
     in
-    check "matrix schema mismatch seed run exits zero" (code = 0);
+    check "matrix signature schema mismatch seed run exits zero" (code = 0);
     match seed_report with
     | `Assoc seed_fields ->
       let matrix =
@@ -2513,7 +2575,7 @@ let check_cross_platform_matrix_signature_schema_mismatch_rejects () =
             "--require-validator-readiness";
           ]
       in
-      check "matrix schema mismatch exits nonzero" (code = 1);
+      check "matrix signature schema mismatch exits nonzero" (code = 1);
       (match report with
        | `Assoc fields ->
          let readiness = assoc_json "validator_readiness_gate" fields in
@@ -3230,6 +3292,7 @@ let () =
   check_pinned_cross_platform_matrix_is_consumed ();
   check_cross_platform_matrix_without_pin_rejects ();
   check_cross_platform_matrix_sha_mismatch_rejects ();
+  check_cross_platform_matrix_schema_mismatch_rejects ();
   check_cross_platform_matrix_signature_schema_mismatch_rejects ();
   check_cross_platform_matrix_row_envelope_mismatch_rejects ();
   check_cross_platform_matrix_local_signature_mismatch_rejects ();

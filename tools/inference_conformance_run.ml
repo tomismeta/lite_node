@@ -36,6 +36,12 @@ let require_validator_readiness = ref false
 let cross_platform_result_signature_schema =
   Signature.schema
 
+let cross_platform_matrix_schema =
+  "octra.inference.conformance.matrix.v2"
+
+let cross_platform_matrix_request_schema =
+  "octra.inference.conformance.matrix.request.v2"
+
 let fail message =
   prerr_endline message;
   exit 1
@@ -1240,7 +1246,7 @@ let cross_platform_matrix_request
     ]
   in
   `Assoc [
-    "schema", `String "octra.inference.conformance.matrix.request.v1";
+    "schema", `String cross_platform_matrix_request_schema;
     "diagnostic_only", `Bool true;
     "authority", `String "none";
     "evidence_scope", `String "diagnostic_collection_request";
@@ -1447,7 +1453,7 @@ let cross_platform_evidence
      | `Assoc fields ->
        let schema_accepted =
          match opt_string_field "schema" fields with
-         | Some "octra.inference.conformance.matrix.v1" -> true
+         | Some schema -> String.equal schema cross_platform_matrix_schema
          | _ -> false
        in
        let status_accepted =

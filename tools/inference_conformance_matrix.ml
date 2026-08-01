@@ -26,6 +26,9 @@ let requested_opcodes = ref []
 let result_signature_schema =
   Signature.schema
 
+let matrix_schema =
+  "octra.inference.conformance.matrix.v2"
+
 let fail message =
   prerr_endline message;
   exit 1
@@ -1659,7 +1662,7 @@ let matrix_report paths =
   `Assoc [
     "status", `String (if matrix_accepted then "accepted" else "rejected");
     "diagnostic_only", `Bool true;
-    "schema", `String "octra.inference.conformance.matrix.v1";
+    "schema", `String matrix_schema;
     "report_count", `Int report_count;
     "accepted_report_count", `Int accepted_reports;
     "required_distinct_platform_count", `Int required_distinct_platform_count;
