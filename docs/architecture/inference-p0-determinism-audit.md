@@ -850,7 +850,7 @@ LiteNode VM implementation for the five P0 positive cases. The next gap is
 full policy resolution for observational failure cases, followed by replacing
 host-FP semantics where protocol determinism requires it.
 
-Failure/edge-case status:
+Failure/edge-case status for the older effort-authority run:
 
 | Opcode | Declared cases | Counted cases | Counted cases accepted |
 | --- | ---: | ---: | ---: |
@@ -860,7 +860,31 @@ Failure/edge-case status:
 | `SOFTMAX_FP` | 7 | 7 | 7 |
 | `GATED_DELTA_RULE_FP` | 7 | 7 | 7 |
 
-No current P0 failure/edge cases are left uncounted in the direct runner.
+The current 2026-08-01 source-artifact rerun against
+`/private/tmp/octra-conformance-3feb1677-20260801-024010/source/p0/p0-vm-execution-templates.cjson`
+is stricter and correctly rejects the failure gate:
+
+| Report | Declared cases | Counted cases | Counted cases accepted | Status |
+| --- | ---: | ---: | ---: | --- |
+| `/private/tmp/octra-p0-full-failure-profile-report-envelope.cjson` | 35 | 30 | 30 | rejected |
+
+The full report SHA-256 is
+`9a767e6a3ff03aeff17390e7dc70e8761f2b811946edc36bc8eb99d4dc97a601`.
+
+The remaining source-corpus blockers are all Q1 failure-contract issues:
+`q1_failure_case_expected_mismatch_output_input_aliasing`,
+`q1_failure_case_missing_negative_byte_offset`,
+`q1_failure_case_missing_byte_offset_out_of_bounds`,
+`q1_failure_case_missing_byte_offset_truncated_span`,
+`q1_failure_case_missing_lower_effort_limit`,
+`q1_failure_case_missing_partial_output_input_aliasing`, and
+`q1_failure_case_uncounted_output_input_aliasing`.
+
+A positive-only smoke report, such as
+`/private/tmp/octra-p0-positive-report-envelope.cjson`, still correctly reports
+failure-case blockers because that command intentionally omits failure
+execution. Treat positive execution and punitive failure coverage as separate
+readiness gates.
 
 `LINEAR_Q1_G128_FP` aliasing is no longer accepted as an ambiguous
 `reject_or_documented_safe_copy` branch. Validator-readiness now requires
@@ -1009,11 +1033,12 @@ transcendental math or a qualified replacement profile exists.
 
 ## P0-Plus Execution Gate
 
-Status on 2026-07-30:
+Status on 2026-08-01:
 
 ```text
 /home/exedev/evidence/octra-inference/determinism-p0-plus-corpus-20260730-022653/p0-plus-fixture-pack.cjson
 /home/exedev/evidence/octra-inference/determinism-p0-plus-topk-boundary-20260730-025306/p0-plus-fixture-pack.cjson
+/private/tmp/octra-p0-plus-softmax-diagnostic-report-envelope.cjson
 ```
 
 LiteNode executes this pack with:
@@ -1027,12 +1052,21 @@ Current result:
 
 | Surface | Fixture cases | VM result |
 | --- | ---: | --- |
-| `SOFTMAX_FP` | 2 | accepted/matched |
+| `SOFTMAX_FP` | 2 | one accepted/matched; `wide-1024-stable-tail` rejected by one f64 bit-pattern mismatch |
 | `ATTENTION_SCORES_FP` | 1 | accepted/matched |
 | `ATTENTION_WEIGHTED_SUM_FP` | 1 | accepted/matched |
 | `ROPE_APPLY_INDEXED_FP` | 2 | accepted/matched |
 | `ARGMAX_FP` | 2 | accepted/matched for selected index |
 | `RMSNORM_FP_EPS -> LINEAR_Q1_G128_FP -> ARGMAX_FP` | 1 | accepted/matched |
+
+The current P0-plus run is therefore `8/9`, not validator-ready. Its rejected
+case is intentionally useful: the `SOFTMAX_FP wide-1024-stable-tail` fixture
+has finite inputs, executes the local VM path, and then reports a single f64
+bit-pattern drift at byte `4904`, cell `613`. The expected value is
+`0x3c6cceffa4571f9a`; the observed value is `0x3c6cceffa4571f9b`. That keeps
+the host-native exponential surface classified as
+`host-fp-exp-local-candidate`, even though the smaller local Softmax fixture
+still matches.
 
 LiteNode runtime tests now also pin deterministic finite binary64
 left-to-right accumulation for `ATTENTION_SCORES_FP` dot products and
@@ -1084,12 +1118,31 @@ atomicity. This is a generic sequence primitive, not a model- or SSM-specific
 fused path, and still requires cross-platform conformance plus bound profile
 roots before a consensus-ready claim.
 
-The saved report is:
+The older saved reports are:
 
 ```text
 /home/exedev/evidence/octra-inference/determinism-p0-plus-corpus-20260730-022653/litenode-p0-plus-execution-report.cjson
 /home/exedev/evidence/octra-inference/determinism-p0-plus-topk-boundary-20260730-025306/litenode-p0-plus-execution-report.cjson
 ```
+
+The current local diagnostic report is:
+
+```text
+/private/tmp/octra-p0-plus-softmax-diagnostic-report-envelope.cjson
+```
+
+Its fixture pack SHA-256 is
+`ccf0a834e55a8c0a25e75f4e3c1fab8392c2a683e11021c69a7dad33bafb203d`;
+the report SHA-256 is
+`197a2f5b8b8dc5271353a6db96724f9ff9c144030e5a66a169f864c59c7c31d9`.
+It was produced on `macosx`/`arm64` with OCaml switch
+`octra-lite-4.14.2`, compiler `4.14.2`, runner
+`_build/default/tools/inference_conformance_run.exe`, runner SHA-256
+`409195571e45c9fd728d7a97289911a730c0602b34decb230e81a153dbfbe7c0`.
+
+Use the report-envelope diagnostic result for consensus claims. The older
+`9/9` reports remain product/reference evidence from an earlier harness
+boundary, but they no longer override the stricter Softmax mismatch detector.
 
 The P0-plus pack is still diagnostic and model-neutral. It adds coverage for
 attention math, indexed RoPE, argmax tie behavior, and the final logits-tail

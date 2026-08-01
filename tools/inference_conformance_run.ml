@@ -190,6 +190,11 @@ let field name fields =
   | [(_, value)] -> Some value
   | _ -> None
 
+let field_or_null name fields =
+  match field name fields with
+  | Some value -> value
+  | None -> `Null
+
 let string_field name fields =
   match field name fields with
   | Some (`String value) -> value
@@ -3231,6 +3236,33 @@ let execute_p0_plus_fixture root_dir entry =
     "outputs", `List outputs;
   ]
 
+let p0_plus_rejected_results results =
+  List.filter_map
+    (fun (ok, result) ->
+       if ok then
+         None
+       else
+         match result with
+         | `Assoc fields ->
+           Some
+             (`Assoc [
+               "case", field_or_null "case" fields;
+               "opcode", field_or_null "opcode" fields;
+               "manifest", field_or_null "manifest" fields;
+               "output_status", field_or_null "output_status" fields;
+               "outputs", field_or_null "outputs" fields;
+             ])
+         | _ ->
+           Some
+             (`Assoc [
+               "case", `Null;
+               "opcode", `Null;
+               "manifest", `Null;
+               "output_status", `String "invalid_result";
+               "outputs", `List [];
+             ]))
+    results
+
 let template_corpus_entry root_dir entry =
   let template_path = string_field "vm_execution_template" entry in
   let full_template_path = Filename.concat root_dir template_path in
@@ -3436,6 +3468,7 @@ let run_p0_plus_pack path =
       ~unprofiled_count:0
       ~root_binding_counts
       status_counts;
+    "rejected_results", `List (p0_plus_rejected_results results);
     "results", `List (List.map snd results);
   ]
 

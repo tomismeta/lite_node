@@ -65,6 +65,9 @@ let write_file path raw =
 let write_json path json =
   write_file path (Yojson.Safe.to_string json)
 
+let mkdir_if_missing path =
+  if not (Sys.file_exists path) then Unix.mkdir path 0o700
+
 let read_all input =
   let buffer = Buffer.create 4096 in
   (try
@@ -166,6 +169,20 @@ let manifest name path raw =
     "bytes", `Int (String.length raw);
     "sha256", `String (sha256 raw);
   ]
+
+let expected_manifest ?layout name path raw =
+  let fields =
+    [
+      "name", `String name;
+      "path", `String path;
+      "bytes", `Int (String.length raw);
+      "sha256", `String (sha256 raw);
+      "root", `String (fixture_value_root ~name raw);
+    ]
+  in
+  match layout with
+  | Some layout -> `Assoc (fields @ ["layout", `String layout])
+  | None -> `Assoc fields
 
 let span name base cells =
   `Assoc [
@@ -504,6 +521,80 @@ let run_conformance dir template args =
          opcode;
        ]
        @ args)
+  in
+  let input = Unix.open_process_in command in
+  let raw = read_all input in
+  let status = Unix.close_process_in input in
+  let code =
+    match status with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED signal -> 128 + signal
+    | Unix.WSTOPPED signal -> 128 + signal
+  in
+  code, Yojson.Safe.from_string raw
+
+let write_p0_plus_softmax_fixture dir case_name expected =
+  let root = Filename.concat dir "p0-plus-fixtures" in
+  let primitive_dir = Filename.concat root "softmax-fp" in
+  let case_dir = Filename.concat primitive_dir case_name in
+  mkdir_if_missing root;
+  mkdir_if_missing primitive_dir;
+  mkdir_if_missing case_dir;
+  let scores = f64_bytes [0.0] in
+  let expected = f64_bytes [expected] in
+  let scores_path =
+    Filename.concat "p0-plus-fixtures" ("softmax-fp/" ^ case_name ^ "/scores.f64le.bin")
+  in
+  let expected_path =
+    Filename.concat
+      "p0-plus-fixtures"
+      ("softmax-fp/" ^ case_name ^ "/expected.f64le.bin")
+  in
+  write_file (Filename.concat dir scores_path) scores;
+  write_file (Filename.concat dir expected_path) expected;
+  let fixture_path =
+    Filename.concat
+      "p0-plus-fixtures"
+      ("softmax-fp/" ^ case_name ^ "/fixture.cjson")
+  in
+  write_json
+    (Filename.concat dir fixture_path)
+    (`Assoc [
+      "case", `String case_name;
+      "opcode", `String "SOFTMAX_FP";
+      "primitive", `String "softmax_fp";
+      "parameters", `Assoc ["count", `Int 1];
+      "input_byte_manifests", `List [manifest "scores" scores_path scores];
+      "expected_output_byte_manifests",
+      `List [
+        expected_manifest
+          ~layout:"f64le[1]"
+          "expected_probabilities"
+          expected_path
+          expected;
+      ];
+    ]);
+  fixture_path
+
+let run_p0_plus dir fixtures =
+  let pack_path = Filename.concat dir "p0-plus-pack.cjson" in
+  write_json
+    pack_path
+    (`Assoc [
+      "fixtures",
+      `List
+        (List.map
+           (fun manifest -> `Assoc ["manifest", `String manifest])
+           fixtures);
+    ]);
+  let command =
+    String.concat
+      " "
+      [
+        Filename.quote (tool_path ());
+        "--p0-plus-pack";
+        Filename.quote pack_path;
+      ]
   in
   let input = Unix.open_process_in command in
   let raw = read_all input in
@@ -2094,6 +2185,93 @@ let check_cross_platform_matrix_forged_row_root_rejects () =
        | _ -> failwith "report must be object")
     | _ -> failwith "seed report must be object")
 
+let check_p0_plus_rejected_results_empty_when_accepted () =
+  with_temp_dir (fun dir ->
+    let fixture =
+      write_p0_plus_softmax_fixture dir "unit-softmax-match" 1.0
+    in
+    let code, report = run_p0_plus dir [fixture] in
+    check "P0-plus accepted exits zero" (code = 0);
+    match report with
+    | `Assoc fields ->
+      check
+        "P0-plus accepted status"
+        (String.equal (string_value "status" fields) "accepted");
+      check
+        "P0-plus accepted count"
+        (int_value "accepted_count" fields = 1);
+      check
+        "P0-plus rejected count"
+        (int_value "rejected_count" fields = 0);
+      check
+        "P0-plus rejected summary empty"
+        (list_value "rejected_results" fields = [])
+    | _ -> failwith "report must be object")
+
+let check_p0_plus_rejected_results_report_outputs () =
+  with_temp_dir (fun dir ->
+    let accepted =
+      write_p0_plus_softmax_fixture dir "unit-softmax-match" 1.0
+    in
+    let expected_mismatch =
+      Int64.float_of_bits 0x3ff0000000000001L
+    in
+    let rejected =
+      write_p0_plus_softmax_fixture dir "unit-softmax-mismatch" expected_mismatch
+    in
+    let code, report = run_p0_plus dir [accepted; rejected] in
+    check "P0-plus rejected exits nonzero" (code = 1);
+    match report with
+    | `Assoc fields ->
+      check
+        "P0-plus rejected status"
+        (String.equal (string_value "status" fields) "rejected");
+      check
+        "P0-plus mixed accepted count"
+        (int_value "accepted_count" fields = 1);
+      check
+        "P0-plus mixed rejected count"
+        (int_value "rejected_count" fields = 1);
+      (match list_value "rejected_results" fields with
+       | [`Assoc rejected_fields] ->
+         check
+           "P0-plus rejected case"
+           (String.equal
+              (string_value "case" rejected_fields)
+              "unit-softmax-mismatch");
+         check
+           "P0-plus rejected opcode"
+           (String.equal
+              (string_value "opcode" rejected_fields)
+              "SOFTMAX_FP");
+         check
+           "P0-plus rejected output status"
+           (String.equal
+              (string_value "output_status" rejected_fields)
+              "mismatch");
+         (match list_value "outputs" rejected_fields with
+          | [`Assoc output_fields] ->
+            check
+              "P0-plus rejected output"
+              (String.equal
+                 (string_value "name" output_fields)
+                 "expected_probabilities");
+            check
+              "P0-plus rejected output root"
+              (not (bool_value "root_matched" output_fields));
+            let detail = assoc_json "mismatch_detail" output_fields in
+            check
+              "P0-plus rejected output detail"
+              (String.equal
+                 (string_value "status" detail)
+                 "mismatch");
+            check
+              "P0-plus rejected f64 cell"
+              (int_value "first_mismatch_f64_cell" detail = 0)
+          | _ -> failwith "expected one rejected output")
+       | _ -> failwith "expected one rejected result")
+    | _ -> failwith "report must be object")
+
 let () =
   check_good_template_reports_bound_abi ();
   check_dynamic_q1_effort_vector ();
@@ -2120,4 +2298,6 @@ let () =
   check_cross_platform_matrix_forged_runner_count_rejects ();
   check_cross_platform_matrix_forged_observation_count_rejects ();
   check_cross_platform_matrix_rejects_insufficient_row_diversity ();
-  check_cross_platform_matrix_forged_row_root_rejects ()
+  check_cross_platform_matrix_forged_row_root_rejects ();
+  check_p0_plus_rejected_results_empty_when_accepted ();
+  check_p0_plus_rejected_results_report_outputs ()

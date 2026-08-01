@@ -1,6 +1,6 @@
 # Inference Devnet Readiness
 
-Status: readiness checkpoint, 2026-07-30.
+Status: readiness checkpoint, 2026-08-01.
 
 This document is the short operational view of where the inference VM stands.
 It does not define new semantics. Runtime authority remains in
@@ -23,8 +23,9 @@ The current branch has demonstrated:
 - batch execution for repeated proof stages;
 - opcode timing sufficient to identify `LINEAR_Q1_G128_FP` as the current
   recurrent hotspot;
-- P0 and P0-plus conformance ingestion from independent `octra-inference`
-  fixtures; and
+- P0 conformance ingestion from independent `octra-inference` fixtures;
+- P0-plus diagnostic ingestion with the current `SOFTMAX_FP`
+  wide-tail portability gap isolated; and
 - explicit top-k boundary: top-k evidence is reference-only unless a future
   `TOPK_FP` primitive is proposed and accepted.
 - a product-facing prefill session bundle shape with rooted open, prefill,
@@ -38,11 +39,48 @@ session/runtime packaging.
 
 | Gate | Artifact | LiteNode status |
 | --- | --- | --- |
-| P0 schema, positive execution, exact effort, failure/atomicity | `/home/exedev/evidence/octra-inference/determinism-ingestion-corpus-effort-authority-20260730-014647` | accepted |
-| P0-plus execution | `/home/exedev/evidence/octra-inference/determinism-p0-plus-corpus-20260730-022653` | accepted `9/9` |
-| P0-plus top-k boundary | `/home/exedev/evidence/octra-inference/determinism-p0-plus-topk-boundary-20260730-025306` | accepted `9/9` |
+| P0 positive execution and effort authority | `/home/exedev/evidence/octra-inference/determinism-ingestion-corpus-effort-authority-20260730-014647` plus local rerun `/private/tmp/octra-p0-positive-report-envelope.cjson` | positive execution accepted `5/5`; validator readiness still blocked by failure-case/root/matrix gates |
+| P0 punitive failure/profile gate | local rerun `/private/tmp/octra-p0-full-failure-profile-report-envelope.cjson` | positive execution accepted `5/5`, but failure gate rejected: `30/35` counted/accepted; Q1 failure-contract rows need producer repair |
+| P0-plus execution | `/home/exedev/evidence/octra-inference/determinism-p0-plus-corpus-20260730-022653` plus local rerun `/private/tmp/octra-p0-plus-softmax-diagnostic-report-envelope.cjson` | diagnostic execution rejected `8/9`; `SOFTMAX_FP wide-1024-stable-tail` mismatches by one f64 bit pattern |
+| P0-plus top-k boundary | `/home/exedev/evidence/octra-inference/determinism-p0-plus-topk-boundary-20260730-025306` | boundary accepted as product authority classification; top-k remains reference-only and does not qualify P0-plus validator readiness |
 | Recurrent-heavy performance fixture on rebased LiteNode | `/home/exedev/evidence/octra-inference/litenode-recurrent-heavy-reemitted-2ca5dfd-754b0a5-20260729` | accepted |
 | Prefill session bundle shape | `/home/exedev/evidence/octra-inference/prefill-session-bundle-55cd597-20260730-121116` | producer-shaped; not continuous LiteNode execution |
+
+The `/private/tmp` reports above are local rerun snapshots, not durable
+artifacts. The durable identity of the current local rerun is:
+
+| Field | Value |
+| --- | --- |
+| LiteNode source state | local report-envelope working tree; identify by runner SHA below |
+| Runner | `_build/default/tools/inference_conformance_run.exe` |
+| Runner SHA-256 | `409195571e45c9fd728d7a97289911a730c0602b34decb230e81a153dbfbe7c0` |
+| Platform | `macosx`, `arm64`, OCaml switch `octra-lite-4.14.2`, compiler `4.14.2` |
+| P0 template index SHA-256 | `4e3de9d7ed36b33bf33b54160b431318f474bcdbadf610940039e28f102a5db1` |
+| P0 positive report SHA-256 | `49b475d31bbde593b0dc066531f50a6b8b4182866ecb1fbcfe5419ead4ab1237` |
+| P0 full failure/profile report SHA-256 | `9a767e6a3ff03aeff17390e7dc70e8761f2b811946edc36bc8eb99d4dc97a601` |
+| P0-plus fixture pack SHA-256 | `ccf0a834e55a8c0a25e75f4e3c1fab8392c2a683e11021c69a7dad33bafb203d` |
+| P0-plus diagnostic report SHA-256 | `197a2f5b8b8dc5271353a6db96724f9ff9c144030e5a66a169f864c59c7c31d9` |
+
+Rerun shape:
+
+```text
+opam exec --switch=octra-lite-4.14.2 -- \
+  dune exec tools/inference_conformance_run.exe -- \
+  --template-index /private/tmp/octra-conformance-3feb1677-20260801-024010/source/p0/p0-vm-execution-templates.cjson \
+  --strict-effort
+
+opam exec --switch=octra-lite-4.14.2 -- \
+  dune exec tools/inference_conformance_run.exe -- \
+  --template-index /private/tmp/octra-conformance-3feb1677-20260801-024010/source/p0/p0-vm-execution-templates.cjson \
+  --strict-effort \
+  --include-failures \
+  --require-failure-cases \
+  --require-profile-roots-bound
+
+opam exec --switch=octra-lite-4.14.2 -- \
+  dune exec tools/inference_conformance_run.exe -- \
+  --p0-plus-pack /private/tmp/octra-conformance-3feb1677-20260801-024010/source/p0-plus/p0-plus-fixture-pack.cjson
+```
 
 Latest producer checkpoints consumed by LiteNode:
 
@@ -70,9 +108,13 @@ d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
 
 1. Deterministic math profile.
    Current inference FP opcodes still use host `float`, `sqrt`, `exp`, `cos`,
-   `sin`, or binary64 accumulation. P0/P0-plus fixtures prove current LiteNode
-   agreement with producer fixtures; they do not make host math
-   validator-portable.
+   `sin`, or binary64 accumulation. P0 positive execution now proves the five
+   local P0 primitives can match their producer fixtures, but validator
+   readiness is still blocked by punitive failure coverage, root binding, and
+   cross-platform matrix evidence. P0-plus now gives an explicit portability
+   warning: `SOFTMAX_FP wide-1024-stable-tail` executes locally but differs by
+   one f64 bit pattern, so host-native `exp` cannot be counted as
+   consensus-safe.
 
 2. Target-owned session program.
    The proof path can chain admitted stages. Product runtime needs one
@@ -88,8 +130,10 @@ d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
    cached authenticated ranges, and measured kernel optimization.
 
 4. Multi-platform conformance.
-   P0 and P0-plus must run across the intended validator platforms and build
-   modes before a consensus claim.
+   Strict P0 reports must run across the intended validator platforms and
+   build modes before a consensus claim. P0-plus matrixing is intentionally not
+   supported yet; its host-transcendental surfaces need deterministic
+   replacement or narrower qualification first.
 
 5. Resource isolation.
    Inference must remain outside consensus proposal, epoch apply, finality, and
@@ -99,17 +143,20 @@ d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
 ## Next Engineering Sequence
 
 1. Keep P0 and P0-plus fixtures immutable.
-2. Add a deterministic arithmetic profile decision for P0:
+2. Add a deterministic arithmetic profile decision for P0 and P0-plus:
    - exact software FP, or
    - wider fixed point where quality evidence supports it, or
    - explicitly local-only host-FP profile.
-3. Wire conformance into CI for schema, positive execution, strict effort, and
+3. Keep `SOFTMAX_FP` behind `host-fp-exp-local-candidate` until its
+   max-subtract, exp, summation, division, rounding, output encoding, and
+   punitive vectors are protocol-owned.
+4. Wire conformance into CI for schema, positive execution, strict effort, and
    counted failure/atomicity.
-4. Build the target-owned prefill/decode session path; do not continue relying
+5. Build the target-owned prefill/decode session path; do not continue relying
    on caller-visible layer orchestration as product runtime.
-5. Re-run one Bonsai prompt-to-token proof under the target-owned session shape.
-6. Re-run recurrent-heavy and logits-tail performance gates against that shape.
-7. Only then prepare the mergeable branch by reducing evidence-only scaffolding
+6. Re-run one Bonsai prompt-to-token proof under the target-owned session shape.
+7. Re-run recurrent-heavy and logits-tail performance gates against that shape.
+8. Only then prepare the mergeable branch by reducing evidence-only scaffolding
    and isolating conformance tooling.
 
 ## What Not To Claim
