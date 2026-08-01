@@ -671,6 +671,80 @@ let q1_failure_mutation_payload_shape_ok result_fields case_fields =
      | _ -> true)
   | _ -> false
 
+let span_positive_cells fields =
+  match json_int_field "length_f64_cells" fields with
+  | Some cells -> cells > 0
+  | None -> false
+
+let valid_equal_digest_pair fields left right =
+  match binding_string left fields, binding_string right fields with
+  | Some left_digest, Some right_digest ->
+    String.equal left_digest right_digest && hex_string left_digest
+  | _ -> false
+
+let unchanged_span_ok = function
+  | `Assoc span_fields ->
+    span_positive_cells span_fields
+    && valid_equal_digest_pair span_fields "before_sha256" "after_sha256"
+    &&
+    (match field "unchanged" span_fields with
+     | Some (`Bool true) -> true
+     | _ -> false)
+  | _ -> false
+
+let changed_span_ok = function
+  | `Assoc span_fields ->
+    span_positive_cells span_fields
+    &&
+    (match binding_string "before_sha256" span_fields,
+           binding_string "after_sha256" span_fields with
+     | Some before_digest, Some after_digest ->
+       hex_string before_digest
+       && hex_string after_digest
+       && not (String.equal before_digest after_digest)
+     | _ -> false)
+    &&
+    (match field "changed" span_fields with
+     | Some (`Bool true) -> true
+     | _ -> false)
+  | _ -> false
+
+let finite_span_ok = function
+  | `Assoc span_fields ->
+    span_positive_cells span_fields
+    &&
+    (match field "finite" span_fields with
+     | Some (`Bool true) -> true
+     | _ -> false)
+  | _ -> false
+
+let nonempty_list_all name fields predicate =
+  match field name fields with
+  | Some (`List (_ :: _ as values)) -> List.for_all predicate values
+  | _ -> false
+
+let snapshot_output_not_required fields =
+  match opt_assoc_field "snapshot_output" fields with
+  | Some snapshot_fields ->
+    opt_string_field "status" snapshot_fields = Some "not_required"
+  | None -> false
+
+let snapshot_output_matched fields =
+  match opt_assoc_field "snapshot_output" fields with
+  | Some snapshot_fields ->
+    opt_string_field "status" snapshot_fields = Some "matched"
+    && span_positive_cells snapshot_fields
+    &&
+    (match json_int_field "length_f64_cells" snapshot_fields,
+           json_int_field "expected_length_f64_cells" snapshot_fields with
+     | Some cells, Some expected_cells -> cells = expected_cells
+     | _ -> false)
+    && valid_equal_digest_pair
+         snapshot_fields
+         "expected_sha256"
+         "observed_sha256"
+  | None -> false
+
 let q1_failure_observed_behavior_ok case_fields =
   let expected = string_field "expected" case_fields in
   let observed = string_field "observed" case_fields in
@@ -679,11 +753,16 @@ let q1_failure_observed_behavior_ok case_fields =
      || String.equal observed "ingress_rejected")
     && opt_string_field "unchanged_status" case_fields = Some "matched"
     && opt_string_field "snapshot_output_status" case_fields = Some "not_required"
+    && nonempty_list_all "unchanged_spans" case_fields unchanged_span_ok
+    && snapshot_output_not_required case_fields
   else if starts_with "accept_from_snapshot" expected then
     String.equal observed "vm_accepted"
     && opt_string_field "active_changed_status" case_fields = Some "changed"
     && opt_string_field "active_finite_status" case_fields = Some "finite"
     && opt_string_field "snapshot_output_status" case_fields = Some "matched"
+    && nonempty_list_all "active_changed_spans" case_fields changed_span_ok
+    && nonempty_list_all "active_finite_spans" case_fields finite_span_ok
+    && snapshot_output_matched case_fields
   else
     false
 

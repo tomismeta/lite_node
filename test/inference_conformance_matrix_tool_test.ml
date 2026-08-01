@@ -130,9 +130,11 @@ let failure_case
     ?(mutation_shape_status = "accepted")
     ?(mutation_shape_blockers = [])
     ?(observed_effort = 200)
+    ?unchanged_spans
     ?(active_changed_status = "not_changed")
     ?(active_finite_status = "finite")
     ?(finite_spans = `List [])
+    ?(active_changed_spans = `List [])
     ?(active_finite_spans = `List [])
     ?snapshot_sha
     () =
@@ -152,6 +154,21 @@ let failure_case
         "expected_length_f64_cells", `Int 6;
         "expected_sha256", `String (hex_root 'a');
         "observed_sha256", `String observed_sha;
+      ]
+  in
+  let unchanged_spans =
+    match unchanged_spans with
+    | Some spans -> spans
+    | None ->
+      `List [
+        `Assoc [
+          "name", `String "output";
+          "base_address", `Int 10000;
+          "length_f64_cells", `Int 6;
+          "before_sha256", `String (hex_root 'a');
+          "after_sha256", `String (hex_root 'a');
+          "unchanged", `Bool true;
+        ];
       ]
   in
   `Assoc [
@@ -174,20 +191,25 @@ let failure_case
     "active_finite_status", `String active_finite_status;
     "snapshot_output_status", `String snapshot_output_status;
     "snapshot_output", snapshot_output;
-    "unchanged_spans",
-    `List [
-      `Assoc [
-        "name", `String "output";
-        "base_address", `Int 10000;
-        "length_f64_cells", `Int 6;
-        "before_sha256", `String (hex_root 'a');
-        "after_sha256", `String (hex_root 'a');
-        "unchanged", `Bool true;
-      ];
-    ];
+    "unchanged_spans", unchanged_spans;
     "finite_spans", finite_spans;
-    "active_changed_spans", `List [];
+    "active_changed_spans", active_changed_spans;
     "active_finite_spans", active_finite_spans;
+  ]
+
+let changed_span
+    ?(before_sha = hex_root 'a')
+    ?(after_sha = hex_root 'c')
+    name
+    base
+    cells =
+  `Assoc [
+    "name", `String name;
+    "base_address", `Int base;
+    "length_f64_cells", `Int cells;
+    "before_sha256", `String before_sha;
+    "after_sha256", `String after_sha;
+    "changed", `Bool true;
   ]
 
 let finite_span ?(finite = true) name base cells =
@@ -296,6 +318,10 @@ let q1_required_failure_cases () =
            ~executable_mutations
            ~observed:"vm_accepted"
            ~active_changed_status:"changed"
+           ~active_changed_spans:
+             (`List [changed_span "active_output" 10000 6])
+           ~active_finite_spans:
+             (`List [finite_span "active_output" 10000 6])
            ~snapshot_sha:(hex_root 'a')
            ()
        else
@@ -1321,6 +1347,101 @@ let check_matrix_rejects_forged_snapshot_failure_observed_rejected () =
            (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_forged_reject_failure_changed_span () =
+  with_temp_dir (fun dir ->
+    let forged =
+      failure_case
+        ~case:"nonfinite_input_nan"
+        ~expected:"reject_before_write"
+        ~observed:"vm_rejected"
+        ~unchanged_spans:
+          (`List [
+            `Assoc [
+              "name", `String "output";
+              "base_address", `Int 10000;
+              "length_f64_cells", `Int 6;
+              "before_sha256", `String (hex_root 'a');
+              "after_sha256", `String (hex_root 'c');
+              "unchanged", `Bool true;
+            ];
+          ])
+        ~executable_mutations:[executable_mutation_for_case "nonfinite_input_nan"]
+        ()
+    in
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') ~failure:forged "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') ~failure:forged "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "forged reject changed span exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "forged reject changed span top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      check
+        "forged reject changed span validator blocker"
+        (List.mem
+           "required_q1_failure_cases_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_forged_snapshot_failure_unchanged_active_span () =
+  with_temp_dir (fun dir ->
+    let forged =
+      failure_case
+        ~case:"output_input_aliasing"
+        ~expected:"accept_from_snapshot"
+        ~observed:"vm_accepted"
+        ~active_changed_status:"changed"
+        ~active_changed_spans:
+          (`List [
+            changed_span
+              ~after_sha:(hex_root 'a')
+              "active_output"
+              10000
+              6;
+          ])
+        ~active_finite_spans:
+          (`List [finite_span "active_output" 10000 6])
+        ~snapshot_sha:(hex_root 'a')
+        ~executable_mutations:[executable_mutation_for_case "output_input_aliasing"]
+        ()
+    in
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') ~failure:forged "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') ~failure:forged "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "forged snapshot unchanged active span exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "forged snapshot unchanged active span top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      check
+        "forged snapshot unchanged active span validator blocker"
+        (List.mem
+           "required_q1_failure_cases_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_accepts_nonfinite_fp16_nan_scale_payload () =
   with_temp_dir (fun dir ->
     let nan_scale =
@@ -1470,6 +1591,10 @@ let check_matrix_rejects_failure_snapshot_mismatch () =
                 ~observed:"vm_accepted"
                 ~observed_effort:201
                 ~active_changed_status:"changed"
+                ~active_changed_spans:
+                  (`List [changed_span "active_output" 10000 6])
+                ~active_finite_spans:
+                  (`List [finite_span "active_output" 10000 6])
                 ~snapshot_sha:(hex_root 'a')
                 ())
            "Darwin"
@@ -1488,6 +1613,10 @@ let check_matrix_rejects_failure_snapshot_mismatch () =
                 ~observed:"vm_accepted"
                 ~observed_effort:201
                 ~active_changed_status:"changed"
+                ~active_changed_spans:
+                  (`List [changed_span "active_output" 10000 6])
+                ~active_finite_spans:
+                  (`List [finite_span "active_output" 10000 6])
                 ~snapshot_sha:(hex_root 'b')
                 ())
            "Linux"
@@ -2585,6 +2714,8 @@ let () =
   check_matrix_rejects_forged_failure_mutation_payload_shape ();
   check_matrix_rejects_forged_reject_failure_observed_accepted ();
   check_matrix_rejects_forged_snapshot_failure_observed_rejected ();
+  check_matrix_rejects_forged_reject_failure_changed_span ();
+  check_matrix_rejects_forged_snapshot_failure_unchanged_active_span ();
   check_matrix_accepts_nonfinite_fp16_nan_scale_payload ();
   check_matrix_rejects_partial_alias_payload_outside_lhs ();
   check_matrix_rejects_missing_failure_mutation_payload ();
