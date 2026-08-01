@@ -670,6 +670,33 @@ let report_row_string_list_field name = function
   | `Assoc fields -> optional_string_list_field name fields
   | _ -> []
 
+let report_row_platform_runner_observation = function
+  | `Assoc fields ->
+    (match
+       opt_string_field "platform_key" fields,
+       opt_string_field "runner_executable_sha256" fields
+     with
+     | Some platform_key, Some runner_executable_sha256 ->
+       Some (platform_key, runner_executable_sha256)
+     | _ -> None)
+  | _ -> None
+
+let max_distinct_platform_runner_observations observations =
+  let observations = List.sort_uniq compare observations in
+  let rec loop used_platforms used_runners count = function
+    | [] -> count
+    | (platform, runner) :: rest ->
+      let skipped = loop used_platforms used_runners count rest in
+      let taken =
+        if List.mem platform used_platforms || List.mem runner used_runners then
+          count
+        else
+          loop (platform :: used_platforms) (runner :: used_runners) (count + 1) rest
+      in
+      max skipped taken
+  in
+  loop [] [] 0 observations
+
 let cross_platform_evidence
     ~required_opcodes
     ~profile_catalog_root
@@ -771,6 +798,11 @@ let cross_platform_evidence
          | Some value -> value
          | None -> -1
        in
+       let matrix_distinct_platform_runner_observation_count =
+         match opt_int_field "distinct_platform_runner_observation_count" fields with
+         | Some value -> value
+         | None -> -1
+       in
        let row_platforms =
          report_rows
          |> List.filter_map (report_row_string_field "platform_key")
@@ -780,6 +812,14 @@ let cross_platform_evidence
          report_rows
          |> List.filter_map (report_row_string_field "runner_executable_sha256")
          |> unique
+       in
+       let row_platform_runner_observations =
+         report_rows
+         |> List.filter_map report_row_platform_runner_observation
+       in
+       let row_platform_runner_observation_count =
+         max_distinct_platform_runner_observations
+           row_platform_runner_observations
        in
        let row_result_signatures =
          report_rows
@@ -831,11 +871,18 @@ let cross_platform_evidence
        let row_runner_count_accepted =
          matrix_distinct_runner_count = List.length row_runner_executables
        in
+       let row_platform_runner_observation_count_accepted =
+         matrix_distinct_platform_runner_observation_count =
+         row_platform_runner_observation_count
+       in
        let row_platform_minimum_accepted =
          List.length row_platforms >= 2
        in
        let row_runner_minimum_accepted =
          List.length row_runner_executables >= 2
+       in
+       let row_platform_runner_observation_minimum_accepted =
+         row_platform_runner_observation_count >= 2
        in
        let row_signature_count_accepted =
          matrix_result_signature_count = List.length row_result_signatures
@@ -896,11 +943,17 @@ let cross_platform_evidence
               (not row_runner_count_accepted)
               "matrix_runner_executable_count_mismatch"
          |> add_blocker
+              (not row_platform_runner_observation_count_accepted)
+              "matrix_platform_runner_observation_count_mismatch"
+         |> add_blocker
               (not row_platform_minimum_accepted)
               "matrix_insufficient_distinct_platforms"
          |> add_blocker
               (not row_runner_minimum_accepted)
               "matrix_insufficient_distinct_runner_executables"
+         |> add_blocker
+              (not row_platform_runner_observation_minimum_accepted)
+              "matrix_insufficient_distinct_platform_runner_observations"
          |> add_blocker
               (not row_signature_count_accepted)
               "matrix_result_signature_count_mismatch"
@@ -977,17 +1030,27 @@ let cross_platform_evidence
          "matrix_distinct_platform_count", `Int matrix_distinct_platform_count;
          "matrix_distinct_runner_executable_count",
          `Int matrix_distinct_runner_count;
+         "matrix_distinct_platform_runner_observation_count",
+         `Int matrix_distinct_platform_runner_observation_count;
          "matrix_result_signature_count", `Int matrix_result_signature_count;
          "row_distinct_platform_count",
          `Int (List.length row_platforms);
          "row_distinct_runner_executable_count",
          `Int (List.length row_runner_executables);
+         "row_distinct_platform_runner_observation_count",
+         `Int row_platform_runner_observation_count;
          "row_distinct_platform_status",
          `String
            (if row_platform_minimum_accepted then "accepted" else "rejected");
          "row_distinct_runner_executable_status",
          `String
            (if row_runner_minimum_accepted then "accepted" else "rejected");
+         "row_distinct_platform_runner_observation_status",
+         `String
+           (if row_platform_runner_observation_minimum_accepted then
+              "accepted"
+            else
+              "rejected");
          "row_result_signature_count",
          `Int (List.length row_result_signatures);
          "row_result_signatures",
@@ -1016,8 +1079,10 @@ let cross_platform_evidence
          `String
            (if row_platform_count_accepted
                && row_runner_count_accepted
+               && row_platform_runner_observation_count_accepted
                && row_platform_minimum_accepted
                && row_runner_minimum_accepted
+               && row_platform_runner_observation_minimum_accepted
                && row_signature_count_accepted
                && row_signature_accepted
                && local_result_signature_accepted

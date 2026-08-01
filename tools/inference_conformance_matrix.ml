@@ -222,9 +222,11 @@ let next_readiness_blocker blockers =
       "profile_root_binding_rejected";
       "cross_platform_conformance_missing";
       "missing_cross_platform_matrix";
+      "missing_required_opcode_scope";
       "required_opcode_missing";
       "insufficient_distinct_platforms";
       "insufficient_distinct_runner_executables";
+      "insufficient_distinct_platform_runner_observations";
       "result_mismatch_across_platforms";
     ]
   in
@@ -321,6 +323,12 @@ let starts_with prefix value =
 let required_opcodes () =
   List.rev !requested_opcodes |> unique
 
+let required_distinct_platform_count () =
+  if !require_validator_readiness && !min_platforms < 2 then
+    2
+  else
+    !min_platforms
+
 type report_summary = {
   accepted : bool;
   platform_key : string;
@@ -334,6 +342,28 @@ type report_summary = {
   blockers : string list;
   json : Yojson.Safe.t;
 }
+
+let platform_runner_observation summary =
+  match summary.runner_executable_sha256 with
+  | Some runner_executable_sha256 ->
+    Some (summary.platform_key, runner_executable_sha256)
+  | None -> None
+
+let max_distinct_platform_runner_observations observations =
+  let observations = List.sort_uniq compare observations in
+  let rec loop used_platforms used_runners count = function
+    | [] -> count
+    | (platform, runner) :: rest ->
+      let skipped = loop used_platforms used_runners count rest in
+      let taken =
+        if List.mem platform used_platforms || List.mem runner used_runners then
+          count
+        else
+          loop (platform :: used_platforms) (runner :: used_runners) (count + 1) rest
+      in
+      max skipped taken
+  in
+  loop [] [] 0 observations
 
 let platform_key platform =
   String.concat
@@ -1234,6 +1264,7 @@ let without_cross_platform_blocker blockers =
     blockers
 
 let matrix_report paths =
+  let required_distinct_platform_count = required_distinct_platform_count () in
   let summaries = List.map report_summary paths in
   let report_count = List.length summaries in
   let accepted_reports =
@@ -1250,6 +1281,11 @@ let matrix_report paths =
     summaries
     |> List.filter_map (fun summary -> summary.runner_executable_sha256)
     |> unique
+  in
+  let distinct_platform_runner_observation_count =
+    summaries
+    |> List.filter_map platform_runner_observation
+    |> max_distinct_platform_runner_observations
   in
   let profile_catalog_roots =
     summaries
@@ -1299,6 +1335,9 @@ let matrix_report paths =
     |> unique
   in
   let required_opcodes = required_opcodes () in
+  let required_opcode_scope_ready =
+    (not !require_validator_readiness) || required_opcodes <> []
+  in
   let opcode_coverage_ready =
     List.for_all
       (fun opcode -> List.exists (String.equal opcode) result_opcodes)
@@ -1324,8 +1363,10 @@ let matrix_report paths =
   let matrix_accepted =
     report_count > 0
     && accepted_reports = report_count
-    && List.length platforms >= !min_platforms
-    && List.length runner_executable_sha256s >= !min_platforms
+    && required_opcode_scope_ready
+    && List.length platforms >= required_distinct_platform_count
+    && List.length runner_executable_sha256s >= required_distinct_platform_count
+    && distinct_platform_runner_observation_count >= required_distinct_platform_count
     && List.length signatures = 1
     && missing_profile_catalog_root_count = 0
     && List.length profile_catalog_roots = 1
@@ -1340,11 +1381,17 @@ let matrix_report paths =
          (accepted_reports <> report_count)
          "runner_report_rejected"
     |> add_if
-         (List.length platforms < !min_platforms)
+         (not required_opcode_scope_ready)
+         "missing_required_opcode_scope"
+    |> add_if
+         (List.length platforms < required_distinct_platform_count)
          "insufficient_distinct_platforms"
     |> add_if
-         (List.length runner_executable_sha256s < !min_platforms)
+         (List.length runner_executable_sha256s < required_distinct_platform_count)
          "insufficient_distinct_runner_executables"
+    |> add_if
+         (distinct_platform_runner_observation_count < required_distinct_platform_count)
+         "insufficient_distinct_platform_runner_observations"
     |> add_if
          (List.length signatures <> 1)
          "result_mismatch_across_platforms"
@@ -1387,13 +1434,24 @@ let matrix_report paths =
            "rejected");
       "distinct_platform_status",
       `String
-        (if List.length platforms >= !min_platforms then "accepted" else "rejected");
-      "distinct_runner_executable_status",
-      `String
-        (if List.length runner_executable_sha256s >= !min_platforms then
+        (if List.length platforms >= required_distinct_platform_count then
            "accepted"
          else
            "rejected");
+      "distinct_runner_executable_status",
+      `String
+        (if List.length runner_executable_sha256s >= required_distinct_platform_count then
+           "accepted"
+         else
+           "rejected");
+      "distinct_platform_runner_observation_status",
+      `String
+        (if distinct_platform_runner_observation_count >= required_distinct_platform_count then
+           "accepted"
+         else
+           "rejected");
+      "required_opcode_scope_status",
+      `String (if required_opcode_scope_ready then "accepted" else "rejected");
       "result_signature_status",
       `String (if List.length signatures = 1 then "accepted" else "rejected");
       "profile_catalog_status",
@@ -1431,11 +1489,16 @@ let matrix_report paths =
     "schema", `String "octra.inference.conformance.matrix.v1";
     "report_count", `Int report_count;
     "accepted_report_count", `Int accepted_reports;
-    "required_distinct_platform_count", `Int !min_platforms;
+    "required_distinct_platform_count", `Int required_distinct_platform_count;
     "distinct_platform_count", `Int (List.length platforms);
-    "required_distinct_runner_executable_count", `Int !min_platforms;
+    "requested_min_platform_count", `Int !min_platforms;
+    "required_distinct_runner_executable_count", `Int required_distinct_platform_count;
     "distinct_runner_executable_count",
     `Int (List.length runner_executable_sha256s);
+    "required_distinct_platform_runner_observation_count",
+    `Int required_distinct_platform_count;
+    "distinct_platform_runner_observation_count",
+    `Int distinct_platform_runner_observation_count;
     "cross_platform_status",
     `String (if matrix_accepted then "accepted" else "rejected");
     "validator_readiness_required", `Bool !require_validator_readiness;

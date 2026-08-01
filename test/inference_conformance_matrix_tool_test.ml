@@ -883,7 +883,127 @@ let check_matrix_accepts_bound_reports () =
            "octra.inference.conformance.result-signature.v6");
       check
         "matrix carries runner hashes"
-        (List.length (string_list_value "runner_executable_sha256s" fields) = 2)
+        (List.length (string_list_value "runner_executable_sha256s" fields) = 2);
+      check
+        "matrix carries platform runner observation count"
+        (match assoc_value "distinct_platform_runner_observation_count" fields with
+         | `Int count -> count = 2
+         | _ -> false)
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_aggregate_only_runner_diversity () =
+  with_temp_dir (fun dir ->
+    let reports =
+      [
+        "a.cjson", report ~runner_sha:(hex_root '1') "Darwin" "arm64";
+        "b.cjson", report ~runner_sha:(hex_root '2') "Darwin" "arm64";
+        "c.cjson", report ~runner_sha:(hex_root '3') "Darwin" "arm64";
+        "d.cjson", report ~runner_sha:(hex_root '1') "Linux" "x86_64";
+        "e.cjson", report ~runner_sha:(hex_root '1') "FreeBSD" "x86_64";
+      ]
+      |> List.map (fun (name, value) -> write_report dir name value)
+    in
+    let code, json = run_matrix ~args:["--min-platforms"; "3"] reports in
+    check "aggregate-only runner diversity exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "aggregate-only runner diversity has three platforms"
+        (match assoc_value "distinct_platform_count" fields with
+         | `Int count -> count = 3
+         | _ -> false);
+      check
+        "aggregate-only runner diversity has three runners"
+        (match assoc_value "distinct_runner_executable_count" fields with
+         | `Int count -> count = 3
+         | _ -> false);
+      check
+        "aggregate-only runner diversity has two independent observations"
+        (match assoc_value "distinct_platform_runner_observation_count" fields with
+         | `Int count -> count = 2
+         | _ -> false);
+      check
+        "aggregate-only runner diversity blocker"
+        (List.mem
+           "insufficient_distinct_platform_runner_observations"
+           (blockers fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_validator_readiness_without_opcode_scope () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix ~args:["--require-validator-readiness"] [a; b] in
+    check "unscoped readiness matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "unscoped readiness blocker"
+        (List.mem "missing_required_opcode_scope" (blockers fields));
+      check
+        "unscoped readiness scope status"
+        (match assoc_value "validator_readiness_gate" fields with
+         | `Assoc gate_fields ->
+           String.equal
+             (string_value "required_opcode_scope_status" gate_fields)
+             "rejected"
+         | _ -> false)
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_one_platform_validator_readiness () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Darwin" "arm64")
+    in
+    let code, json =
+      run_matrix
+        ~args:[
+          "--min-platforms"; "1";
+          "--opcode"; "LINEAR_Q1_G128_FP";
+          "--require-validator-readiness";
+        ]
+        [a; b]
+    in
+    check "one-platform readiness matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "one-platform readiness requested floor preserved"
+        (match assoc_value "requested_min_platform_count" fields with
+         | `Int count -> count = 1
+         | _ -> false);
+      check
+        "one-platform readiness effective floor is two"
+        (match assoc_value "required_distinct_platform_count" fields with
+         | `Int count -> count = 2
+         | _ -> false);
+      check
+        "one-platform readiness platform blocker"
+        (List.mem "insufficient_distinct_platforms" (blockers fields));
+      check
+        "one-platform readiness observation blocker"
+        (List.mem
+           "insufficient_distinct_platform_runner_observations"
+           (blockers fields))
     | _ -> failwith "matrix output must be object")
 
 let check_matrix_rejects_reused_runner_hash () =
@@ -2780,6 +2900,9 @@ let check_matrix_rejects_same_platform () =
 
 let () =
   check_matrix_accepts_bound_reports ();
+  check_matrix_rejects_aggregate_only_runner_diversity ();
+  check_matrix_rejects_validator_readiness_without_opcode_scope ();
+  check_matrix_rejects_one_platform_validator_readiness ();
   check_matrix_rejects_reused_runner_hash ();
   check_matrix_accepts_required_opcode_reports ();
   check_matrix_rejects_missing_required_opcode ();

@@ -559,6 +559,7 @@ let accepted_matrix
     `String "octra.inference.conformance.result-signature.v6";
     "distinct_platform_count", `Int 2;
     "distinct_runner_executable_count", `Int 2;
+    "distinct_platform_runner_observation_count", `Int 2;
     "result_signature_count", `Int 1;
     "profile_catalog_roots", `List [`String profile_catalog_root];
     "template_corpus_roots", `List [`String template_corpus_root];
@@ -1324,6 +1325,12 @@ let check_pinned_cross_platform_matrix_is_consumed () =
            "matrix-backed row runner count"
            (int_value "row_distinct_runner_executable_count" cross_platform = 2);
          check
+           "matrix-backed declared platform runner observation count"
+           (int_value "matrix_distinct_platform_runner_observation_count" cross_platform = 2);
+         check
+           "matrix-backed row platform runner observation count"
+           (int_value "row_distinct_platform_runner_observation_count" cross_platform = 2);
+         check
            "matrix-backed declared signature count"
            (int_value "matrix_result_signature_count" cross_platform = 1);
          check
@@ -1704,9 +1711,75 @@ let check_cross_platform_matrix_forged_runner_count_rejects () =
            "matrix forged count reports row runner count"
            (int_value "row_distinct_runner_executable_count" cross_platform = 2);
          let blockers = string_list "blockers" cross_platform in
+	         check
+	           "matrix forged count blocker"
+	           (List.mem "matrix_runner_executable_count_mismatch" blockers)
+	       | _ -> failwith "report must be object")
+    | _ -> failwith "seed report must be object")
+
+let check_cross_platform_matrix_forged_observation_count_rejects () =
+  with_temp_dir (fun dir ->
+    let code, seed_report =
+      run_conformance
+        dir
+        (q1_template ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "matrix forged observation count seed run exits zero" (code = 0);
+    match seed_report with
+    | `Assoc seed_fields ->
+      let matrix =
+        accepted_matrix
+          ~profile_catalog_root:(string_value "profile_catalog_root" seed_fields)
+          ~template_corpus_root:(string_value "template_corpus_root" seed_fields)
+          ~result_signature_sha256:(string_value "result_signature_sha256" seed_fields)
+        |> replace_assoc_field
+             "distinct_platform_runner_observation_count"
+             (`Int 3)
+      in
+      let matrix_path, matrix_sha = write_matrix dir matrix in
+      let code, report =
+        run_conformance
+          dir
+          (q1_template ())
+          [
+            "--strict-effort";
+            "--include-failures";
+            "--require-failure-cases";
+            "--require-profile-roots-bound";
+            "--cross-platform-matrix";
+            Filename.quote matrix_path;
+            "--expected-cross-platform-matrix-sha256";
+            matrix_sha;
+            "--require-validator-readiness";
+          ]
+      in
+      check "matrix forged observation count exits nonzero" (code = 1);
+      (match report with
+       | `Assoc fields ->
+         let readiness = assoc_json "validator_readiness_gate" fields in
+         let cross_platform = assoc_json "cross_platform_evidence" readiness in
          check
-           "matrix forged count blocker"
-           (List.mem "matrix_runner_executable_count_mismatch" blockers)
+           "matrix forged observation count rejected"
+           (String.equal (string_value "status" cross_platform) "rejected");
+         check
+           "matrix forged observation count row aggregate rejected"
+           (String.equal (string_value "row_aggregate_status" cross_platform) "rejected");
+         check
+           "matrix forged observation count declared"
+           (int_value "matrix_distinct_platform_runner_observation_count" cross_platform = 3);
+         check
+           "matrix forged observation count observed"
+           (int_value "row_distinct_platform_runner_observation_count" cross_platform = 2);
+         let blockers = string_list "blockers" cross_platform in
+         check
+           "matrix forged observation count blocker"
+           (List.mem "matrix_platform_runner_observation_count_mismatch" blockers)
        | _ -> failwith "report must be object")
     | _ -> failwith "seed report must be object")
 
@@ -1771,13 +1844,23 @@ let check_cross_platform_matrix_rejects_insufficient_row_diversity () =
            (String.equal
               (string_value "row_distinct_runner_executable_status" cross_platform)
               "rejected");
+         check
+           "matrix row platform runner observation minimum rejected"
+           (String.equal
+              (string_value "row_distinct_platform_runner_observation_status" cross_platform)
+              "rejected");
          let blockers = string_list "blockers" cross_platform in
          check
            "matrix row platform minimum blocker"
            (List.mem "matrix_insufficient_distinct_platforms" blockers);
          check
            "matrix row runner minimum blocker"
-           (List.mem "matrix_insufficient_distinct_runner_executables" blockers)
+           (List.mem "matrix_insufficient_distinct_runner_executables" blockers);
+         check
+           "matrix row platform runner observation minimum blocker"
+           (List.mem
+              "matrix_insufficient_distinct_platform_runner_observations"
+              blockers)
        | _ -> failwith "report must be object")
     | _ -> failwith "seed report must be object")
 
@@ -1860,5 +1943,6 @@ let () =
   check_cross_platform_matrix_row_envelope_mismatch_rejects ();
   check_cross_platform_matrix_local_signature_mismatch_rejects ();
   check_cross_platform_matrix_forged_runner_count_rejects ();
+  check_cross_platform_matrix_forged_observation_count_rejects ();
   check_cross_platform_matrix_rejects_insufficient_row_diversity ();
   check_cross_platform_matrix_forged_row_root_rejects ()
