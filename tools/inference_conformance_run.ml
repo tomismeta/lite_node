@@ -277,9 +277,39 @@ let profile_gate_opcodes gates =
     | _ -> None)
   |> List.sort_uniq String.compare
 
-let transcendental_dependency_catalog_report_fields profile_gates =
-  let opcodes = profile_gate_opcodes profile_gates in
-  let catalog = Profile.transcendental_dependency_catalog_json ~opcodes in
+let transcendental_dependency_entry_count = function
+  | `Assoc fields ->
+    (match opt_int_field "entry_count" fields with
+     | Some count -> count
+     | None -> 0)
+  | _ -> 0
+
+let transcendental_dependency_dependency_count = function
+  | `Assoc fields ->
+    (match opt_int_field "dependency_count" fields with
+     | Some count -> count
+     | None -> 0)
+  | _ -> 0
+
+let transcendental_dependency_blockers catalog =
+  let entry_count = transcendental_dependency_entry_count catalog in
+  if entry_count = 0 then []
+  else ["unresolved_transcendental_dependencies"]
+
+let transcendental_dependency_gate_json catalog =
+  let blockers = transcendental_dependency_blockers catalog in
+  `Assoc [
+    "diagnostic_only", `Bool true;
+    "status", `String (if blockers = [] then "accepted" else "rejected");
+    "entry_count", `Int (transcendental_dependency_entry_count catalog);
+    "dependency_count", `Int (transcendental_dependency_dependency_count catalog);
+    "transcendental_dependency_catalog_root",
+    `String (Profile.transcendental_dependency_catalog_root catalog);
+    "blockers",
+    `List (List.map (fun blocker -> `String blocker) blockers);
+  ]
+
+let transcendental_dependency_catalog_report_fields catalog =
   [
     "transcendental_dependency_catalog", catalog;
     "transcendental_dependency_catalog_root",
@@ -1878,6 +1908,7 @@ let validator_readiness_gate
     ~vm_semantics_binding_counts
     ~abi_declaration_binding_counts
     ~executable_abi_counts
+    ~transcendental_dependency_catalog
     ~cross_platform_evidence
     ~included_template_count
     ~declared_failure_case_count
@@ -1910,6 +1941,9 @@ let validator_readiness_gate
     Profile.root_bindings_are_consensus_ready abi_declaration_binding_counts
   in
   let executable_abi_ready = executable_abi_ready executable_abi_counts in
+  let transcendental_dependency_ready =
+    transcendental_dependency_blockers transcendental_dependency_catalog = []
+  in
   let cross_platform_ready = gate_status_accepted cross_platform_evidence in
   let ready =
     Profile.validator_readiness_accepted
@@ -1922,6 +1956,7 @@ let validator_readiness_gate
     && vm_semantics_ready
     && abi_ready
     && executable_abi_ready
+    && transcendental_dependency_ready
   in
   let blockers =
     []
@@ -1942,6 +1977,9 @@ let validator_readiness_gate
          (not executable_abi_ready)
          "executable_abi_binding_not_proven"
     |> add_blocker
+         (not transcendental_dependency_ready)
+         "transcendental_dependency_not_resolved"
+    |> add_blocker
          (not cross_platform_ready)
          "cross_platform_conformance_missing"
   in
@@ -1958,6 +1996,7 @@ let validator_readiness_gate
     @ vm_semantics_root_blockers vm_semantics_binding_counts
     @ abi_declaration_binding_blockers abi_declaration_binding_counts
     @ executable_abi_blockers executable_abi_counts
+    @ transcendental_dependency_blockers transcendental_dependency_catalog
     @ Profile.consensus_ready_blockers
         ~profile_gate_count
         ~unprofiled_count
@@ -1991,6 +2030,11 @@ let validator_readiness_gate
     `String (if executable_abi_ready then "accepted" else "rejected");
     "executable_abi_binding_gate",
     executable_abi_gate_json executable_abi_counts;
+    "transcendental_dependency_status",
+    `String
+      (if transcendental_dependency_ready then "accepted" else "rejected");
+    "transcendental_dependency_gate",
+    transcendental_dependency_gate_json transcendental_dependency_catalog;
     "cross_platform_status",
     `String (if cross_platform_ready then "accepted" else "rejected");
     "cross_platform_evidence", cross_platform_evidence;
@@ -4152,6 +4196,10 @@ let run_p0_plus_pack path =
   let classified_profile_gate_count =
     Profile.classified_gate_count status_counts
   in
+  let transcendental_dependency_catalog =
+    Profile.transcendental_dependency_catalog_json
+      ~opcodes:(profile_gate_opcodes profile_gates)
+  in
   let cross_platform_evidence_json =
     `Assoc [
       "status", `String "not_supported";
@@ -4174,6 +4222,7 @@ let run_p0_plus_pack path =
       ~vm_semantics_binding_counts
       ~abi_declaration_binding_counts
       ~executable_abi_counts
+      ~transcendental_dependency_catalog
       ~cross_platform_evidence:cross_platform_evidence_json
       ~included_template_count:0
       ~declared_failure_case_count:0
@@ -4230,7 +4279,7 @@ let run_p0_plus_pack path =
     "consensus_blocker_class_counts",
     Profile.consensus_blocker_class_counts_json profile_gates;
   ]
-  @ transcendental_dependency_catalog_report_fields profile_gates
+  @ transcendental_dependency_catalog_report_fields transcendental_dependency_catalog
   @ [
     "profile_root_binding_status_counts",
     Profile.root_binding_counts_json root_binding_counts;
@@ -4432,6 +4481,10 @@ let run_index path =
       ~template_corpus_root
       ~local_result_signature_sha256
   in
+  let transcendental_dependency_catalog =
+    Profile.transcendental_dependency_catalog_json
+      ~opcodes:(profile_gate_opcodes profile_gates)
+  in
   let accepted =
     execution_accepted
     && failure_cases_required_pass
@@ -4472,6 +4525,7 @@ let run_index path =
       ~vm_semantics_binding_counts
       ~abi_declaration_binding_counts
       ~executable_abi_counts
+      ~transcendental_dependency_catalog
       ~cross_platform_evidence:cross_platform_evidence_json
       ~included_template_count:included_failure_template_count
       ~declared_failure_case_count
@@ -4534,7 +4588,7 @@ let run_index path =
     "consensus_blocker_class_counts",
     Profile.consensus_blocker_class_counts_json profile_gates;
   ]
-  @ transcendental_dependency_catalog_report_fields profile_gates
+  @ transcendental_dependency_catalog_report_fields transcendental_dependency_catalog
   @ [
     "profile_root_binding_status_counts",
     Profile.root_binding_counts_json root_binding_counts;

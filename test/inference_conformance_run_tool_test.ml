@@ -804,6 +804,41 @@ let check_transcendental_dependency_catalog
        = List.sort_uniq String.compare opcodes)
   | _ -> failwith "report must be object"
 
+let check_readiness_transcendental_dependency_gate
+    report
+    ~status
+    ~entry_count
+    ~dependency_count
+    ~blocker =
+  match report with
+  | `Assoc fields ->
+    let readiness = assoc_json "validator_readiness_gate" fields in
+    check
+      "readiness transcendental dependency status"
+      (String.equal
+         (string_value "transcendental_dependency_status" readiness)
+         status);
+    let gate = assoc_json "transcendental_dependency_gate" readiness in
+    check
+      "readiness transcendental dependency gate status"
+      (String.equal (string_value "status" gate) status);
+    check
+      "readiness transcendental dependency gate entry count"
+      (int_value "entry_count" gate = entry_count);
+    check
+      "readiness transcendental dependency gate dependency count"
+      (int_value "dependency_count" gate = dependency_count);
+    (match blocker with
+     | None -> check "readiness dependency blockers empty" (list_value "blockers" gate = [])
+     | Some expected ->
+       check
+         "readiness dependency blocker"
+         (List.mem expected (string_list "blockers" gate));
+       check
+         "readiness top-level dependency blocker"
+         (List.mem expected (string_list "blockers" readiness)))
+  | _ -> failwith "report must be object"
+
 let producer_repair_hints report =
   match report with
   | `Assoc fields -> list_value "producer_repair_hints" fields
@@ -1128,7 +1163,13 @@ let check_good_template_reports_bound_abi () =
       report
       ~entry_count:0
       ~dependency_count:0
-      ~opcodes:[])
+      ~opcodes:[];
+    check_readiness_transcendental_dependency_gate
+      report
+      ~status:"accepted"
+      ~entry_count:0
+      ~dependency_count:0
+      ~blocker:None)
 
 let check_dynamic_q1_effort_vector () =
   with_temp_dir (fun dir ->
@@ -2898,7 +2939,13 @@ let check_p0_plus_rejected_results_empty_when_accepted () =
         report
         ~entry_count:1
         ~dependency_count:1
-        ~opcodes:["SOFTMAX_FP"]
+        ~opcodes:["SOFTMAX_FP"];
+      check_readiness_transcendental_dependency_gate
+        report
+        ~status:"rejected"
+        ~entry_count:1
+        ~dependency_count:1
+        ~blocker:(Some "unresolved_transcendental_dependencies")
     | _ -> failwith "report must be object")
 
 let check_p0_plus_rejected_results_report_outputs () =
