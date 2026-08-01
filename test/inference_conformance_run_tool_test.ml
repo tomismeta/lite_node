@@ -3079,6 +3079,11 @@ let check_p0_plus_softmax_gap_reports_diagnostic_replacement_plan () =
          (string_value "status" plan_fields)
          "required_before_consensus");
     check
+      "Softmax gap plan consensus action"
+      (String.equal
+         (string_value "consensus_action" plan_fields)
+         "qualified_protocol_owned_exp_required_before_consensus");
+    check
       "Softmax gap plan replacement"
       (String.equal
          (string_value "preferred_replacement" plan_fields)

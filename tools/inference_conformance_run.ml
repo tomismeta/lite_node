@@ -3791,7 +3791,7 @@ let p0_plus_failure_classification ~opcode ~case_name ~fixture ~params ~outputs
     | "SOFTMAX_FP"
       when known_softmax_portability_gap ~case_name fixture params outputs ->
       ( "host_transcendental_portability_gap",
-        "replace_or_qualify_native_exp_before_consensus" )
+        "qualified_protocol_owned_exp_required_before_consensus" )
     | _ ->
       ( "deterministic_output_mismatch",
         "inspect_vm_semantics_or_fixture_authority" )

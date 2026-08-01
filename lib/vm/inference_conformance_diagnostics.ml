@@ -22,6 +22,8 @@ let softmax_exp_replacement_plan ~case_name ~outputs =
     "current_profile", `String "host-fp-exp-local-candidate";
     "current_classification", `String "host_transcendental_portability_gap";
     "status", `String "required_before_consensus";
+    "consensus_action",
+    `String "qualified_protocol_owned_exp_required_before_consensus";
     "preferred_replacement",
     `String "protocol-owned software exp over finite nonpositive binary64 inputs";
     "blocked_surface",
