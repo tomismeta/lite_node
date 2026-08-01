@@ -13,7 +13,7 @@ Include at startup:
 *)
 
 let schema =
-  "octra.inference.conformance.result-signature.v4"
+  "octra.inference.conformance.result-signature.v5"
 
 let fail message =
   failwith message

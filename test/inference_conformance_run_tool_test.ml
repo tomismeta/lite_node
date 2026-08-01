@@ -537,7 +537,7 @@ let bound_matrix_report_row
     "runner_report_sha256", `String (sha256 platform_key);
     "result_signature_sha256", `String result_signature_sha256;
     "result_signature_schema",
-    `String "octra.inference.conformance.result-signature.v4";
+    `String "octra.inference.conformance.result-signature.v5";
     "result_opcodes", `List [`String opcode];
     "platform_key", `String platform_key;
     "runner_executable_sha256", `String runner_sha;
@@ -556,7 +556,7 @@ let accepted_matrix
     "blockers", `List [];
     "result_opcodes", `List [`String opcode];
     "result_signature_schema",
-    `String "octra.inference.conformance.result-signature.v4";
+    `String "octra.inference.conformance.result-signature.v5";
     "distinct_platform_count", `Int 2;
     "distinct_runner_executable_count", `Int 2;
     "result_signature_count", `Int 1;

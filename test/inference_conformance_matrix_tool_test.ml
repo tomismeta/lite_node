@@ -274,7 +274,7 @@ let executable_mutation_for_case = function
     executable_mutation
       "lower_effort_limit"
       "effort"
-      ["value", `Int 199]
+      ["value", `Int 201]
   | case -> failwith ("missing executable mutation for case: " ^ case)
 
 let q1_required_failure_cases () =
@@ -302,7 +302,7 @@ let replace_failure_case replacement cases =
 
 let result
     ?(opcode = "LINEAR_Q1_G128_FP")
-    ?(observed_opcode_effort = 200)
+    ?(observed_opcode_effort = 201)
     ?(opcode_effort_match = true)
     ?(profile_root_status = "matched")
     ?(vm_semantics_status = "matched")
@@ -435,9 +435,12 @@ let result
     "status", `String "accepted";
     "vm_run", `String "accepted";
     "output_status", `String "matched";
-    "expected_effort", `Int 201;
-    "observed_effort", `Int 201;
-    "expected_opcode_effort", `Int 200;
+    "expected_effort", `Int 202;
+    "observed_effort", `Int 202;
+    "expected_program_effort", `Int 202;
+    "observed_program_effort", `Int 202;
+    "program_effort_match", `Bool true;
+    "expected_opcode_effort", `Int 201;
     "observed_opcode_effort", `Int observed_opcode_effort;
     "opcode_effort_match", `Bool opcode_effort_match;
     "effort_match", `Bool true;
@@ -447,11 +450,13 @@ let result
        `Assoc [
          "m", `Int 1;
          "k", `Int 128;
-         "n", `Int 2;
+         "n", `Int 6;
+         "byte_offset", `Int 0;
          "lhs_cells", `Int 128;
-         "q1_owner_source_bytes", `Int 36;
-         "q1_required_owner_bytes", `Int 36;
-         "expected_effort", `Int 201;
+         "output_cells", `Int 6;
+         "q1_owner_source_bytes", `Int 108;
+         "q1_required_owner_bytes", `Int 108;
+         "expected_effort", `Int 202;
        ]
      else
        `Null);
@@ -560,6 +565,58 @@ let remove_result_field name = function
       | _ -> failwith "results must be a list"
     in
     replace_assoc_field "results" results (`Assoc fields)
+  | _ -> failwith "report must be object"
+
+let replace_result_field name value = function
+  | `Assoc fields ->
+    let results =
+      match assoc_value "results" fields with
+      | `List results ->
+        `List
+          (List.map
+             (function
+               | `Assoc result_fields ->
+                 `Assoc
+                   ((name, value)
+                    :: List.filter
+                         (fun (key, _) -> not (String.equal key name))
+                         result_fields)
+               | value -> value)
+             results)
+      | _ -> failwith "results must be a list"
+    in
+    replace_assoc_field "results" results (`Assoc fields)
+  | _ -> failwith "report must be object"
+
+let replace_q1_contract_shape_field name value = function
+  | `Assoc fields as report ->
+    let results =
+      match assoc_value "results" fields with
+      | `List results ->
+        `List
+          (List.map
+             (function
+               | `Assoc result_fields ->
+                 let shape =
+                   match assoc_value "q1_contract_shape" result_fields with
+                   | `Assoc shape_fields ->
+                     `Assoc
+                       ((name, value)
+                        :: List.filter
+                             (fun (key, _) -> not (String.equal key name))
+                             shape_fields)
+                   | _ -> failwith "q1_contract_shape must be an object"
+                 in
+                 `Assoc
+                   (("q1_contract_shape", shape)
+                    :: List.filter
+                         (fun (key, _) -> not (String.equal key "q1_contract_shape"))
+                         result_fields)
+               | value -> value)
+             results)
+      | _ -> failwith "results must be a list"
+    in
+    replace_assoc_field "results" results report
   | _ -> failwith "report must be object"
 
 let remove_failure_field name = function
@@ -674,7 +731,7 @@ let check_matrix_accepts_bound_reports () =
         "matrix carries result signature schema"
         (String.equal
            (string_value "result_signature_schema" fields)
-           "octra.inference.conformance.result-signature.v4");
+           "octra.inference.conformance.result-signature.v5");
       check
         "matrix carries runner hashes"
         (List.length (string_list_value "runner_executable_sha256s" fields) = 2)
@@ -1563,6 +1620,192 @@ let check_matrix_rejects_q1_failure_mutation_shape_rejected () =
            (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_forged_q1_contract_shape () =
+  with_temp_dir (fun dir ->
+    let forged runner_sha system machine =
+      report ~runner_sha system machine
+      |> replace_q1_contract_shape_field "lhs_cells" (`Int 129)
+    in
+    let a =
+      write_report dir "a.cjson" (forged (hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (forged (hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "forged Q1 contract shape exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "forged Q1 contract shape top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      check
+        "forged Q1 contract shape validator blocker"
+        (List.mem
+           "q1_contract_shape_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_q1_contract_shape_effort_mismatch () =
+  with_temp_dir (fun dir ->
+    let forged runner_sha system machine =
+      report ~runner_sha system machine
+      |> replace_q1_contract_shape_field "expected_effort" (`Int 203)
+    in
+    let a =
+      write_report dir "a.cjson" (forged (hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (forged (hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "Q1 contract shape effort mismatch exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "Q1 contract shape effort mismatch blocker"
+        (List.mem
+           "q1_contract_shape_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_q1_contract_shape_opcode_effort_mismatch () =
+  with_temp_dir (fun dir ->
+    let forged runner_sha system machine =
+      report ~runner_sha system machine
+      |> replace_result_field "expected_opcode_effort" (`Int 202)
+      |> replace_result_field "observed_opcode_effort" (`Int 202)
+    in
+    let a =
+      write_report dir "a.cjson" (forged (hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (forged (hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "Q1 contract shape opcode effort mismatch exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "Q1 contract shape opcode effort mismatch blocker"
+        (List.mem
+           "q1_contract_shape_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_q1_contract_shape_byte_offset_span () =
+  with_temp_dir (fun dir ->
+    let forged runner_sha system machine =
+      report ~runner_sha system machine
+      |> replace_q1_contract_shape_field "byte_offset" (`Int 1)
+    in
+    let a =
+      write_report dir "a.cjson" (forged (hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (forged (hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "Q1 contract shape byte offset span exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "Q1 contract shape byte offset span blocker"
+        (List.mem
+           "q1_contract_shape_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_q1_contract_shape_observed_effort_forgery () =
+  with_temp_dir (fun dir ->
+    let forged runner_sha system machine =
+      report ~runner_sha system machine
+      |> replace_result_field "observed_effort" (`Int 203)
+      |> replace_result_field "observed_program_effort" (`Int 203)
+      |> replace_result_field "observed_opcode_effort" (`Int 202)
+    in
+    let a =
+      write_report dir "a.cjson" (forged (hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (forged (hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "Q1 observed effort forgery exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "Q1 observed effort forgery blocker"
+        (List.mem
+           "q1_contract_shape_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_q1_contract_shape_output_cells_mismatch () =
+  with_temp_dir (fun dir ->
+    let forged runner_sha system machine =
+      report ~runner_sha system machine
+      |> replace_q1_contract_shape_field "output_cells" (`Int 7)
+    in
+    let a =
+      write_report dir "a.cjson" (forged (hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (forged (hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "Q1 output cells mismatch exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "Q1 output cells mismatch blocker"
+        (List.mem
+           "q1_contract_shape_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_q1_contract_shape_oversized_intlit () =
+  with_temp_dir (fun dir ->
+    let forged =
+      report ~runner_sha:(hex_root '1') "Darwin" "arm64"
+      |> replace_q1_contract_shape_field "m" (`Intlit "999999999999999999999")
+    in
+    let a = write_report dir "a.cjson" forged in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "Q1 oversized intlit exits nonzero without crashing" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "Q1 oversized intlit blocker"
+        (List.mem
+           "q1_contract_shape_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_q1_failure_contract_not_applicable () =
   with_temp_dir (fun dir ->
     let a =
@@ -1744,6 +1987,13 @@ let () =
   check_matrix_rejects_q1_failure_contract_weakened_payload ();
   check_matrix_rejects_q1_failure_contract_accepted_with_blockers ();
   check_matrix_rejects_q1_failure_mutation_shape_rejected ();
+  check_matrix_rejects_forged_q1_contract_shape ();
+  check_matrix_rejects_q1_contract_shape_effort_mismatch ();
+  check_matrix_rejects_q1_contract_shape_opcode_effort_mismatch ();
+  check_matrix_rejects_q1_contract_shape_byte_offset_span ();
+  check_matrix_rejects_q1_contract_shape_observed_effort_forgery ();
+  check_matrix_rejects_q1_contract_shape_output_cells_mismatch ();
+  check_matrix_rejects_q1_contract_shape_oversized_intlit ();
   check_matrix_rejects_q1_failure_contract_not_applicable ();
   check_matrix_accepts_non_q1_failure_contract_not_applicable ();
   check_matrix_rejects_empty_results ();

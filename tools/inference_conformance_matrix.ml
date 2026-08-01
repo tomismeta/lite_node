@@ -144,6 +144,31 @@ let q1_fp16_bits_from_hex_le value =
       Some (lo lor (hi lsl 8))
     | _ -> None
 
+let checked_mul left right =
+  if left < 0 || right < 0 then
+    None
+  else if left <> 0 && right > max_int / left then
+    None
+  else
+    Some (left * right)
+
+let checked_add left right =
+  if left < 0 || right < 0 then
+    None
+  else if left > max_int - right then
+    None
+  else
+    Some (left + right)
+
+let json_int_value = function
+  | Some (`Int value) -> Some value
+  | Some (`Intlit value) ->
+    (try Some (int_of_string value) with Failure _ -> None)
+  | _ -> None
+
+let json_int_field name fields =
+  json_int_value (field name fields)
+
 let json_field_or_null name fields =
   match field name fields with
   | Some value -> value
@@ -339,6 +364,110 @@ let q1_failure_mutation_shapes_accepted fields =
           | _ -> false)
         cases
     | _ -> false
+
+let q1_contract_shape_consistent fields =
+  let opcode = string_field "opcode" fields in
+  if not (String.equal opcode "LINEAR_Q1_G128_FP") then
+    true
+  else
+    match opt_assoc_field "q1_contract_shape" fields with
+    | Some shape ->
+      let shape_int name = json_int_field name shape in
+      let output_subspan_cells =
+        match field "subspans" fields with
+        | Some (`List [`Assoc subspan]) ->
+          (match opt_string_field "name" subspan with
+           | Some "output" -> json_int_field "length_f64_cells" subspan
+           | _ -> None)
+        | _ -> None
+      in
+      let executable_abi_count =
+        match opt_assoc_field "executable_abi_binding" fields with
+        | Some abi -> json_int_field "expected_r1" abi
+        | None -> None
+      in
+      (match
+         shape_int "m",
+         shape_int "k",
+         shape_int "n",
+         shape_int "byte_offset",
+         shape_int "lhs_cells",
+         shape_int "output_cells",
+         shape_int "q1_owner_source_bytes",
+         shape_int "q1_required_owner_bytes",
+         shape_int "expected_effort",
+         json_int_field "expected_effort" fields,
+         json_int_field "observed_effort" fields,
+         json_int_field "expected_program_effort" fields,
+         json_int_field "observed_program_effort" fields,
+         json_int_field "expected_opcode_effort" fields,
+         json_int_field "observed_opcode_effort" fields,
+         output_subspan_cells,
+         executable_abi_count
+       with
+       | Some m,
+         Some k,
+         Some n,
+         Some byte_offset,
+         Some lhs_cells,
+         Some output_cells,
+         Some source_bytes,
+         Some required_bytes,
+         Some shape_expected_effort,
+         Some expected_effort,
+         Some observed_effort,
+         Some expected_program_effort,
+         Some observed_program_effort,
+         Some expected_opcode_effort,
+         Some observed_opcode_effort,
+         Some output_subspan_cells,
+         Some executable_abi_count ->
+         let expected_required_bytes =
+           match checked_mul n (k / 128) with
+           | Some blocks -> checked_mul blocks 18
+           | None -> None
+         in
+         let expected_opcode_effort_from_shape =
+           match checked_mul m n with
+           | Some mn -> checked_mul mn k
+           | None -> None
+         in
+         let expected_output_cells = checked_mul m n in
+         let required_source_span = checked_add byte_offset required_bytes in
+         let expected_total_effort =
+           match expected_opcode_effort_from_shape with
+           | Some cells -> Some (201 + (cells / 512))
+           | None -> None
+         in
+         m > 0
+         && k > 0
+         && n > 0
+         && m <= 32768
+         && k <= 32768
+         && n <= 32768
+         && byte_offset >= 0
+         && k mod 128 = 0
+         && checked_mul m k = Some lhs_cells
+         && expected_output_cells = Some output_cells
+         && output_subspan_cells = output_cells
+         && executable_abi_count = output_cells
+         && expected_required_bytes = Some required_bytes
+         &&
+         (match required_source_span with
+          | Some span -> source_bytes >= span
+          | None -> false)
+         && shape_expected_effort = expected_effort
+         && observed_effort = expected_effort
+         && expected_program_effort = expected_effort
+         && observed_program_effort = expected_effort
+         &&
+         (match expected_opcode_effort_from_shape with
+          | Some cells -> expected_opcode_effort = 200 + (cells / 512)
+          | None -> false)
+         && observed_opcode_effort = expected_opcode_effort
+         && expected_total_effort = Some expected_effort
+       | _ -> false)
+    | None -> false
 
 let q1_failure_mutation_payload_shape_ok result_fields case_fields =
   let shape_int name =
@@ -650,6 +779,9 @@ let report_summary path =
     let q1_failure_mutation_shapes_accepted =
       List.for_all q1_failure_mutation_shapes_accepted result_fields
     in
+    let q1_contract_shapes_consistent =
+      List.for_all q1_contract_shape_consistent result_fields
+    in
     let q1_required_failure_rows_accepted =
       List.for_all q1_required_failure_rows_accepted result_fields
     in
@@ -668,6 +800,7 @@ let report_summary path =
           | Some fields -> opt_status_is_accepted "status" fields
           | None -> false)
       && required_failure_case_contracts_accepted
+      && q1_contract_shapes_consistent
       && q1_required_failure_rows_accepted
       && q1_failure_mutation_shapes_accepted
       && q1_failure_mutation_payloads_present
@@ -705,6 +838,9 @@ let report_summary path =
       |> add_if
            (not required_failure_case_contracts_accepted)
            "required_failure_case_contract_rejected"
+      |> add_if
+           (not q1_contract_shapes_consistent)
+           "q1_contract_shape_rejected"
       |> add_if
            (not q1_required_failure_rows_accepted)
            "required_q1_failure_cases_rejected"

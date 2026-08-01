@@ -1743,6 +1743,11 @@ let q1_lhs_cell_count values =
   | Some m, Some k when m > 0 && k > 0 -> Some (m * k)
   | _ -> None
 
+let q1_output_cell_count values =
+  match opt_int_field "m" values, opt_int_field "n" values with
+  | Some m, Some n when m > 0 && n > 0 -> Some (m * n)
+  | _ -> None
+
 let q1_mutates_scalar param predicate mutations =
   List.exists
     (fun mutation ->
@@ -2471,7 +2476,9 @@ let q1_contract_shape_json opcode template values expected_effort =
       "m", int_or_null (opt_int_field "m" values);
       "k", int_or_null (opt_int_field "k" values);
       "n", int_or_null (opt_int_field "n" values);
+      "byte_offset", int_or_null (opt_int_field "byte_offset" values);
       "lhs_cells", int_or_null (q1_lhs_cell_count values);
+      "output_cells", int_or_null (q1_output_cell_count values);
       "q1_owner_source_bytes", int_or_null (q1_owner_source_bytes template);
       "q1_required_owner_bytes", int_or_null (q1_required_owner_bytes values);
       "expected_effort", `Int expected_effort;

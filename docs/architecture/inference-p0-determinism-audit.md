@@ -273,10 +273,18 @@ binding, ABI declaration binding, executable ABI binding, ingress rejection
 authority, executable mutation payloads, mutation-shape status/blockers, and
 counted failure/atomicity outcomes. For Q1, it also signs the compact
 `q1_contract_shape` metadata needed to validate alias and byte-offset mutation
-payloads. Cross-platform agreement is therefore not limited to the happy path.
-The
+payloads. The matrix does not trust that metadata blindly: it independently
+checks that the Q1 shape has positive `m`, `k`, and `n`, that `k` is a
+128-value block multiple, that `lhs_cells = m * k`, that required owner bytes
+match `n * (k / 128) * 18`, that the source owner span is large enough, and
+that shape-bound effort matches the positive result and opcode effort formula.
+The checked span includes `byte_offset + required_bytes`, output cells must
+match both `m * n` and the executable ABI/output subspan, and observed
+program/opcode effort must equal the recomputed expected effort.
+Cross-platform agreement is therefore not limited to the happy path, and a
+shared forged shape does not qualify a report. The
 matrix also carries `result_signature_schema =
-octra.inference.conformance.result-signature.v4`; the runner rejects a pinned
+octra.inference.conformance.result-signature.v5`; the runner rejects a pinned
 matrix whose signature schema is missing or stale. This prevents an older
 matrix from qualifying current Q1 evidence after the punitive failure signature
 changes. Each matrix row must also carry the same signature schema and opcode
