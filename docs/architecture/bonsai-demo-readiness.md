@@ -215,14 +215,15 @@ multi-transition bundles still fail closed with a hash-bound
 through the same input/range/plan-creation path as the stage runner, root
 uniformity and explicit `identity_blockers`, `declaration_blockers`, and
 top-level request/deployment claims are reported. The remaining product
-blocker is no longer repeated advance or phase ordering itself; ABI-v2
-multi-transition bundles must declare a `prefill*` then `decode*` phase order
-with `decode_steps` bound to the declared decode count. The remaining product
-blocker is committed state payload transport. Session reports now include the
-canonical transition output payload and its SHA-256 next to `output_root`; a
-decode transition may declare a `selected_index` `output_contract` so LiteNode
-can report a root-bound selected index without tokenizer or model-family
-knowledge. If the target program uses `ARGMAX_FP`, opcode evidence provides the
+blocker is no longer repeated advance itself; ABI-v2 multi-transition bundles
+must declare exactly one initial `prefill` followed by zero or more `decode`
+transitions, with `decode_steps` bound to the declared decode count. Remaining
+product blockers are committed state payload transport and decode token output
+contract binding. Session reports now include the canonical transition output
+payload and its SHA-256 next to `output_root`; a decode transition may declare a
+`selected_index` `output_contract` so LiteNode can report a root-bound VM-emitted
+selected index without tokenizer or model-family knowledge. If the target
+program uses `ARGMAX_FP`, opcode evidence provides the
 ARGMAX provenance.
 `--scan-policy` is the faster frontier-discovery mode. It decodes the program
 envelope and reports every visible inference opcode-policy violation as JSON,

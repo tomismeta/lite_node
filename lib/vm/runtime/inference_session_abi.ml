@@ -167,6 +167,93 @@ let committed_state_root =
        ^ Yojson.Safe.to_string committed_state_json)
     |> to_hex)
 
+let resident_lifecycle_schema =
+  "octra.inference.resident-session-lifecycle.v1"
+
+let resident_lifecycle_json =
+  `Assoc [
+    "schema", `String resident_lifecycle_schema;
+    "product_lifecycle",
+    `List [
+      `String "open_session";
+      `String "prefill";
+      `String "decode";
+      `String "finalize";
+    ];
+    "runtime_lifecycle",
+    `List [
+      `String "open_session";
+      `String "advance_session";
+      `String "finalize_session";
+    ];
+    "referenced_session_abi_roots",
+    `Assoc [
+      "progress_cells", `String v2_root;
+      "committed_state_transport", `String committed_state_root;
+    ];
+    "transition_phase_contract",
+    `Assoc [
+      "allowed_phases", `List [`String "prefill"; `String "decode"];
+      "phase_order",
+      `String "exactly-one-prefill-followed-by-zero-or-more-decode";
+      "decode_steps",
+      `String "must equal the number of decode transitions";
+    ];
+    "uniform_identity",
+    `List [
+      `String "target_root";
+      `String "request_root";
+      `String "model_ranges_root";
+      `String "model_deployment_root";
+      `String "session_abi_root";
+    ];
+    "state_transport",
+    `Assoc [
+      "progress_cells", `String "session-abi-v2";
+      "committed_target_state_payload", `String "session-abi-committed-state";
+      "committed_target_state_payload_root",
+      `String "sha256-raw-bound-to-root-cell";
+      "vm_memory_residency",
+      `String "fresh-vm-state-per-advance";
+      "resident_state_residency",
+      `String "host-session-rooted-transport";
+    ];
+    "failure_semantics",
+    `List [
+      `String "identity_mismatch_rejects_before_execution";
+      `String "declaration_mismatch_rejects_before_execution";
+      `String "failed_advance_is_atomic";
+      `String "finalize_requires_advanced_session";
+    ];
+    "output_contracts",
+    `Assoc [
+      "selected_index",
+      `Assoc [
+        "authority", `String "vm-emitted-selected-index";
+        "payload_encoding",
+        `String "base=<r0>|length=1|values=int:<token-id>";
+        "value_rule", `String "single-nonnegative-integer";
+        "tie_policy", `String "primitive-specific-profile";
+        "not_bound_by_this_contract",
+        `List [
+          `String "vocabulary_bounds";
+          `String "argmax_algorithm_correctness";
+          `String "autoregressive_feedback";
+        ];
+      ];
+    ];
+    "claim_boundary",
+    `String
+      "resident local candidate session shape; consensus authority comes from profile and conformance roots";
+  ]
+
+let resident_lifecycle_root =
+  Digestif.SHA256.(
+    digest_string
+      ("octra:inference:resident-session-lifecycle\000"
+       ^ Yojson.Safe.to_string resident_lifecycle_json)
+    |> to_hex)
+
 let supported_roots = [v1_root; v2_root; committed_state_root]
 
 let supported_root root =

@@ -40,6 +40,9 @@ val v2_json : Yojson.Safe.t
 val v2_root : string
 val committed_state_json : Yojson.Safe.t
 val committed_state_root : string
+val resident_lifecycle_schema : string
+val resident_lifecycle_json : Yojson.Safe.t
+val resident_lifecycle_root : string
 val supported_roots : string list
 val supported_root : string -> bool
 val continuation_supported : string -> bool

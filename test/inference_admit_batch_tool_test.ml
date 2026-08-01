@@ -603,6 +603,16 @@ let check_runtime_semantics report =
       "runtime semantics diagnostic"
       (bool_json "diagnostic_only" semantics);
     check
+      "batch lifecycle root"
+      (String.equal
+         (string_json "resident_session_lifecycle_root" semantics)
+         Abi.resident_lifecycle_root);
+    check
+      "batch lifecycle status"
+      (String.equal
+         (string_json "resident_session_lifecycle_status" semantics)
+         "not_supported_by_independent_batch");
+    check
       "session mode"
       (String.equal
          (string_json "session_mode" semantics)
@@ -667,6 +677,11 @@ let check_session_runtime_semantics
     "session runtime diagnostic"
     (bool_json "diagnostic_only" semantics);
   check
+    "session lifecycle root"
+    (String.equal
+       (string_json "resident_session_lifecycle_root" semantics)
+       Abi.resident_lifecycle_root);
+  check
     "session product lifecycle"
     (list_json "product_lifecycle" semantics
      = [
@@ -726,6 +741,8 @@ let check_session_hash report =
     let envelope_fields = [
         "schema", `String (string_json "schema" fields);
         "status", `String (string_json "status" fields);
+        "resident_session_lifecycle_root",
+        assoc_value "resident_session_lifecycle_root" fields;
         "transition_count", `Int (int_json "transition_count" fields);
         "decode_steps", `Int (int_json "decode_steps" fields);
         "runtime_semantics", assoc_value "runtime_semantics" fields;
@@ -942,10 +959,10 @@ let check_session_bundle_rejects_multi_transition () =
       "preflight did not execute"
       (not (bool_json "execution_attempted" preflight));
     check
-      "preflight labels only"
+      "preflight lifecycle contract"
       (String.equal
          (string_json "phase_contract" preflight)
-         "labels_only_unverified");
+         Abi.resident_lifecycle_schema);
     check
       "preflight continuation undefined"
       (String.equal
@@ -1094,12 +1111,12 @@ let check_session_bundle_accepts_v2_multi_transition () =
       dir
   in
   let code, report = run_session_bundle bundle_path in
-  check "v2 multi-transition exits cleanly" (code = 0);
+  check "v2 multi-transition exits incomplete" (code = 1);
   match report with
   | `Assoc fields ->
     check
-      "v2 multi-transition accepted"
-      (String.equal (string_json "status" fields) "accepted");
+      "v2 multi-transition incomplete"
+      (String.equal (string_json "status" fields) "runtime_incomplete");
     check "v2 transition count" (int_json "transition_count" fields = 2);
     check "v2 decode steps" (int_json "decode_steps" fields = 1);
     check
@@ -1139,6 +1156,11 @@ let check_session_bundle_accepts_v2_multi_transition () =
       (String.equal
          (string_json "session_mode" semantics)
          "resident_multi_transition_session");
+    check
+      "v2 lifecycle status"
+      (String.equal
+         (string_json "resident_session_lifecycle_status" semantics)
+         "bound");
     check
       "v2 continuation supported"
       (bool_json "continuation_supported" semantics);
@@ -1274,12 +1296,12 @@ let check_session_bundle_binds_decode_token_contract () =
       dir
   in
   let code, report = run_session_bundle bundle_path in
-  check "token-contract bundle exits cleanly" (code = 0);
+  check "token-contract bundle exits incomplete" (code = 1);
   match report with
   | `Assoc fields ->
     check
-      "token-contract bundle accepted"
-      (String.equal (string_json "status" fields) "accepted");
+      "token-contract bundle incomplete"
+      (String.equal (string_json "status" fields) "runtime_incomplete");
     let semantics = assoc_json "runtime_semantics" fields in
     check
       "decode token contract bound"
@@ -1353,6 +1375,11 @@ let check_session_bundle_binds_committed_state_transport () =
       (String.equal
          (string_json "state_carry" semantics)
          "abi_committed_state_payload");
+    check
+      "committed-state lifecycle status"
+      (String.equal
+         (string_json "resident_session_lifecycle_status" semantics)
+         "bound");
     check
       "committed-state support reported"
       (bool_json "committed_state_transport_supported" semantics);
@@ -1438,7 +1465,7 @@ let check_session_bundle_binds_committed_state_transport () =
      | _ -> failwith "expected two committed-state transitions")
   | _ -> failwith "report must be an object"
 
-let check_session_bundle_prefill_only_keeps_decode_token_contract () =
+let check_session_bundle_rejects_multiple_prefills () =
   with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
   let bundle_path =
     write_session_bundle_fixture
@@ -1450,26 +1477,29 @@ let check_session_bundle_prefill_only_keeps_decode_token_contract () =
       dir
   in
   let code, report = run_session_bundle bundle_path in
-  check "prefill-only bundle exits cleanly" (code = 0);
+  check "multiple-prefill bundle exits nonzero" (code = 1);
   match report with
   | `Assoc fields ->
+    check_session_hash report;
     check
-      "prefill-only bundle accepted"
-      (String.equal (string_json "status" fields) "accepted");
+      "multiple-prefill top-level blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "prefill_decode_phase_sequence_mismatch");
     let semantics = assoc_json "runtime_semantics" fields in
     check
-      "prefill-only decode token contract not bound"
+      "multiple-prefill readiness"
       (String.equal
-         (string_json "decode_token_contract_status" semantics)
-         "not_bound");
+         (string_json "runtime_readiness_status" semantics)
+         "declaration_rejected");
+    let preflight = assoc_json "continuation_preflight" fields in
     check
-      "prefill-only keeps decode blocker"
-      (list_json "missing_runtime_capabilities" semantics
-       = [
-         `String "committed_target_state_payload_transport";
-         `String "decode_loop_token_contract";
-       ]);
-    check_session_hash report
+      "multiple-prefill phase sequence invalid"
+      (not (bool_json "prefill_decode_phase_sequence_valid" preflight));
+    check
+      "multiple-prefill declaration blocker"
+      (list_json "declaration_blockers" preflight
+       = [`String "prefill_decode_phase_sequence_mismatch"])
   | _ -> failwith "report must be an object"
 
 let check_session_bundle_rejects_decode_token_contract_mismatch () =
@@ -1732,7 +1762,7 @@ let () =
   check_session_bundle_accepts_v2_multi_transition ();
   check_session_bundle_binds_decode_token_contract ();
   check_session_bundle_binds_committed_state_transport ();
-  check_session_bundle_prefill_only_keeps_decode_token_contract ();
+  check_session_bundle_rejects_multiple_prefills ();
   check_session_bundle_rejects_decode_token_contract_mismatch ();
   check_session_bundle_rejects_invalid_phase_order ();
   check_session_bundle_reports_top_level_claim_mismatch ();

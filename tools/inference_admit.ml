@@ -2172,15 +2172,10 @@ let preflight_identity_blockers
   |> List.rev
 
 let valid_phase_sequence phases =
-  let rec loop seen_decode = function
-    | [] -> true
-    | phase :: rest when String.equal phase "prefill" ->
-      (not seen_decode) && loop seen_decode rest
-    | phase :: rest when String.equal phase "decode" ->
-      loop true rest
-    | _ -> false
-  in
-  loop false phases
+  match phases with
+  | "prefill" :: rest ->
+    List.for_all (String.equal "decode") rest
+  | _ -> false
 
 let preflight_declaration_blockers
     ~decode_steps_match
@@ -2386,10 +2381,12 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
   let json =
     `Assoc [
       "status", `String (if execution_ready then "ready" else "blocked");
+      "resident_session_lifecycle_root",
+      `String Abi.resident_lifecycle_root;
       "runtime_readiness_status", `String runtime_readiness_status;
       "next_runtime_blocker", `String next_runtime_blocker;
       "execution_attempted", `Bool false;
-      "phase_contract", `String "labels_only_unverified";
+      "phase_contract", `String Abi.resident_lifecycle_schema;
       "continuation_basis",
       `String
         (if committed_state_supported then "abi_committed_state_payload"
@@ -2497,7 +2494,13 @@ let remaining_session_runtime_capabilities
 let independent_batch_runtime_semantics =
   `Assoc [
     "diagnostic_only", `Bool true;
+    "resident_session_lifecycle_root",
+    `String Abi.resident_lifecycle_root;
+    "resident_session_lifecycle_status",
+    `String "not_supported_by_independent_batch";
     "session_mode", `String "independent_session_per_stage";
+    "vm_memory_residency", `String "fresh_vm_state_per_stage";
+    "resident_state_residency", `String "none";
     "product_lifecycle", product_lifecycle_json;
     "stage_lifecycle", stage_lifecycle_json;
     "batch_cache_scope",
@@ -2526,11 +2529,24 @@ let session_runtime_semantics
   let single_transition = transition_count = 1 in
   `Assoc [
     "diagnostic_only", `Bool true;
+    "resident_session_lifecycle_root",
+    `String Abi.resident_lifecycle_root;
+    "resident_session_lifecycle_status",
+    `String
+      (if continuation_supported then "bound"
+       else if single_transition then "partial_single_transition"
+       else "not_bound");
     "session_mode",
     `String
       (if continuation_supported then "resident_multi_transition_session"
        else if single_transition then "single_transition_session"
        else "multi_transition_session_requested");
+    "vm_memory_residency", `String "fresh_vm_state_per_advance";
+    "resident_state_residency",
+    `String
+      (if committed_state_transport_bound then "host_session_rooted_transport"
+       else if continuation_supported then "progress_cells_only"
+       else "none");
     "product_lifecycle", product_lifecycle_json;
     "stage_lifecycle", stage_lifecycle_json;
     "continuation_supported", `Bool continuation_supported;
@@ -2597,6 +2613,8 @@ let session_report_payload
   let fields = [
     "schema", `String "octra.inference.session.report";
     "status", `String status;
+    "resident_session_lifecycle_root",
+    `String Abi.resident_lifecycle_root;
     "transition_count", `Int transition_count;
     "decode_steps", `Int decode_steps;
     "runtime_semantics", runtime_semantics;
@@ -2713,9 +2731,10 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     Abi.committed_state_supported first_session_abi_root
   in
   let committed_state_transport_bound =
-    List.exists
-      (fun result -> result.session_stage_committed_state_transport_bound)
-      results
+    decode_results <> []
+    && List.for_all
+         (fun result -> result.session_stage_committed_state_transport_bound)
+         decode_results
   in
   let next_runtime_blocker =
     if output_contract_mismatch then "decode_loop_token_contract_mismatch"
@@ -2732,6 +2751,8 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
   let status =
     if output_contract_mismatch then "output_contract_mismatch"
     else if reference_mismatch then "reference_mismatch"
+    else if not (String.equal next_runtime_blocker "none") then
+      "runtime_incomplete"
     else "accepted"
   in
   let last_transition_output_root =
@@ -2779,6 +2800,8 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       "status", `String status;
       "schema", `String "octra.inference.session.report";
       "session_path", `String bundle.session_path;
+      "resident_session_lifecycle_root",
+      `String Abi.resident_lifecycle_root;
       "transition_count", `Int (List.length bundle.transitions);
       "decode_steps", `Int bundle.decode_steps;
       "session_report_sha256", `String (session_report_sha256 payload);
@@ -2805,7 +2828,12 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     ]
   in
   print_endline (Yojson.Safe.pretty_to_string report);
-  if output_contract_mismatch || reference_mismatch then 1 else 0
+  if
+    output_contract_mismatch
+    || reference_mismatch
+    || not (String.equal next_runtime_blocker "none")
+  then 1
+  else 0
 
 let run_inference_session_file ~timing_mode path =
   let bundle = session_bundle_file path in
@@ -2868,6 +2896,8 @@ let run_inference_session_file ~timing_mode path =
         "status", `String status;
         "schema", `String "octra.inference.session.report";
         "session_path", `String bundle.session_path;
+        "resident_session_lifecycle_root",
+        `String Abi.resident_lifecycle_root;
         "transition_count", `Int transition_count;
         "decode_steps", `Int bundle.decode_steps;
         "session_report_sha256", `String (session_report_sha256 payload);
@@ -2963,6 +2993,8 @@ let run_inference_session_file ~timing_mode path =
         "status", `String status;
         "schema", `String "octra.inference.session.report";
         "session_path", `String bundle.session_path;
+        "resident_session_lifecycle_root",
+        `String Abi.resident_lifecycle_root;
         "transition_count", `Int transition_count;
         "decode_steps", `Int bundle.decode_steps;
         "session_report_sha256", `String (session_report_sha256 payload);

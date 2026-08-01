@@ -186,9 +186,10 @@ d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
    one-shot. The local session harness now routes uniform ABI-v2
    multi-transition bundles through one opened session, repeated advance, and
    one finalization. The harness also binds the generic phase sequence as
-   `prefill*` followed by `decode*`, with `decode_steps` matching the declared
-   decode count. A separate committed-state ABI root now adds resident payload
-   transport: prior payload bytes are hash-checked and rebound, `FSTORE` is
+   exactly one initial `prefill` followed by zero or more `decode` transitions,
+   with `decode_steps` matching the declared decode count. A separate
+   committed-state ABI root now adds resident payload transport: prior payload
+   bytes are hash-checked and rebound, `FSTORE` is
    gated by `session.committed-state`, retained payload bytes count against
    `max_session_bytes`, and the session identity remains root-only. The next
    product step is to validate a producer-emitted committed-state session

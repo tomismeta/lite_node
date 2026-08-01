@@ -142,6 +142,9 @@ let attach_authority_catalogs opcodes = function
          `String (vm_semantics_catalog_root vm_semantics_catalog);
          "session_abi_root_catalog", session_abi_catalog_json;
          "session_abi_catalog_root", `String session_abi_catalog_root;
+         "resident_session_lifecycle", Abi.resident_lifecycle_json;
+         "resident_session_lifecycle_root",
+         `String Abi.resident_lifecycle_root;
          "transcendental_dependency_catalog",
          transcendental_dependency_catalog;
          "transcendental_dependency_catalog_root",

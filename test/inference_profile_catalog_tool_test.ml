@@ -92,7 +92,42 @@ let check_p0_catalog_exports_session_abi_authority () =
     check
       "committed-state root"
       (String.equal (root "committed-state") Abi.committed_state_root);
-    ignore (string_value "session_abi_catalog_root" fields)
+    ignore (string_value "session_abi_catalog_root" fields);
+    check
+      "resident lifecycle root"
+      (String.equal
+         (string_value "resident_session_lifecycle_root" fields)
+         Abi.resident_lifecycle_root);
+    let lifecycle =
+      assoc_value "resident_session_lifecycle" fields
+    in
+    check
+      "resident lifecycle schema"
+      (String.equal
+         (string_value "schema" lifecycle)
+         Abi.resident_lifecycle_schema);
+    check
+      "resident lifecycle binds product phases"
+      (list_value "product_lifecycle" lifecycle
+       = [
+           `String "open_session";
+           `String "prefill";
+           `String "decode";
+           `String "finalize";
+         ]);
+    let abi_roots =
+      assoc_value "referenced_session_abi_roots" lifecycle
+    in
+    check
+      "resident lifecycle references v2"
+      (String.equal
+         (string_value "progress_cells" abi_roots)
+         Abi.v2_root);
+    check
+      "resident lifecycle references committed state"
+      (String.equal
+         (string_value "committed_state_transport" abi_roots)
+         Abi.committed_state_root)
   | _ -> failwith "catalog output must be an object"
 
 let dependency_entry opcode = function
