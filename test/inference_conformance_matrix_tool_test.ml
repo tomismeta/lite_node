@@ -538,6 +538,7 @@ let report
     ?include_required_contract_payload
     ?required_failure_contract_payload
     ?(validator_readiness_blockers = ["cross_platform_conformance_missing"])
+    ?(result_signature_schema = "octra.inference.conformance.result-signature.v6")
     ?failure
     system
     machine =
@@ -545,6 +546,7 @@ let report
     "status", `String "accepted";
     "execution_status", `String "accepted";
     "execution_mode", `String "positive_template_vm_execution";
+    "result_signature_schema", `String result_signature_schema;
     "platform", platform ?runner_sha system machine;
     "selected_opcodes", `List [`String opcode];
     "template_corpus_root", `String corpus;
@@ -587,6 +589,11 @@ let replace_assoc_field name value = function
     `Assoc
       ((name, value)
        :: List.filter (fun (key, _) -> not (String.equal key name)) fields)
+  | _ -> failwith "report must be object"
+
+let remove_assoc_field name = function
+  | `Assoc fields ->
+    `Assoc (List.filter (fun (key, _) -> not (String.equal key name)) fields)
   | _ -> failwith "report must be object"
 
 let remove_result_field name = function
@@ -983,6 +990,79 @@ let check_matrix_rejects_missing_required_opcode () =
         (String.equal
            (string_value "next_validator_readiness_blocker" fields)
            "required_opcode_missing")
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_old_runner_result_signature_schema () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report
+           ~runner_sha:(hex_root '1')
+           ~result_signature_schema:"octra.inference.conformance.result-signature.v5"
+           "Darwin"
+           "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "old runner signature schema matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "old runner signature schema top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      (match assoc_value "reports" fields with
+       | `List (`Assoc report_fields :: _) ->
+         check
+           "source row old runner signature schema blocker"
+           (List.mem "result_signature_schema_mismatch" (blockers report_fields));
+         check
+           "source row old runner signature schema status"
+           (String.equal
+              (string_value "result_signature_schema_status" report_fields)
+              "rejected")
+       | _ -> failwith "missing report rows")
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_missing_runner_result_signature_schema () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64"
+         |> remove_assoc_field "result_signature_schema")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "missing runner signature schema matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "missing runner signature schema top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      (match assoc_value "reports" fields with
+       | `List (`Assoc report_fields :: _) ->
+         check
+           "source row missing runner signature schema blocker"
+           (List.mem "result_signature_schema_mismatch" (blockers report_fields));
+         check
+           "source row missing runner signature schema is null"
+           (match assoc_value "runner_result_signature_schema" report_fields with
+            | `Null -> true
+            | _ -> false)
+       | _ -> failwith "missing report rows")
     | _ -> failwith "matrix output must be object")
 
 let check_matrix_rejects_required_opcode_missing_from_one_report () =
@@ -2703,6 +2783,8 @@ let () =
   check_matrix_rejects_reused_runner_hash ();
   check_matrix_accepts_required_opcode_reports ();
   check_matrix_rejects_missing_required_opcode ();
+  check_matrix_rejects_old_runner_result_signature_schema ();
+  check_matrix_rejects_missing_runner_result_signature_schema ();
   check_matrix_rejects_required_opcode_missing_from_one_report ();
   check_matrix_rejects_missing_runner_hash ();
   check_matrix_rejects_invalid_runner_hash ();

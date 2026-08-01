@@ -870,6 +870,10 @@ let report_summary path =
       | None -> "not_runner"
     in
     let failure_gate = opt_assoc_field "failure_case_gate" fields in
+    let report_result_signature_schema_accepted =
+      opt_string_field "result_signature_schema" fields
+      = Some result_signature_schema
+    in
     let results =
       if String.equal execution_mode "positive_template_vm_execution" then
         list_field "results" fields
@@ -999,6 +1003,7 @@ let report_summary path =
       String.equal execution_mode "positive_template_vm_execution"
       && opt_status_is_accepted "status" fields
       && opt_status_is_accepted "execution_status" fields
+      && report_result_signature_schema_accepted
       && has_results
       && results_accepted
       && vm_runs_accepted
@@ -1035,6 +1040,9 @@ let report_summary path =
       |> add_if
            (not (opt_status_is_accepted "execution_status" fields))
            "execution_rejected"
+      |> add_if
+           (not report_result_signature_schema_accepted)
+           "result_signature_schema_mismatch"
       |> add_if (not has_results) "missing_results"
       |> add_if (not results_accepted) "result_rejected"
       |> add_if (not vm_runs_accepted) "vm_run_rejected"
@@ -1152,6 +1160,16 @@ let report_summary path =
         (match opt_string_field "execution_status" fields with
          | Some value -> value
          | None -> "missing");
+      "runner_result_signature_schema",
+      (match opt_string_field "result_signature_schema" fields with
+       | Some value -> `String value
+       | None -> `Null);
+      "result_signature_schema_status",
+      `String
+        (if report_result_signature_schema_accepted then
+           "accepted"
+         else
+           "rejected");
       "failure_case_status",
       `String
         (match failure_gate with
