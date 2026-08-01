@@ -48,6 +48,7 @@ type continuation_context = {
   output_root : string;
   output_prefix_root : string;
   committed_target_state_root : string option;
+  committed_target_state_payload : string option;
 }
 
 let v2_json =
@@ -101,13 +102,81 @@ let v2_root =
       ("octra:inference:session-abi\000" ^ Yojson.Safe.to_string v2_json)
     |> to_hex)
 
-let supported_roots = [v1_root; v2_root]
+let committed_state_json =
+  `Assoc [
+    "advance_entrypoint", `String advance_entrypoint;
+    "advance_label", `Int advance_label;
+    "candidate_state", `String "memory";
+    "input_root_cell", `Int input_root_cell;
+    "continuation_cells",
+    `Assoc [
+      "sequence",
+      `Assoc [
+        "cell", `Int sequence_cell;
+        "value_encoding", `String "VInt";
+        "semantics", `String "nonnegative pre-advance sequence";
+      ];
+      "logical_position",
+      `Assoc [
+        "cell", `Int logical_position_cell;
+        "value_encoding", `String "VInt";
+        "semantics", `String "nonnegative pre-advance logical position";
+      ];
+      "output_root",
+      `Assoc [
+        "cell", `Int output_root_cell;
+        "value_encoding", `String "VString";
+        "string_encoding", `String "64-lowercase-hex";
+      ];
+      "output_prefix_root",
+      `Assoc [
+        "cell", `Int output_prefix_root_cell;
+        "value_encoding", `String "VString";
+        "string_encoding", `String "64-lowercase-hex";
+      ];
+      "committed_target_state_root",
+      `Assoc [
+        "cell", `Int committed_target_state_root_cell;
+        "value_encoding", `String "VString";
+        "string_encoding", `String "64-lowercase-hex-or-empty";
+        "none_encoding", `String "";
+        "root_hash", `String "sha256-raw";
+        "payload_binding", `String "blob-keyed-by-root";
+        "capability", `String "session.committed-state";
+      ];
+    ];
+    "committed_target_state_payload",
+    `Assoc [
+      "transport", `String "resident-blob";
+      "root_cell", `Int committed_target_state_root_cell;
+      "root_hash", `String "sha256-raw";
+      "payload_binding", `String "blob-keyed-by-root";
+      "retention", `String "session";
+      "bytes_count_against", `String "max_session_bytes";
+      "capability", `String "session.committed-state";
+    ];
+    "output_base_register", `Int output_base_register;
+    "output_count_register", `Int output_count_register;
+    "request_schema", `Int request_schema;
+  ]
+
+let committed_state_root =
+  Digestif.SHA256.(
+    digest_string
+      ("octra:inference:session-abi\000"
+       ^ Yojson.Safe.to_string committed_state_json)
+    |> to_hex)
+
+let supported_roots = [v1_root; v2_root; committed_state_root]
 
 let supported_root root =
   List.exists (String.equal root) supported_roots
 
 let continuation_supported root =
-  String.equal root v2_root
+  String.equal root v2_root || String.equal root committed_state_root
+
+let committed_state_supported root =
+  String.equal root committed_state_root
 
 let supported_root_message =
   String.concat "," supported_roots

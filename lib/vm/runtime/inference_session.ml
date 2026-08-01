@@ -29,6 +29,7 @@ type t = {
   phase : phase;
   logical_position : int;
   committed_target_state_root : string option;
+  committed_target_state_payload : string option;
   output_payload : string option;
   output_root : string;
   output_prefix_root : string;
@@ -93,6 +94,10 @@ let root session =
 
 let session_size session =
   String.length (Yojson.Safe.to_string (identity_json session))
+  +
+  match session.committed_target_state_payload with
+  | None -> 0
+  | Some payload -> String.length payload
 
 let check_session_size session =
   let length = session_size session in
@@ -186,6 +191,7 @@ let continuation_context (session : t) =
     output_root = session.output_root;
     output_prefix_root = session.output_prefix_root;
     committed_target_state_root = session.committed_target_state_root;
+    committed_target_state_payload = session.committed_target_state_payload;
   }
 
 let receipt ~status (prior : t) (next : t) =
@@ -221,6 +227,7 @@ let open_session ~plan =
     phase = Open;
     logical_position = 0;
     committed_target_state_root = None;
+    committed_target_state_payload = None;
     output_payload = None;
     output_root = initial_output_root request_root;
     output_prefix_root = initial_output_prefix_root request_root;
@@ -288,6 +295,10 @@ let advance_with_profile ?profile ~plan ~expected_sequence session =
                  append_output_prefix
                    ~prior_root:session.output_prefix_root
                    ~output_root:execution.output_root;
+               committed_target_state_root =
+                 execution.committed_target_state_root;
+               committed_target_state_payload =
+                 execution.committed_target_state_payload;
                candidate_root = execution.candidate_root;
                committed_effort;
              } in
@@ -347,6 +358,7 @@ let sequence session = session.sequence
 let phase session = session.phase
 let logical_position session = session.logical_position
 let committed_target_state_root session = session.committed_target_state_root
+let committed_target_state_payload session = session.committed_target_state_payload
 let output_payload session = session.output_payload
 let output_prefix_root session = session.output_prefix_root
 let output_root session = session.output_root

@@ -187,6 +187,11 @@ let check_vectors () =
        Abi.v2_root
        "4bf54824520b4efe34e4d7772137d7808caeb7c816071fe5d539a456c0c0046c");
   check
+    "committed-state session ABI root vector"
+    (String.equal
+       Abi.committed_state_root
+       "cf350f53b7dcf68569971409aaa0d868155b27c8bdb2e3911f49d46c6587a7b7");
+  check
     "program root vector"
     (String.equal
        (Target.program_root admitted)

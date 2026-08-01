@@ -70,7 +70,6 @@ let opcode_class = function
   | Contract_vm.SSTOREN _
   | Contract_vm.SKEYS _
   | Contract_vm.SKEYS_PAGE _
-  | Contract_vm.FSTORE _
   | Contract_vm.OBJECT_MEMBER_COUNT _
   | Contract_vm.OBJECT_HAS_MEMBER _
   | Contract_vm.OBJECT_MEMBER_REF_AT _
@@ -103,6 +102,7 @@ let opcode_class = function
   | Contract_vm.FLOAD _
   | Contract_vm.LOAD_F32_LE_FP _
   | Contract_vm.LOAD_F64_LE_FP _ -> Requires "storage.authenticated-range"
+  | Contract_vm.FSTORE _ -> Requires "session.committed-state"
   | Contract_vm.EXP_Q16 _
   | Contract_vm.SOFTMAX_Q16_INPLACE _
   | Contract_vm.LAYERNORM_Q16_INPLACE _

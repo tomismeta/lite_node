@@ -17,6 +17,8 @@ type result = {
   effort_used : int;
   output_payload : string;
   output_root : string;
+  committed_target_state_root : string option;
+  committed_target_state_payload : string option;
   candidate_root : string;
 }
 
@@ -64,6 +66,9 @@ type error =
   | Missing_output_cell of int
   | Output_limit_exceeded of int * int
   | Scratch_limit_exceeded of int * int
+  | Invalid_committed_target_state of string
+  | Missing_committed_target_state_payload of string
+  | Committed_target_state_root_mismatch of string * string
   | Execution_failed
 
 let entrypoint_pc code label =
@@ -124,6 +129,9 @@ let candidate_root ~target_root payload =
     digest_string
       ("octra:inference:candidate\000" ^ target_root ^ "\000" ^ payload)
     |> to_hex)
+
+let sha256 raw =
+  Digestif.SHA256.(digest_string raw |> to_hex)
 
 let output_integer = function
   | Contract_vm.VInt value
@@ -229,7 +237,31 @@ let bind_session_context state context =
     state.Contract_vm.memory.data
     committed_target_state_root_cell
     (Contract_vm.VString
-       (root_or_empty context.committed_target_state_root))
+       (root_or_empty context.committed_target_state_root));
+  match
+    context.committed_target_state_root,
+    context.committed_target_state_payload
+  with
+  | None, None -> Ok ()
+  | Some root, Some payload ->
+    let actual = sha256 payload in
+    if not (String.equal actual root) then
+      Error (Committed_target_state_root_mismatch (root, actual))
+    else
+      (match Hashtbl.find_opt state.Contract_vm.blobs root with
+       | None ->
+         Hashtbl.replace state.Contract_vm.blobs root payload;
+         Ok ()
+       | Some existing when String.equal existing payload -> Ok ()
+       | Some _ ->
+         Error
+           (Invalid_committed_target_state
+              "committed target state blob collision"))
+  | Some root, None -> Error (Missing_committed_target_state_payload root)
+  | None, Some _ ->
+    Error
+      (Invalid_committed_target_state
+         "committed target state payload requires a root")
 
 let check_scratch_payload payload ~max_bytes =
   let length = String.length payload in
@@ -262,16 +294,38 @@ let check_context_values context =
       (Session_context_mismatch
          "output prefix root must be 64 lowercase hex")
   else
-    match context.committed_target_state_root with
-    | None -> Ok ()
-    | Some root ->
+    match
+      context.committed_target_state_root,
+      context.committed_target_state_payload
+    with
+    | None, None -> Ok ()
+    | Some root, None ->
       if valid_root root then Ok ()
       else
         Error
           (Session_context_mismatch
              "committed target state root must be 64 lowercase hex")
+    | Some root, Some payload ->
+      if not (valid_root root) then
+        Error
+          (Session_context_mismatch
+             "committed target state root must be 64 lowercase hex")
+      else if not (String.equal (sha256 payload) root) then
+        Error
+          (Session_context_mismatch
+             "committed target state payload hash mismatch")
+      else Ok ()
+    | None, Some _ ->
+      Error
+        (Session_context_mismatch
+           "committed target state payload requires a root")
 
-let check_session_context = function
+let check_session_context ~committed_state_supported = function
+  | Some context, false
+    when context.Inference_session_abi.committed_target_state_payload <> None ->
+    Error
+      (Session_context_mismatch
+         "committed target state payload requires committed-state session ABI")
   | Some _, false ->
     Error
       (Session_context_mismatch
@@ -280,8 +334,39 @@ let check_session_context = function
     Error
       (Session_context_mismatch
          "continuation-capable session ABI requires continuation context")
-  | Some context, true -> check_context_values context
+  | Some context, true ->
+    if
+      context.Inference_session_abi.committed_target_state_payload <> None
+      && not committed_state_supported
+    then
+      Error
+        (Session_context_mismatch
+           "committed target state payload requires committed-state session ABI")
+    else
+      check_context_values context
   | None, false -> Ok ()
+
+let committed_target_state state =
+  let open Inference_session_abi in
+  match Hashtbl.find_opt state.Contract_vm.memory.data committed_target_state_root_cell with
+  | None -> Ok (None, None)
+  | Some (Contract_vm.VString "") -> Ok (None, None)
+  | Some (Contract_vm.VString root) ->
+    if not (valid_root root) then
+      Error
+        (Invalid_committed_target_state
+           "committed target state root must be 64 lowercase hex")
+    else
+      (match Hashtbl.find_opt state.Contract_vm.blobs root with
+       | None -> Error (Missing_committed_target_state_payload root)
+       | Some payload ->
+         let actual = sha256 payload in
+         if String.equal actual root then Ok (Some root, Some payload)
+         else Error (Committed_target_state_root_mismatch (root, actual)))
+  | Some _ ->
+    Error
+      (Invalid_committed_target_state
+         "committed target state root cell must contain a string")
 
 let run_internal ?profile ?session_context ~plan () =
   let admitted = Inference_plan.admitted plan in
@@ -293,7 +378,15 @@ let run_internal ?profile ?session_context ~plan () =
     Inference_session_abi.continuation_supported
       target.Inference_target.session_abi_root
   in
-  match check_session_context (session_context, continuation_supported) with
+  let committed_state_supported =
+    Inference_session_abi.committed_state_supported
+      target.Inference_target.session_abi_root
+  in
+  match
+    check_session_context
+      ~committed_state_supported
+      (session_context, continuation_supported)
+  with
   | Error error -> Error error
   | Ok () ->
     if not
@@ -324,14 +417,19 @@ let run_internal ?profile ?session_context ~plan () =
          add_pins state pins);
        profile_phase profile execution_profile "bind_request_input" (fun () ->
          bind_request_input state request (Inference_plan.input plan));
-       (match session_context with
-        | None -> ()
-        | Some context ->
-          profile_phase
-            profile
-            execution_profile
-            "bind_session_context"
-            (fun () -> bind_session_context state context));
+       let bound_context =
+         match session_context with
+         | None -> Ok ()
+         | Some context ->
+           profile_phase
+             profile
+             execution_profile
+             "bind_session_context"
+             (fun () -> bind_session_context state context)
+       in
+       (match bound_context with
+        | Error error -> Error error
+        | Ok () ->
        let fixed =
          profile_phase profile execution_profile "fix_jumps" (fun () ->
            Contract.fix_jumps (Admission.code admitted))
@@ -386,18 +484,34 @@ let run_internal ?profile ?session_context ~plan () =
                         ~target_root:(Inference_target.root target)
                         candidate)
                   in
+                  let committed =
+                    if committed_state_supported then
+                      profile_phase
+                        profile
+                        execution_profile
+                        "committed_target_state"
+                        (fun () -> committed_target_state state)
+                    else Ok (None, None)
+                  in
+                  (match committed with
+                   | Error error -> Error error
+                   | Ok (committed_root, committed_payload) ->
                Ok
                  ( {
                      effort_used = state.Contract_vm.effort_used;
                      output_payload = output;
                      output_root;
+                     committed_target_state_root = committed_root;
+                     committed_target_state_payload = committed_payload;
                      candidate_root;
                    },
                    {
                      execution_profile = List.rev !execution_profile;
                      opcode_profile;
                    } )
+                  )
                 | Error error -> Error error))))
+        )
 
 let run ?session_context ~plan () =
   match run_internal ?session_context ~plan () with
@@ -429,4 +543,12 @@ let error_message = function
     Printf.sprintf
       "inference scratch exceeds limit: required %d available %d"
       required available
+  | Invalid_committed_target_state error ->
+    "invalid committed target state: " ^ error
+  | Missing_committed_target_state_payload root ->
+    "missing committed target state payload: " ^ root
+  | Committed_target_state_root_mismatch (expected, actual) ->
+    Printf.sprintf
+      "committed target state root mismatch: expected %s actual %s"
+      expected actual
   | Execution_failed -> "inference execution failed"

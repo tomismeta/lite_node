@@ -22,6 +22,8 @@ type result = {
   effort_used : int;
   output_payload : string;
   output_root : string;
+  committed_target_state_root : string option;
+  committed_target_state_payload : string option;
   candidate_root : string;
 }
 
@@ -49,6 +51,9 @@ type error =
   | Missing_output_cell of int
   | Output_limit_exceeded of int * int
   | Scratch_limit_exceeded of int * int
+  | Invalid_committed_target_state of string
+  | Missing_committed_target_state_payload of string
+  | Committed_target_state_root_mismatch of string * string
   | Execution_failed
 
 val run :

@@ -31,13 +31,17 @@ type continuation_context = {
   output_root : string;
   output_prefix_root : string;
   committed_target_state_root : string option;
+  committed_target_state_payload : string option;
 }
 
 val v1_json : Yojson.Safe.t
 val v1_root : string
 val v2_json : Yojson.Safe.t
 val v2_root : string
+val committed_state_json : Yojson.Safe.t
+val committed_state_root : string
 val supported_roots : string list
 val supported_root : string -> bool
 val continuation_supported : string -> bool
+val committed_state_supported : string -> bool
 val supported_root_message : string

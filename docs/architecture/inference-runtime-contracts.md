@@ -294,8 +294,28 @@ initial deterministic generation target is expected not to need it. A target
 must explicitly declare and bound such state; it cannot use this field to root
 ordinary KV or recurrent caches.
 
-When committed target state exists, its payload is durable canonical session
-data. It is not stored only in an optional checkpoint.
+Committed target-state payload transport uses a separate session ABI root from
+the progress-only v2 ABI. The existing v2 ABI root is unchanged. A target that
+needs this transport must use the committed-state session ABI root and request
+the generic `session.committed-state` capability. Under that ABI:
+
+- `memory[1005]` remains the committed target-state root cell;
+- the root is the raw SHA-256 of the opaque payload bytes;
+- the payload is bound through the VM blob table by that root;
+- `FSTORE` is admitted only with `session.committed-state` and carries the
+  `storage_write` program effect;
+- prior payloads are rebound before execution only when
+  `sha256(payload) == committed_target_state_root`;
+- after execution, the runner inspects `memory[1005]`, requires the referenced
+  blob to exist, verifies the raw SHA-256 again, and retains only that payload;
+  and
+- retained payload bytes count against `max_session_bytes` but are not copied
+  into the session identity JSON.
+
+This is resident committed-state transport. It is sufficient for a local
+`open_session -> prefill -> decode -> finalize` harness, but it is not a
+durable devnet state store until the payload is written to a content-addressed
+session store outside the in-process runner.
 
 ABI v1 accepts at most one successful advance. ABI v2 permits repeated
 advances when the target consumes prior canonical progress or explicitly

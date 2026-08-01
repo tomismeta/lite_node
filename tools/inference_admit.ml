@@ -145,6 +145,7 @@ type session_stage_result = {
   session_stage_phase : string;
   session_stage_output_payload : string;
   session_stage_output_root : string;
+  session_stage_committed_state_transport_bound : bool;
   session_stage_output_contract_mismatch : bool;
   session_stage_decode_token_contract_bound : bool;
   session_stage_reference_mismatch : bool;
@@ -1919,6 +1920,18 @@ let run_batch_stage ~cache ~timing_mode stage =
           "output_payload_sha256", `String (sha256 output_payload);
           "output_root", `String output_root;
           "output_prefix_root", `String (Session.output_prefix_root finalized);
+          "committed_target_state_root",
+          nullable_string_json
+            (Session.committed_target_state_root finalized);
+          "committed_target_state_payload_sha256",
+          nullable_string_json
+            (Option.map
+               sha256
+               (Session.committed_target_state_payload finalized));
+          "committed_target_state_payload_bytes",
+          (match Session.committed_target_state_payload finalized with
+           | None -> `Null
+           | Some payload -> `Int (String.length payload));
           "candidate_root", `String (Session.candidate_root finalized);
           "effort_delta", `Int advance_receipt.Receipt.effort_delta;
           "final_effort_delta", `Int final_receipt.Receipt.effort_delta;
@@ -1952,6 +1965,21 @@ let run_prepared_session_transition session prepared_transition =
   let prepared = prepared_transition.prepared_stage in
   let transition = prepared_transition.prepared_transition in
   let prior_session_root = Session.root session in
+  let prior_committed_target_state_root =
+    Session.committed_target_state_root session
+  in
+  let prior_committed_target_state_payload =
+    Session.committed_target_state_payload session
+  in
+  let committed_state_transport_bound =
+    match
+      prior_committed_target_state_root,
+      prior_committed_target_state_payload
+    with
+    | Some root, Some payload ->
+      String.length payload > 0 && String.equal (sha256 payload) root
+    | _ -> false
+  in
   let advanced, advance_receipt, execution_profile, opcode_profile =
     match timer.mode with
     | Timing_opcode ->
@@ -2027,6 +2055,17 @@ let run_prepared_session_transition session prepared_transition =
         "missing_capabilities", list_json missing;
         "policy_violations", `List violation_values;
         "prior_session_root", `String prior_session_root;
+        "prior_committed_target_state_root",
+        nullable_string_json prior_committed_target_state_root;
+        "prior_committed_target_state_payload_sha256",
+        nullable_string_json
+          (Option.map sha256 prior_committed_target_state_payload);
+        "prior_committed_target_state_payload_bytes",
+        (match prior_committed_target_state_payload with
+         | None -> `Null
+         | Some payload -> `Int (String.length payload));
+        "committed_state_transport_bound",
+        `Bool committed_state_transport_bound;
         "advanced_session_root", `String (Session.root advanced);
         "advance_receipt_root", `String (Receipt.root advance_receipt);
         "output_contract", output_contract.output_contract_json;
@@ -2034,6 +2073,18 @@ let run_prepared_session_transition session prepared_transition =
         "output_payload_sha256", `String (sha256 output_payload);
         "output_root", `String output_root;
         "output_prefix_root", `String (Session.output_prefix_root advanced);
+        "committed_target_state_root",
+        nullable_string_json
+          (Session.committed_target_state_root advanced);
+        "committed_target_state_payload_sha256",
+        nullable_string_json
+          (Option.map
+             sha256
+             (Session.committed_target_state_payload advanced));
+        "committed_target_state_payload_bytes",
+        (match Session.committed_target_state_payload advanced with
+         | None -> `Null
+         | Some payload -> `Int (String.length payload));
         "candidate_root", `String (Session.candidate_root advanced);
         "effort_delta", `Int advance_receipt.Receipt.effort_delta;
         "consensus_accepted", `Bool false;
@@ -2049,6 +2100,8 @@ let run_prepared_session_transition session prepared_transition =
     session_stage_phase = transition.phase;
     session_stage_output_payload = output_payload;
     session_stage_output_root = output_root;
+    session_stage_committed_state_transport_bound =
+      committed_state_transport_bound;
     session_stage_output_contract_mismatch =
       output_contract.output_contract_mismatch;
     session_stage_decode_token_contract_bound =
@@ -2287,7 +2340,13 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
   let session_abi_v2_supported =
     match session_abi_roots with
     | root :: _ when session_abi_root_uniform ->
-      String.equal root Abi.v2_root
+      Abi.continuation_supported root
+    | _ -> false
+  in
+  let committed_state_supported =
+    match session_abi_roots with
+    | root :: _ when session_abi_root_uniform ->
+      Abi.committed_state_supported root
     | _ -> false
   in
   let decode_steps_match = decode_transitions = bundle.decode_steps in
@@ -2333,9 +2392,10 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
       "phase_contract", `String "labels_only_unverified";
       "continuation_basis",
       `String
-        (if session_abi_v2_supported then "abi_v2_progress_cells"
+        (if committed_state_supported then "abi_committed_state_payload"
+         else if session_abi_v2_supported then "abi_v2_progress_cells"
          else "undefined");
-      "state_payload_available", `Bool false;
+      "state_payload_transport_supported", `Bool committed_state_supported;
       "repeated_advance_supported", `Bool session_abi_v2_supported;
       "output_prefix_hash_primitive_available", `Bool true;
       "continuation_output_prefix_supported",
@@ -2424,11 +2484,12 @@ let missing_resident_runtime_capabilities =
     `String "decode_loop_token_contract";
   ]
 
-let remaining_v2_runtime_capabilities ~decode_token_contract_bound =
+let remaining_session_runtime_capabilities
+    ~decode_token_contract_bound
+    ~committed_state_transport_bound =
   `List
-    ([
-      `String "committed_target_state_payload_transport";
-    ]
+    ((if committed_state_transport_bound then []
+      else [`String "committed_target_state_payload_transport"])
      @
      if decode_token_contract_bound then []
      else [`String "decode_loop_token_contract"])
@@ -2459,6 +2520,8 @@ let session_runtime_semantics
     ~next_runtime_blocker
     ~decode_token_contract_status
     ~missing_runtime_capabilities
+    ~committed_state_supported
+    ~committed_state_transport_bound
     ~continuation_supported =
   let single_transition = transition_count = 1 in
   `Assoc [
@@ -2471,12 +2534,21 @@ let session_runtime_semantics
     "product_lifecycle", product_lifecycle_json;
     "stage_lifecycle", stage_lifecycle_json;
     "continuation_supported", `Bool continuation_supported;
+    "committed_state_transport_supported",
+    `Bool committed_state_supported;
+    "committed_state_transport_bound",
+    `Bool committed_state_transport_bound;
     "state_carry",
     `String
-      (if continuation_supported then "abi_v2_progress_cells"
+      (if committed_state_transport_bound then "abi_committed_state_payload"
+       else if committed_state_supported then
+         "abi_committed_state_payload_supported"
+       else if continuation_supported then "abi_v2_progress_cells"
        else "not_supported");
     "resident_cache_scope",
-    (if continuation_supported then `List [`String "session"]
+    (if committed_state_transport_bound then
+       `List [`String "session"; `String "committed_target_state_payload"]
+     else if continuation_supported then `List [`String "session"]
      else `List []);
     "runtime_readiness_status", `String runtime_readiness_status;
     "next_runtime_blocker", `String next_runtime_blocker;
@@ -2634,12 +2706,28 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     else if decode_token_contract_bound then "bound"
     else "not_bound"
   in
+  let first_session_abi_root =
+    (Plan.target first_plan).Target.session_abi_root
+  in
+  let committed_state_supported =
+    Abi.committed_state_supported first_session_abi_root
+  in
+  let committed_state_transport_bound =
+    List.exists
+      (fun result -> result.session_stage_committed_state_transport_bound)
+      results
+  in
   let next_runtime_blocker =
     if output_contract_mismatch then "decode_loop_token_contract_mismatch"
-    else "committed_target_state_payload_transport_not_bound"
+    else if not committed_state_transport_bound then
+      "committed_target_state_payload_transport_not_bound"
+    else if not decode_token_contract_bound then "decode_loop_token_contract_not_bound"
+    else "none"
   in
   let missing_runtime_capabilities =
-    remaining_v2_runtime_capabilities ~decode_token_contract_bound
+    remaining_session_runtime_capabilities
+      ~decode_token_contract_bound
+      ~committed_state_transport_bound
   in
   let status =
     if output_contract_mismatch then "output_contract_mismatch"
@@ -2663,6 +2751,8 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       ~next_runtime_blocker
       ~decode_token_contract_status
       ~missing_runtime_capabilities
+      ~committed_state_supported
+      ~committed_state_transport_bound
       ~continuation_supported:true
   in
   let payload =
@@ -2749,6 +2839,8 @@ let run_inference_session_file ~timing_mode path =
         ~next_runtime_blocker:preflight.continuation_next_runtime_blocker
         ~decode_token_contract_status:"not_bound"
         ~missing_runtime_capabilities:missing_resident_runtime_capabilities
+        ~committed_state_supported:false
+        ~committed_state_transport_bound:false
         ~continuation_supported:false
     in
     let status = "rejected" in
@@ -2837,6 +2929,8 @@ let run_inference_session_file ~timing_mode path =
           "session_continuation_state_carry_not_supported"
         ~decode_token_contract_status
         ~missing_runtime_capabilities:missing_resident_runtime_capabilities
+        ~committed_state_supported:false
+        ~committed_state_transport_bound:false
         ~continuation_supported:false
     in
     let status =

@@ -205,6 +205,112 @@ let continuation_code =
     VM.STOP;
   |]
 
+let committed_state_payload = "state:0"
+let committed_state_payload_root = sha256 committed_state_payload
+
+let committed_state_limits =
+  Req.{
+    continuation_limits with
+    max_session_bytes = 4096;
+    max_scratch_bytes = 4096;
+    max_output_bytes = 512;
+    max_advance_effort = 4096;
+  }
+
+let committed_state_requirement =
+  Req.{
+    continuation_requirement with
+    capabilities =
+      continuation_requirement.capabilities
+      @ [capability "session.committed-state" (hex_root '6')];
+    limits = committed_state_limits;
+  }
+
+let committed_state_support =
+  Req.{
+    continuation_support with
+    support_capabilities = committed_state_requirement.capabilities;
+    support_limits = committed_state_limits;
+  }
+
+let committed_state_code =
+  [|
+    VM.JDEST Abi.advance_label;
+    VM.MLOAD (20, Abi.sequence_cell);
+    VM.LDI (21, VM.VInt Z.zero);
+    VM.EQ (22, 20, 21);
+    VM.JIF (22, 101);
+    VM.MLOAD (5, Abi.committed_target_state_root_cell);
+    VM.FLOAD (6, 5);
+    VM.MSTORE (30, 6);
+    VM.LDI (0, VM.VInt (Z.of_int 30));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+    VM.JDEST 101;
+    VM.LDI (5, VM.VString committed_state_payload);
+    VM.FSTORE (6, 5);
+    VM.MSTORE (Abi.committed_target_state_root_cell, 6);
+    VM.MSTORE (30, 5);
+    VM.LDI (0, VM.VInt (Z.of_int 30));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+  |]
+
+let committed_state_bad_cell_code =
+  [|
+    VM.JDEST Abi.advance_label;
+    VM.LDI (5, VM.VInt Z.one);
+    VM.MSTORE (Abi.committed_target_state_root_cell, 5);
+    VM.MSTORE (30, 5);
+    VM.LDI (0, VM.VInt (Z.of_int 30));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+  |]
+
+let committed_state_plan ?(max_session_bytes = 4096)
+    ?(code = committed_state_code) () =
+  let limits =
+    Req.{ committed_state_limits with max_session_bytes }
+  in
+  let requirement =
+    Req.{ committed_state_requirement with limits }
+  in
+  let support =
+    Req.{
+      committed_state_support with
+      support_capabilities = requirement.capabilities;
+      support_limits = limits;
+    }
+  in
+  let admitted =
+    Inference_cert.admit ~support ~requirement code
+  in
+  let target =
+    target
+      ~requirement
+      ~session_abi_root:Abi.committed_state_root
+      admitted
+  in
+  let request =
+    request
+      ~max_output_bytes:512
+      ~max_advance_effort:4096
+      target
+  in
+  let model = model target in
+  plan admitted target request model
+
+let committed_state_advance_result max_session_bytes =
+  let plan =
+    committed_state_plan ~max_session_bytes ()
+  in
+  match Session.open_session ~plan with
+  | Error error -> `Open_error error
+  | Ok session ->
+    match Session.advance ~plan ~expected_sequence:0 session with
+    | Error error -> `Advance_error (session, error)
+    | Ok (advanced, _) -> `Advanced advanced
+
 let check_v2_continuation_lifecycle () =
   let admitted =
     Inference_cert.admit
@@ -331,6 +437,144 @@ let check_v2_continuation_lifecycle () =
   | Ok (finalized, receipt) ->
     check "v2 finalized sequence" (Session.sequence finalized = 3);
     check "v2 finalize delta" (receipt.Receipt.effort_delta = 0)
+
+let check_committed_state_lifecycle () =
+  let admitted =
+    Inference_cert.admit
+      ~support:committed_state_support
+      ~requirement:committed_state_requirement
+      committed_state_code
+  in
+  let target =
+    target
+      ~requirement:committed_state_requirement
+      ~session_abi_root:Abi.committed_state_root
+      admitted
+  in
+  let request =
+    request
+      ~max_output_bytes:512
+      ~max_advance_effort:4096
+      target
+  in
+  let model = model target in
+  let plan, session = open_session admitted target request model in
+  check
+    "committed-state ABI is new"
+    (not (String.equal Abi.committed_state_root Abi.v2_root));
+  let expected_payload =
+    "base=30|length=1|values=string:7:" ^ committed_state_payload
+  in
+  let first =
+    match Session.advance ~plan ~expected_sequence:0 session with
+    | Ok (advanced, receipt) ->
+      check "first committed sequence" (Session.sequence advanced = 1);
+      check
+        "first committed root"
+        (Session.committed_target_state_root advanced
+         = Some committed_state_payload_root);
+      check
+        "first committed payload"
+        (Session.committed_target_state_payload advanced
+         = Some committed_state_payload);
+      check
+        "first committed output"
+        (Session.output_payload advanced = Some expected_payload);
+      check "first committed receipt" (receipt.Receipt.effort_delta > 0);
+      advanced
+    | Error error -> failwith (Session.error_message error)
+  in
+  let second =
+    match Session.advance ~plan ~expected_sequence:1 first with
+    | Ok (advanced, receipt) ->
+      check "second committed sequence" (Session.sequence advanced = 2);
+      check
+        "second committed root carried"
+        (Session.committed_target_state_root advanced
+         = Some committed_state_payload_root);
+      check
+        "second committed payload carried"
+        (Session.committed_target_state_payload advanced
+         = Some committed_state_payload);
+      check
+        "second committed output reloaded"
+        (Session.output_payload advanced = Some expected_payload);
+      check "second committed receipt" (receipt.Receipt.effort_delta > 0);
+      advanced
+    | Error error -> failwith (Session.error_message error)
+  in
+  match Session.finalize ~expected_sequence:2 second with
+  | Error error -> failwith (Session.error_message error)
+  | Ok (finalized, receipt) ->
+    check "committed finalized sequence" (Session.sequence finalized = 3);
+    check
+      "committed finalized root retained"
+      (Session.committed_target_state_root finalized
+       = Some committed_state_payload_root);
+    check
+      "committed finalized payload retained"
+      (Session.committed_target_state_payload finalized
+       = Some committed_state_payload);
+    check "committed finalize delta" (receipt.Receipt.effort_delta = 0)
+
+let check_committed_state_session_limit_boundary () =
+  let rec first_open_success limit =
+    if limit > 4096 then failwith "missing committed-state open threshold"
+    else
+      match committed_state_advance_result limit with
+      | `Open_error _ -> first_open_success (limit + 1)
+      | `Advance_error _
+      | `Advanced _ -> limit
+  in
+  let rec first_advance_success limit =
+    if limit > 4096 then failwith "missing committed-state success threshold"
+    else
+      match committed_state_advance_result limit with
+      | `Advanced _ -> limit
+      | `Open_error _
+      | `Advance_error _ -> first_advance_success (limit + 1)
+  in
+  let open_threshold = first_open_success 1 in
+  let threshold = first_advance_success 1 in
+  check
+    "committed-state payload increases session bound"
+    (threshold > open_threshold);
+  (match committed_state_advance_result threshold with
+   | `Advanced advanced ->
+     check
+       "committed-state boundary retains payload"
+       (Session.committed_target_state_payload advanced
+        = Some committed_state_payload)
+   | _ -> failwith "expected committed-state boundary success");
+  match committed_state_advance_result (threshold - 1) with
+  | `Advance_error (_, Session.Session_limit_exceeded _) -> ()
+  | `Open_error _ -> failwith "expected advance-time session limit rejection"
+  | `Advanced _ -> failwith "expected one-byte session limit rejection"
+  | `Advance_error (_, error) -> failwith (Session.error_message error)
+
+let check_committed_state_failed_advance_is_atomic () =
+  let plan =
+    committed_state_plan
+      ~code:committed_state_bad_cell_code
+      ()
+  in
+  let session =
+    match Session.open_session ~plan with
+    | Ok session -> session
+    | Error error -> failwith (Session.error_message error)
+  in
+  let prior_root = Session.root session in
+  match Session.advance ~plan ~expected_sequence:0 session with
+  | Error (Session.Execution_error _) ->
+    check
+      "failed committed advance root unchanged"
+      (String.equal (Session.root session) prior_root);
+    check "failed committed sequence unchanged" (Session.sequence session = 0);
+    check
+      "failed committed payload absent"
+      (Session.committed_target_state_payload session = None)
+  | Error error -> failwith (Session.error_message error)
+  | Ok _ -> failwith "expected committed-state bad-cell rejection"
 
 let check_profiled_advance_equivalence () =
   let admitted = admitted () in
@@ -509,6 +753,9 @@ let check_session_cancel_limit () =
 let () =
   check_lifecycle ();
   check_v2_continuation_lifecycle ();
+  check_committed_state_lifecycle ();
+  check_committed_state_session_limit_boundary ();
+  check_committed_state_failed_advance_is_atomic ();
   check_profiled_advance_equivalence ();
   check_sequence_mismatch ();
   check_finalize_phase ();

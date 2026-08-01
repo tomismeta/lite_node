@@ -549,7 +549,19 @@ let step facts pc env = function
       match IntMap.find_opt index env.mem with
       | Some (Set kind) -> kind
       | Some Unset -> Unknown
-      | None -> if index = 999 || index = 1000 then String else Unknown
+              | None ->
+                if
+                  index = 999
+                  || index = Inference_session_abi.input_root_cell
+                  || index = Inference_session_abi.output_root_cell
+                  || index = Inference_session_abi.output_prefix_root_cell
+                  || index = Inference_session_abi.committed_target_state_root_cell
+                then String
+                else if
+                  index = Inference_session_abi.sequence_cell
+                  || index = Inference_session_abi.logical_position_cell
+                then Int
+                else Unknown
     in
     write pc env dest kind
   | Contract_vm.MSTORE (index, source) ->

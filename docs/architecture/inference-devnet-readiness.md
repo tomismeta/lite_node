@@ -143,13 +143,13 @@ d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
    harness overhead, but full prompt runtime still needs resident execution,
    cached authenticated ranges, and measured kernel optimization. Batch reports
    now make this explicit in diagnostic `runtime_semantics`: owner-byte and
-   model-range pin caches are supported, while committed state payload
-   transport remains the runtime blocker after a decode transition declares and
-   satisfies a `selected_index` `output_contract`. Session reports now expose
-   each canonical output payload and payload digest alongside the output root,
-   so root-bound selected-index payloads can be returned without tokenizer or
-   model-family knowledge. `ARGMAX_FP` provenance comes from the admitted
-   decode program and opcode evidence.
+   model-range pin caches are supported, and committed-state payload transport
+   is available under the dedicated committed-state session ABI root. Session
+   reports now expose each canonical output payload and payload digest
+   alongside the output root, and committed-state reports expose only root,
+   digest, and byte count. Root-bound selected-index payloads can be returned
+   without tokenizer or model-family knowledge. `ARGMAX_FP` provenance comes
+   from the admitted decode program and opcode evidence.
 
 4. Multi-platform conformance.
    Strict P0 reports must run across the intended validator platforms and
@@ -187,12 +187,13 @@ d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
    multi-transition bundles through one opened session, repeated advance, and
    one finalization. The harness also binds the generic phase sequence as
    `prefill*` followed by `decode*`, with `decode_steps` matching the declared
-   decode count. A separate state-transport step is still required if a target
-   declares non-empty committed target state; today's proven path keeps that
-   root absent and does not persist a canonical state payload. The next product
-   step is to validate a producer-emitted decode `output_contract` against the
-   Bonsai prompt-token bundle and then bind any required committed state
-   payload.
+   decode count. A separate committed-state ABI root now adds resident payload
+   transport: prior payload bytes are hash-checked and rebound, `FSTORE` is
+   gated by `session.committed-state`, retained payload bytes count against
+   `max_session_bytes`, and the session identity remains root-only. The next
+   product step is to validate a producer-emitted committed-state session
+   bundle against the Bonsai prompt-token path and decide what, if any, state
+   must become durable beyond the local resident harness.
 6. Re-run one Bonsai prompt-to-token proof under the target-owned session shape.
 7. Re-run recurrent-heavy and logits-tail performance gates against that shape.
 8. Only then prepare the mergeable branch by reducing evidence-only scaffolding

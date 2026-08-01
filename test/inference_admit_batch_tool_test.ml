@@ -266,6 +266,35 @@ let continuation_token_code =
     VM.STOP;
   |]
 
+let committed_state_payload = "state:0"
+let committed_state_payload_root = sha256 committed_state_payload
+
+let committed_state_token_code =
+  [|
+    VM.JDEST Abi.advance_label;
+    VM.MLOAD (20, Abi.sequence_cell);
+    VM.LDI (21, VM.VInt Z.zero);
+    VM.EQ (22, 20, 21);
+    VM.JIF (22, 101);
+    VM.MLOAD (5, Abi.committed_target_state_root_cell);
+    VM.FLOAD (6, 5);
+    VM.MSTORE (30, 6);
+    VM.LDI (2, VM.VInt Z.one);
+    VM.MSTORE (10, 2);
+    VM.LDI (0, VM.VInt (Z.of_int 10));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+    VM.JDEST 101;
+    VM.LDI (5, VM.VString committed_state_payload);
+    VM.FSTORE (6, 5);
+    VM.MSTORE (Abi.committed_target_state_root_cell, 6);
+    VM.LDI (2, VM.VInt Z.one);
+    VM.MSTORE (10, 2);
+    VM.LDI (0, VM.VInt (Z.of_int 10));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+  |]
+
 let selected_index_contract ?(output_base = 10) () =
   `Assoc [
     "kind", `String "selected_index";
@@ -292,10 +321,18 @@ let write_batch_fixture
         VM.STOP;
       |]
   in
-  let continuation = String.equal session_abi_root Abi.v2_root in
+  let continuation = Abi.continuation_supported session_abi_root in
+  let committed_state = Abi.committed_state_supported session_abi_root in
   let max_output_bytes = if continuation then 512 else 64 in
   let max_scratch_bytes = if continuation then 2048 else 128 in
   let capability = Req.{ name = "storage.authenticated-range"; root = hex_root 'd' } in
+  let capabilities =
+    [capability]
+    @
+    if committed_state then
+      [Req.{ name = "session.committed-state"; root = hex_root '6' }]
+    else []
+  in
   let limits =
     Req.{
       max_model_bytes = 64;
@@ -311,7 +348,7 @@ let write_batch_fixture
       vm_semantics_root = hex_root 'a';
       numerical_root = hex_root 'b';
       effort_root = hex_root 'c';
-      capabilities = [capability];
+      capabilities;
       limits;
     }
   in
@@ -916,7 +953,7 @@ let check_session_bundle_rejects_multi_transition () =
          "undefined");
     check
       "preflight no state payload"
-      (not (bool_json "state_payload_available" preflight));
+      (not (bool_json "state_payload_transport_supported" preflight));
     check
       "preflight no repeated advance"
       (not (bool_json "repeated_advance_supported" preflight));
@@ -1288,6 +1325,119 @@ let check_session_bundle_binds_decode_token_contract () =
      | _ -> failwith "expected two resident transitions")
   | _ -> failwith "report must be an object"
 
+let check_session_bundle_binds_committed_state_transport () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~session_abi_root:Abi.committed_state_root
+      ~code:committed_state_token_code
+      ~output_contract_for_index:(fun index ->
+        if index = 1 then Some (selected_index_contract ())
+        else None)
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "committed-state bundle exits cleanly" (code = 0);
+  match report with
+  | `Assoc fields ->
+    check
+      "committed-state bundle accepted"
+      (String.equal (string_json "status" fields) "accepted");
+    check
+      "committed-state blocker cleared"
+      (String.equal (string_json "next_runtime_blocker" fields) "none");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "committed-state carry named"
+      (String.equal
+         (string_json "state_carry" semantics)
+         "abi_committed_state_payload");
+    check
+      "committed-state support reported"
+      (bool_json "committed_state_transport_supported" semantics);
+    check
+      "committed-state binding reported"
+      (bool_json "committed_state_transport_bound" semantics);
+    check
+      "committed-state cache scope"
+      (list_json "resident_cache_scope" semantics
+       = [
+         `String "session";
+         `String "committed_target_state_payload";
+       ]);
+    check
+      "committed-state missing capabilities clear"
+      (list_json "missing_runtime_capabilities" semantics = []);
+    check
+      "committed-state decode token contract bound"
+      (String.equal
+         (string_json "decode_token_contract_status" semantics)
+         "bound");
+    check_session_hash report;
+    (match list_json "transitions" fields with
+     | [`Assoc first; `Assoc second] ->
+       check
+         "first transition does not start bound"
+         (not (bool_json "committed_state_transport_bound" first));
+       check
+         "second transition starts bound"
+         (bool_json "committed_state_transport_bound" second);
+       check
+         "first transition has no prior root"
+         (match List.assoc_opt "prior_committed_target_state_root" first with
+          | Some `Null -> true
+          | _ -> false);
+       check
+         "second transition prior root"
+         (String.equal
+            (string_json
+               "prior_committed_target_state_root"
+               second)
+            committed_state_payload_root);
+       check
+         "second transition prior payload sha"
+         (String.equal
+            (string_json
+               "prior_committed_target_state_payload_sha256"
+               second)
+            committed_state_payload_root);
+       check
+         "second transition prior payload bytes"
+         (int_json
+            "prior_committed_target_state_payload_bytes"
+            second
+          = String.length committed_state_payload);
+       List.iter
+         (fun transition ->
+            check
+              "committed-state transition root"
+              (String.equal
+                 (string_json
+                    "committed_target_state_root"
+                    transition)
+                 committed_state_payload_root);
+            check
+              "committed-state transition payload sha"
+              (String.equal
+                 (string_json
+                    "committed_target_state_payload_sha256"
+                    transition)
+                 committed_state_payload_root);
+            check
+              "committed-state transition payload bytes"
+              (int_json
+                 "committed_target_state_payload_bytes"
+                 transition
+               = String.length committed_state_payload))
+         [first; second];
+       let contract = assoc_json "output_contract" second in
+       check
+         "committed-state decode contract matched"
+         (String.equal (string_json "status" contract) "matched")
+     | _ -> failwith "expected two committed-state transitions")
+  | _ -> failwith "report must be an object"
+
 let check_session_bundle_prefill_only_keeps_decode_token_contract () =
   with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
   let bundle_path =
@@ -1581,6 +1731,7 @@ let () =
   check_session_bundle_rejects_multi_transition ();
   check_session_bundle_accepts_v2_multi_transition ();
   check_session_bundle_binds_decode_token_contract ();
+  check_session_bundle_binds_committed_state_transport ();
   check_session_bundle_prefill_only_keeps_decode_token_contract ();
   check_session_bundle_rejects_decode_token_contract_mismatch ();
   check_session_bundle_rejects_invalid_phase_order ();
