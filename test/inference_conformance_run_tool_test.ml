@@ -670,6 +670,37 @@ let replace_output_subspan_sha sha = function
          fields)
   | value -> value
 
+let replace_output_subspan_base base = function
+  | `Assoc fields ->
+    let replace_subspan = function
+      | `Assoc subspan ->
+        `Assoc
+          (List.map
+             (fun (key, value) ->
+                if String.equal key "base_address" then key, `Int base
+                else key, value)
+             subspan)
+      | value -> value
+    in
+    let replace_output = function
+      | `Assoc output ->
+        `Assoc
+          (List.map
+             (fun (key, value) ->
+                if String.equal key "subspans" then
+                  key, `List (List.map replace_subspan (list_value key output))
+                else key, value)
+             output)
+      | value -> value
+    in
+    `Assoc
+      (List.map
+         (fun (key, value) ->
+            if String.equal key "output" then key, replace_output value
+            else key, value)
+         fields)
+  | value -> value
+
 let check_good_template_reports_bound_abi () =
   with_temp_dir (fun dir ->
     let code, report =
@@ -1298,6 +1329,42 @@ let check_readiness_gate_reports_executable_abi_mismatch () =
          "bad executable ABI top-level gate"
          (String.equal (string_value "status" gate) "rejected")
      | _ -> failwith "report must be object"))
+
+let check_missing_output_subspan_reports_rejected () =
+  with_temp_dir (fun dir ->
+    let code, report =
+      run_conformance
+        dir
+        (q1_template () |> replace_output_subspan_base 10001)
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "missing output subspan runner exits nonzero" (code = 1);
+    let result = first_result report in
+    check
+      "missing output subspan result rejected"
+      (String.equal (string_value "status" result) "rejected");
+    check
+      "missing output subspan output mismatch"
+      (String.equal (string_value "output_status" result) "mismatch");
+    match assoc_value "subspans" result with
+    | `List [`Assoc subspan] ->
+      check
+        "missing output subspan root marked false"
+        (not (bool_value "root_matched" subspan));
+      check
+        "missing output subspan marked false"
+        (not (bool_value "matched" subspan));
+      check
+        "missing output subspan records error"
+        (String.equal
+           (string_value "error" subspan)
+           "missing output cell: base 10001 index 0")
+    | _ -> failwith "expected one subspan")
 
 let check_pinned_cross_platform_matrix_is_consumed () =
   with_temp_dir (fun dir ->
@@ -1974,6 +2041,7 @@ let () =
   check_stale_abi_is_visible_in_executable_report ();
   check_readiness_gate_rejects_stale_abi ();
   check_readiness_gate_reports_executable_abi_mismatch ();
+  check_missing_output_subspan_reports_rejected ();
   check_pinned_cross_platform_matrix_is_consumed ();
   check_cross_platform_matrix_without_pin_rejects ();
   check_cross_platform_matrix_sha_mismatch_rejects ();

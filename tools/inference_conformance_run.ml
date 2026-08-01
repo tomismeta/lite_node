@@ -1417,22 +1417,41 @@ let set_f64le state base cells raw =
       (VM.VInt (Z.of_int64 (int64_le raw (index * 8))))
   done
 
-let output_bytes state base cells =
+let output_bytes_result state base cells =
+  if cells < 0 then
+    Error
+      (Printf.sprintf
+         "invalid output span: base %d cells %d"
+         base
+         cells)
+  else if cells > 0 && base > max_int - cells then
+    Error
+      (Printf.sprintf
+         "invalid output bounds: base %d cells %d"
+         base
+         cells)
+  else
   let raw = Bytes.create (cells * 8) in
-  for index = 0 to cells - 1 do
-    let bits =
+  let rec fill index =
+    if index = cells then Ok (Bytes.to_string raw)
+    else
       match Hashtbl.find_opt state.VM.memory.data (base + index) with
-      | Some (VM.VInt value) when Z.fits_int64 value -> Z.to_int64 value
+      | Some (VM.VInt value) when Z.fits_int64 value ->
+        put_int64_le raw index (Z.to_int64 value);
+        fill (index + 1)
       | _ ->
-        fail
+        Error
           (Printf.sprintf
              "missing output cell: base %d index %d"
              base
              index)
-    in
-    put_int64_le raw index bits
-  done;
-  Bytes.to_string raw
+  in
+  fill 0
+
+let output_bytes state base cells =
+  match output_bytes_result state base cells with
+  | Ok raw -> raw
+  | Error error -> fail error
 
 let u64_bytes value =
   let raw = Bytes.create 8 in
@@ -2163,35 +2182,70 @@ let executable_abi_result state template =
     "output_payload_sha256", payload_sha256;
   ]
 
+let unavailable_subspan_result fields error =
+  let name = string_field "name" fields in
+  let base = int_field "base_address" fields in
+  let cells = int_field "length_f64_cells" fields in
+  let expected_sha = string_field "sha256" fields in
+  let expected_root = opt_string_field "root" fields in
+  let observed =
+    sha256
+      (String.concat
+         "|"
+         [
+           "octra:inference:missing-output";
+           name;
+           string_of_int base;
+           string_of_int cells;
+           error;
+         ])
+  in
+  false,
+  `Assoc [
+    "name", `String name;
+    "base_address", `Int base;
+    "length_f64_cells", `Int cells;
+    "expected_sha256", `String expected_sha;
+    "observed_sha256", `String observed;
+    "expected_root",
+    (match expected_root with None -> `Null | Some root -> `String root);
+    "observed_root", `String observed;
+    "root_matched", `Bool false;
+    "matched", `Bool false;
+    "error", `String error;
+  ]
+
 let subspan_result state value =
   match value with
   | `Assoc fields ->
-    let name = string_field "name" fields in
     let base = int_field "base_address" fields in
     let cells = int_field "length_f64_cells" fields in
-    let expected_sha = string_field "sha256" fields in
-    let expected_root = opt_string_field "root" fields in
-    let raw = output_bytes state base cells in
-    let actual_sha = sha256 raw in
-    let root_matched =
-      match expected_root with
-      | None -> true
-      | Some root -> String.equal root actual_sha
-    in
-    let matched = String.equal actual_sha expected_sha && root_matched in
-    matched,
-    `Assoc [
-      "name", `String name;
-      "base_address", `Int base;
-      "length_f64_cells", `Int cells;
-      "expected_sha256", `String expected_sha;
-      "observed_sha256", `String actual_sha;
-      "expected_root",
-      (match expected_root with None -> `Null | Some root -> `String root);
-      "observed_root", `String actual_sha;
-      "root_matched", `Bool root_matched;
-      "matched", `Bool matched;
-    ]
+    (match output_bytes_result state base cells with
+     | Error error -> unavailable_subspan_result fields error
+     | Ok raw ->
+       let name = string_field "name" fields in
+       let expected_sha = string_field "sha256" fields in
+       let expected_root = opt_string_field "root" fields in
+       let actual_sha = sha256 raw in
+       let root_matched =
+         match expected_root with
+         | None -> true
+         | Some root -> String.equal root actual_sha
+       in
+       let matched = String.equal actual_sha expected_sha && root_matched in
+       matched,
+       `Assoc [
+         "name", `String name;
+         "base_address", `Int base;
+         "length_f64_cells", `Int cells;
+         "expected_sha256", `String expected_sha;
+         "observed_sha256", `String actual_sha;
+         "expected_root",
+         (match expected_root with None -> `Null | Some root -> `String root);
+         "observed_root", `String actual_sha;
+         "root_matched", `Bool root_matched;
+         "matched", `Bool matched;
+       ])
   | _ -> fail "output subspan must be an object"
 
 let starts_with prefix value =
@@ -2220,8 +2274,10 @@ let capture_span state span =
   seed_span_if_missing state base cells;
   name, base, cells, output_bytes state base cells
 
-let capture_existing_span state name base cells =
-  name, base, cells, output_bytes state base cells
+let capture_existing_span_result state name base cells =
+  match output_bytes_result state base cells with
+  | Ok raw -> Some (name, base, cells, raw)
+  | Error _ -> None
 
 let span_covers base cells (_, span_base, span_cells, _) =
   span_base <= base
@@ -2230,30 +2286,54 @@ let span_covers base cells (_, span_base, span_cells, _) =
   && span_base + span_cells >= base + cells
 
 let unchanged_result state (name, base, cells, before) =
-  let after = output_bytes state base cells in
-  let matched = String.equal before after in
-  matched,
-  `Assoc [
-    "name", `String name;
-    "base_address", `Int base;
-    "length_f64_cells", `Int cells;
-    "before_sha256", `String (sha256 before);
-    "after_sha256", `String (sha256 after);
-    "unchanged", `Bool matched;
-  ]
+  match output_bytes_result state base cells with
+  | Ok after ->
+    let matched = String.equal before after in
+    matched,
+    `Assoc [
+      "name", `String name;
+      "base_address", `Int base;
+      "length_f64_cells", `Int cells;
+      "before_sha256", `String (sha256 before);
+      "after_sha256", `String (sha256 after);
+      "unchanged", `Bool matched;
+    ]
+  | Error error ->
+    false,
+    `Assoc [
+      "name", `String name;
+      "base_address", `Int base;
+      "length_f64_cells", `Int cells;
+      "before_sha256", `String (sha256 before);
+      "after_sha256", `Null;
+      "unchanged", `Bool false;
+      "error", `String error;
+    ]
 
 let changed_span_result state (name, base, cells, before) =
-  let after = output_bytes state base cells in
-  let changed = not (String.equal before after) in
-  changed,
-  `Assoc [
-    "name", `String name;
-    "base_address", `Int base;
-    "length_f64_cells", `Int cells;
-    "before_sha256", `String (sha256 before);
-    "after_sha256", `String (sha256 after);
-    "changed", `Bool changed;
-  ]
+  match output_bytes_result state base cells with
+  | Ok after ->
+    let changed = not (String.equal before after) in
+    changed,
+    `Assoc [
+      "name", `String name;
+      "base_address", `Int base;
+      "length_f64_cells", `Int cells;
+      "before_sha256", `String (sha256 before);
+      "after_sha256", `String (sha256 after);
+      "changed", `Bool changed;
+    ]
+  | Error error ->
+    false,
+    `Assoc [
+      "name", `String name;
+      "base_address", `Int base;
+      "length_f64_cells", `Int cells;
+      "before_sha256", `String (sha256 before);
+      "after_sha256", `Null;
+      "changed", `Bool false;
+      "error", `String error;
+    ]
 
 let expected_output_subspan template =
   let output = assoc_field "output" template in
@@ -2270,20 +2350,32 @@ let snapshot_output_result template state active_before =
   | Some (_, base, cells, _), Some expected ->
     let expected_cells = int_field "length_f64_cells" expected in
     let expected_sha = string_field "sha256" expected in
-    let raw = output_bytes state base cells in
-    let observed_sha = sha256 raw in
-    let matched =
-      cells = expected_cells && String.equal observed_sha expected_sha
-    in
-    matched,
-    `Assoc [
-      "status", `String (if matched then "matched" else "mismatch");
-      "base_address", `Int base;
-      "length_f64_cells", `Int cells;
-      "expected_length_f64_cells", `Int expected_cells;
-      "expected_sha256", `String expected_sha;
-      "observed_sha256", `String observed_sha;
-    ]
+    (match output_bytes_result state base cells with
+     | Ok raw ->
+       let observed_sha = sha256 raw in
+       let matched =
+         cells = expected_cells && String.equal observed_sha expected_sha
+       in
+       matched,
+       `Assoc [
+         "status", `String (if matched then "matched" else "mismatch");
+         "base_address", `Int base;
+         "length_f64_cells", `Int cells;
+         "expected_length_f64_cells", `Int expected_cells;
+         "expected_sha256", `String expected_sha;
+         "observed_sha256", `String observed_sha;
+       ]
+     | Error error ->
+       false,
+       `Assoc [
+         "status", `String "mismatch";
+         "base_address", `Int base;
+         "length_f64_cells", `Int cells;
+         "expected_length_f64_cells", `Int expected_cells;
+         "expected_sha256", `String expected_sha;
+         "observed_sha256", `Null;
+         "error", `String error;
+       ])
   | None, _ ->
     false,
     `Assoc [
@@ -2324,7 +2416,7 @@ let active_output_span state registers unchanged_spans =
   | Some name, (_, _, cells, _) :: _ ->
     let reg = reg_for name registers in
     let base = Z.to_int (reg_z state reg) in
-    Some (capture_existing_span state "active_output" base cells)
+    capture_existing_span_result state "active_output" base cells
   | _ -> None
 
 let failure_expectation expected =
@@ -2629,13 +2721,7 @@ let execute_template root_dir entry =
     else
       List.map
         (function
-          | `Assoc fields ->
-            false,
-            `Assoc [
-              "name", `String (string_field "name" fields);
-              "matched", `Bool false;
-              "error", `String "vm_run_failed";
-            ]
+          | `Assoc fields -> unavailable_subspan_result fields "vm_run_failed"
           | _ -> fail "output subspan must be an object")
         subspans
   in
