@@ -259,6 +259,58 @@ let opt_hex_string = function
   | Some value -> hex_string value
   | None -> false
 
+let binding_string name fields =
+  match field name fields with
+  | Some (`String value) -> Some value
+  | _ -> None
+
+let binding_int name fields =
+  match field name fields with
+  | Some (`Int value) -> Some value
+  | Some (`Intlit value) ->
+    (try Some (int_of_string value) with Failure _ -> None)
+  | _ -> None
+
+let binding_empty_blockers fields =
+  match field "blockers" fields with
+  | Some (`List []) -> true
+  | _ -> false
+
+let matched_root_pair fields ~left ~right =
+  match binding_string left fields, binding_string right fields with
+  | Some left_root, Some right_root ->
+    String.equal left_root right_root && hex_string left_root
+  | _ -> false
+
+let profile_root_binding_matched fields =
+  opt_string_field "status" fields = Some "matched"
+  && opt_string_field "classification" fields = Some "none"
+  && matched_root_pair fields ~left:"numerical_profile_root" ~right:"profile_root"
+
+let vm_semantics_binding_matched fields =
+  opt_string_field "status" fields = Some "matched"
+  && opt_string_field "classification" fields = Some "none"
+  && matched_root_pair
+       fields
+       ~left:"vm_semantics_root"
+       ~right:"litenode_vm_semantics_root"
+
+let abi_declaration_binding_matched fields =
+  opt_string_field "status" fields = Some "matched"
+  && opt_string_field "classification" fields = Some "none"
+  && opt_string_field "evidence_scope" fields = Some "template_declaration"
+  && matched_root_pair
+       fields
+       ~left:"session_abi_root"
+       ~right:"litenode_session_abi_root"
+  && opt_string_field "entrypoint" fields = Some "advance"
+  && binding_int "label" fields = Some 100
+  && opt_string_field "output_base_register" fields = Some "r0"
+  && opt_string_field "output_count_register" fields = Some "r1"
+  && opt_string_field "output_count_unit" fields = Some "cells"
+  && binding_int "request_input_root_cell" fields = Some 1000
+  && binding_empty_blockers fields
+
 let unique values =
   List.sort_uniq String.compare values
 
@@ -773,10 +825,7 @@ let report_summary path =
       List.for_all
         (fun fields ->
            match opt_assoc_field "profile_root_binding" fields with
-           | Some binding_fields ->
-             (match opt_string_field "status" binding_fields with
-              | Some "matched" -> true
-              | _ -> false)
+           | Some binding_fields -> profile_root_binding_matched binding_fields
            | None -> false)
         result_fields
     in
@@ -789,10 +838,7 @@ let report_summary path =
       List.for_all
         (fun fields ->
            match opt_assoc_field "vm_semantics_binding" fields with
-           | Some binding_fields ->
-             (match opt_string_field "status" binding_fields with
-              | Some "matched" -> true
-              | _ -> false)
+           | Some binding_fields -> vm_semantics_binding_matched binding_fields
            | None -> false)
         result_fields
     in
@@ -805,10 +851,7 @@ let report_summary path =
       List.for_all
         (fun fields ->
            match opt_assoc_field "abi_declaration_binding" fields with
-           | Some binding_fields ->
-             (match opt_string_field "status" binding_fields with
-              | Some "matched" -> true
-              | _ -> false)
+           | Some binding_fields -> abi_declaration_binding_matched binding_fields
            | None -> false)
         result_fields
     in

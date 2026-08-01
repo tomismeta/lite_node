@@ -695,6 +695,37 @@ let replace_executable_abi_field name value = function
     replace_assoc_field "results" results report
   | _ -> failwith "report must be object"
 
+let replace_result_binding_field binding_name name value = function
+  | `Assoc fields as report ->
+    let results =
+      match assoc_value "results" fields with
+      | `List results ->
+        `List
+          (List.map
+             (function
+               | `Assoc result_fields ->
+                 let binding =
+                   match assoc_value binding_name result_fields with
+                   | `Assoc binding_fields ->
+                     `Assoc
+                       ((name, value)
+                        :: List.filter
+                             (fun (key, _) -> not (String.equal key name))
+                             binding_fields)
+                   | _ -> failwith (binding_name ^ " must be an object")
+                 in
+                 `Assoc
+                   ((binding_name, binding)
+                    :: List.filter
+                         (fun (key, _) -> not (String.equal key binding_name))
+                         result_fields)
+               | value -> value)
+             results)
+      | _ -> failwith "results must be a list"
+    in
+    replace_assoc_field "results" results report
+  | _ -> failwith "report must be object"
+
 let remove_failure_field name = function
   | `Assoc fields ->
     let results =
@@ -1594,6 +1625,35 @@ let check_matrix_rejects_profile_root_result_mismatch_with_gate_accepted () =
         (List.mem "profile_root_binding_mismatch" readiness_blockers)
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_profile_binding_forged_matched_roots () =
+  with_temp_dir (fun dir ->
+    let forged runner_sha system machine =
+      report ~runner_sha system machine
+      |> replace_result_binding_field
+           "profile_root_binding"
+           "profile_root"
+           (`String (hex_root '8'))
+    in
+    let a =
+      write_report dir "a.cjson" (forged (hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (forged (hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "profile binding forged matched roots exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "profile binding forged matched roots blocker"
+        (List.mem
+           "profile_root_binding_mismatch"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_failure_contract_result_mismatch_with_gate_accepted () =
   with_temp_dir (fun dir ->
     let a =
@@ -2247,6 +2307,64 @@ let check_matrix_rejects_vm_semantics_binding_mismatch () =
        | _ -> failwith "missing report rows")
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_vm_semantics_binding_forged_matched_roots () =
+  with_temp_dir (fun dir ->
+    let forged runner_sha system machine =
+      report ~runner_sha system machine
+      |> replace_result_binding_field
+           "vm_semantics_binding"
+           "litenode_vm_semantics_root"
+           (`String (hex_root '8'))
+    in
+    let a =
+      write_report dir "a.cjson" (forged (hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (forged (hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "vm semantics forged matched roots exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "vm semantics forged matched roots blocker"
+        (List.mem
+           "vm_semantics_binding_mismatch"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_abi_declaration_binding_forged_matched_roots () =
+  with_temp_dir (fun dir ->
+    let forged runner_sha system machine =
+      report ~runner_sha system machine
+      |> replace_result_binding_field
+           "abi_declaration_binding"
+           "litenode_session_abi_root"
+           (`String (hex_root '8'))
+    in
+    let a =
+      write_report dir "a.cjson" (forged (hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (forged (hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "ABI declaration forged matched roots exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "ABI declaration forged matched roots blocker"
+        (List.mem
+           "abi_declaration_binding_mismatch"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_same_platform () =
   with_temp_dir (fun dir ->
     let a =
@@ -2292,6 +2410,7 @@ let () =
   check_matrix_rejects_opcode_effort_mismatch ();
   check_matrix_rejects_profile_root_binding_mismatch ();
   check_matrix_rejects_profile_root_result_mismatch_with_gate_accepted ();
+  check_matrix_rejects_profile_binding_forged_matched_roots ();
   check_matrix_rejects_failure_contract_result_mismatch_with_gate_accepted ();
   check_matrix_rejects_missing_failure_contract_with_gate_accepted ();
   check_matrix_rejects_q1_failure_contract_missing_payload ();
@@ -2317,4 +2436,6 @@ let () =
   check_matrix_rejects_executable_abi_binding_mismatch ();
   check_matrix_prioritizes_executable_abi_not_run ();
   check_matrix_rejects_vm_semantics_binding_mismatch ();
+  check_matrix_rejects_vm_semantics_binding_forged_matched_roots ();
+  check_matrix_rejects_abi_declaration_binding_forged_matched_roots ();
   check_matrix_rejects_same_platform ()
