@@ -110,10 +110,17 @@ type output_contract =
       output_count : int;
     }
 
+type prior_state_contract =
+  | Prior_selected_index_u64le of {
+      source_transition_id : string;
+      offset : int;
+    }
+
 type session_transition = {
   transition_id : string;
   phase : string;
   output_contract : output_contract option;
+  prior_state_contract : prior_state_contract option;
   stage : batch_stage;
 }
 
@@ -142,9 +149,13 @@ type batch_stage_result = {
 
 type session_stage_result = {
   session_stage_json : Yojson.Safe.t;
+  session_stage_transition_id : string;
   session_stage_phase : string;
-  session_stage_output_payload : string;
-  session_stage_output_root : string;
+  session_stage_output_payload : string option;
+  session_stage_output_root : string option;
+  session_stage_selected_index : string option;
+  session_stage_prior_state_contract_bound : bool;
+  session_stage_prior_state_contract_mismatch : bool;
   session_stage_committed_state_transport_bound : bool;
   session_stage_output_contract_mismatch : bool;
   session_stage_decode_token_contract_bound : bool;
@@ -1055,12 +1066,50 @@ let parse_output_contract = function
           Error ("unsupported output_contract kind: " ^ kind)))
   | _ -> Error "output_contract must be an object"
 
+let parse_prior_state_contract = function
+  | `Assoc fields ->
+    (match
+       check_known fields ["kind"; "source_transition_id"; "offset"]
+     with
+     | Error error -> Error error
+     | Ok () ->
+       (match
+          string_field "kind" fields,
+          string_field "source_transition_id" fields,
+          int_field "offset" fields
+        with
+        | Error error, _, _
+        | _, Error error, _
+        | _, _, Error error -> Error error
+        | Ok "previous_selected_index_u64le",
+          Ok source_transition_id,
+          Ok offset ->
+          if source_transition_id = "" then
+            Error "prior_state_contract source_transition_id must not be empty"
+          else if offset < 0 then
+            Error "prior_state_contract offset must be non-negative"
+          else
+            Ok (Prior_selected_index_u64le { source_transition_id; offset })
+        | Ok kind, Ok _, Ok _ ->
+          Error ("unsupported prior_state_contract kind: " ^ kind)))
+  | _ -> Error "prior_state_contract must be an object"
+
 let optional_output_contract fields =
   match optional_field "output_contract" fields with
   | Ok None -> Ok None
   | Ok (Some `Null) -> Ok None
   | Ok (Some value) ->
     (match parse_output_contract value with
+     | Ok contract -> Ok (Some contract)
+     | Error error -> Error error)
+  | Error error -> Error error
+
+let optional_prior_state_contract fields =
+  match optional_field "prior_state_contract" fields with
+  | Ok None -> Ok None
+  | Ok (Some `Null) -> Ok None
+  | Ok (Some value) ->
+    (match parse_prior_state_contract value with
      | Ok contract -> Ok (Some contract)
      | Error error -> Error error)
   | Error error -> Error error
@@ -1307,7 +1356,15 @@ let valid_session_phase = function
 let parse_session_transition ~bundle_base ~top_support = function
   | `Assoc fields ->
     (match
-       check_known fields ["transition_id"; "phase"; "output_contract"; "stage"]
+       check_known
+         fields
+         [
+           "transition_id";
+           "phase";
+           "output_contract";
+           "prior_state_contract";
+           "stage";
+         ]
      with
      | Error error -> Error error
      | Ok () ->
@@ -1315,12 +1372,23 @@ let parse_session_transition ~bundle_base ~top_support = function
           string_field "transition_id" fields,
           string_field "phase" fields,
           optional_output_contract fields,
+          optional_prior_state_contract fields,
           field "stage" fields
         with
-        | Ok transition_id, Ok phase, Ok output_contract, Ok stage_json ->
+        | Ok transition_id,
+          Ok phase,
+          Ok output_contract,
+          Ok prior_state_contract,
+          Ok stage_json ->
           if transition_id = "" then Error "transition_id must not be empty"
           else if not (valid_session_phase phase) then
             Error ("unsupported session transition phase: " ^ phase)
+          else if
+            (match prior_state_contract with
+             | Some _ -> not (String.equal phase "decode")
+             | None -> false)
+          then
+            Error "prior_state_contract requires decode phase"
           else
             (match
                parse_batch_stage
@@ -1329,11 +1397,19 @@ let parse_session_transition ~bundle_base ~top_support = function
                  stage_json
              with
              | Error error -> Error error
-             | Ok stage -> Ok { transition_id; phase; output_contract; stage })
-        | Error error, _, _, _
-        | _, Error error, _, _
-        | _, _, Error error, _
-        | _, _, _, Error error -> Error error))
+             | Ok stage ->
+               Ok {
+                 transition_id;
+                 phase;
+                 output_contract;
+                 prior_state_contract;
+                 stage;
+               })
+        | Error error, _, _, _, _
+        | _, Error error, _, _, _
+        | _, _, Error error, _, _
+        | _, _, _, Error error, _
+        | _, _, _, _, Error error -> Error error))
   | _ -> Error "session transition must be an object"
 
 let parse_session_bundle_json session_path (json : Yojson.Safe.t) =
@@ -1485,6 +1561,16 @@ let output_contract_declared_json = function
       "output_count", `Int output_count;
     ]
 
+let prior_state_contract_declared_json = function
+  | None -> `Null
+  | Some (Prior_selected_index_u64le { source_transition_id; offset }) ->
+    `Assoc [
+      "kind", `String "previous_selected_index_u64le";
+      "source_transition_id", `String source_transition_id;
+      "offset", `Int offset;
+      "encoding", `String "u64le";
+    ]
+
 let string_starts_with ~prefix value =
   let prefix_length = String.length prefix in
   String.length value >= prefix_length
@@ -1559,6 +1645,7 @@ type output_contract_check = {
   output_contract_json : Yojson.Safe.t;
   output_contract_mismatch : bool;
   decode_token_contract_bound : bool;
+  selected_index : string option;
 }
 
 let output_contract_check transition output_payload =
@@ -1573,6 +1660,7 @@ let output_contract_check transition output_payload =
         ];
       output_contract_mismatch = false;
       decode_token_contract_bound = not decode_phase;
+      selected_index = None;
     }
   | Some (Selected_index { output_base; output_count }) ->
     let declared =
@@ -1593,6 +1681,7 @@ let output_contract_check transition output_payload =
              @ declared);
         output_contract_mismatch = true;
         decode_token_contract_bound = false;
+        selected_index = None;
       }
     in
     (match parse_token_output_payload output_payload with
@@ -1616,8 +1705,136 @@ let output_contract_check transition output_payload =
                      @ declared);
                 output_contract_mismatch = false;
                 decode_token_contract_bound = true;
+                selected_index = Some selected_index;
               })
          | _ -> mismatch "output_value_count_mismatch")
+
+type prior_state_contract_check = {
+  prior_state_contract_json : Yojson.Safe.t;
+  prior_state_contract_bound : bool;
+  prior_state_contract_mismatch : bool;
+}
+
+let u64_max = Z.pred (Z.shift_left Z.one 64)
+
+let parse_u64_decimal value =
+  if not (decimal_digits value) then Error "value is not a u64 decimal"
+  else
+    let parsed = Z.of_string value in
+    if Z.sign parsed < 0 || Z.compare parsed u64_max > 0 then
+      Error "value is outside u64 range"
+    else Ok parsed
+
+let u64le_bytes value =
+  let byte_mask = Z.of_int 0xff in
+  Bytes.init 8 (fun index ->
+    value
+    |> fun z -> Z.shift_right z (index * 8)
+    |> fun z -> Z.logand z byte_mask
+    |> Z.to_int
+    |> Char.chr)
+  |> Bytes.to_string
+
+let prior_state_contract_check
+    ~previous_decode_selected_index
+    transition
+    prior_committed_target_state_payload =
+  match transition.prior_state_contract with
+  | None ->
+    {
+      prior_state_contract_json =
+        `Assoc [
+          "status", `String "not_declared";
+          "kind", `Null;
+        ];
+      prior_state_contract_bound = false;
+      prior_state_contract_mismatch = false;
+    }
+  | Some (Prior_selected_index_u64le { source_transition_id; offset }) ->
+    let declared =
+      [
+        "kind", `String "previous_selected_index_u64le";
+        "source_transition_id", `String source_transition_id;
+        "offset", `Int offset;
+        "encoding", `String "u64le";
+      ]
+    in
+    let mismatch reason extra =
+      {
+        prior_state_contract_json =
+          `Assoc
+            ([
+              "status", `String "mismatch";
+              "reason", `String reason;
+            ]
+             @ extra
+             @ declared);
+        prior_state_contract_bound = false;
+        prior_state_contract_mismatch = true;
+      }
+    in
+    (match
+       previous_decode_selected_index,
+       prior_committed_target_state_payload
+     with
+     | None, _ ->
+       mismatch "previous_decode_selected_index_missing" []
+     | Some (previous_transition_id, selected_index), _
+       when not (String.equal source_transition_id previous_transition_id) ->
+       mismatch
+         "source_transition_not_previous_decode"
+         [
+           "previous_decode_transition_id",
+           `String previous_transition_id;
+           "selected_index", `String selected_index;
+         ]
+     | Some (_, selected_index), None ->
+       mismatch
+         "prior_committed_target_state_payload_missing"
+         ["selected_index", `String selected_index]
+     | Some (_, selected_index), Some payload ->
+       (match parse_u64_decimal selected_index with
+        | Error reason ->
+          mismatch reason ["selected_index", `String selected_index]
+        | Ok value ->
+          let expected = u64le_bytes value in
+          let payload_length = String.length payload in
+          let required_length = String.length expected in
+          if
+            payload_length < required_length
+            || offset > payload_length - required_length
+          then
+            mismatch
+              "prior_committed_target_state_payload_too_short"
+              [
+                "selected_index", `String selected_index;
+                "payload_bytes", `Int payload_length;
+                "required_bytes", `Int required_length;
+              ]
+          else
+            let actual =
+              String.sub payload offset required_length
+            in
+            if String.equal actual expected then
+              {
+                prior_state_contract_json =
+                  `Assoc
+                    ([
+                      "status", `String "matched";
+                      "selected_index", `String selected_index;
+                      "payload_bytes", `Int (String.length payload);
+                    ]
+                     @ declared);
+                prior_state_contract_bound = true;
+                prior_state_contract_mismatch = false;
+              }
+            else
+              mismatch
+                "prior_committed_target_state_payload_mismatch"
+                [
+                  "selected_index", `String selected_index;
+                  "payload_bytes", `Int (String.length payload);
+                ]))
 
 let batch_cache () =
   {
@@ -1960,7 +2177,10 @@ let prepare_session_transition ~cache ~timing_mode transition =
     prepared_timer = timer;
   }
 
-let run_prepared_session_transition session prepared_transition =
+let run_prepared_session_transition
+    ~previous_decode_selected_index
+    session
+    prepared_transition =
   let timer = prepared_transition.prepared_timer in
   let prepared = prepared_transition.prepared_stage in
   let transition = prepared_transition.prepared_transition in
@@ -1980,6 +2200,93 @@ let run_prepared_session_transition session prepared_transition =
       String.length payload > 0 && String.equal (sha256 payload) root
     | _ -> false
   in
+  let prior_state_contract =
+    prior_state_contract_check
+      ~previous_decode_selected_index
+      transition
+      prior_committed_target_state_payload
+  in
+  if prior_state_contract.prior_state_contract_mismatch then
+    let unsupported =
+      unsupported_opcode_names prepared.prepared_violations
+    in
+    let missing =
+      missing_capability_names prepared.prepared_violations
+    in
+    let violation_values =
+      List.map violation_json prepared.prepared_violations
+    in
+    let transition_json =
+      `Assoc [
+        "transition_id", `String transition.transition_id;
+        "phase", `String transition.phase;
+        "stage_id", `String transition.stage.stage_id;
+        "status", `String "prior_state_contract_mismatch";
+        "session_status", `String "not_run";
+        "reference_status", `String "unchecked";
+        "program_root", `String prepared.prepared_program_root;
+        "target_root", `String prepared.prepared_target_root;
+        "request_root", `String prepared.prepared_request_root;
+        "model_ranges_root", `String prepared.prepared_model_ranges_root;
+        "program_instructions",
+        `Int (Array.length (Admission.code prepared.prepared_admitted));
+        "unsupported_opcodes", list_json unsupported;
+        "missing_capabilities", list_json missing;
+        "policy_violations", `List violation_values;
+        "prior_session_root", `String prior_session_root;
+        "prior_committed_target_state_root",
+        nullable_string_json prior_committed_target_state_root;
+        "prior_committed_target_state_payload_sha256",
+        nullable_string_json
+          (Option.map sha256 prior_committed_target_state_payload);
+        "prior_committed_target_state_payload_bytes",
+        (match prior_committed_target_state_payload with
+         | None -> `Null
+         | Some payload -> `Int (String.length payload));
+        "committed_state_transport_bound",
+        `Bool committed_state_transport_bound;
+        "advanced_session_root", `Null;
+        "advance_receipt_root", `Null;
+        "output_contract",
+        `Assoc [
+          "status", `String "not_run";
+          "declared",
+          output_contract_declared_json transition.output_contract;
+        ];
+        "prior_state_contract",
+        prior_state_contract.prior_state_contract_json;
+        "output_payload", `Null;
+        "output_payload_sha256", `Null;
+        "output_root", `Null;
+        "output_prefix_root", `Null;
+        "committed_target_state_root", `Null;
+        "committed_target_state_payload_sha256", `Null;
+        "committed_target_state_payload_bytes", `Null;
+        "candidate_root", `Null;
+        "effort_delta", `Int 0;
+        "consensus_accepted", `Bool false;
+      ]
+    in
+    session,
+    {
+      session_stage_json = transition_json;
+      session_stage_transition_id = transition.transition_id;
+      session_stage_phase = transition.phase;
+      session_stage_output_payload = None;
+      session_stage_output_root = None;
+      session_stage_selected_index = None;
+      session_stage_prior_state_contract_bound = false;
+      session_stage_prior_state_contract_mismatch = true;
+      session_stage_committed_state_transport_bound =
+        committed_state_transport_bound;
+      session_stage_output_contract_mismatch = false;
+      session_stage_decode_token_contract_bound = false;
+      session_stage_reference_mismatch = false;
+      session_stage_unsupported_opcodes = unsupported;
+      session_stage_missing_capabilities = missing;
+      session_stage_policy_violations = violation_values;
+    }
+  else
   let advanced, advance_receipt, execution_profile, opcode_profile =
     match timer.mode with
     | Timing_opcode ->
@@ -2028,6 +2335,8 @@ let run_prepared_session_transition session prepared_transition =
   let stage_status =
     if output_contract.output_contract_mismatch then
       "output_contract_mismatch"
+    else if prior_state_contract.prior_state_contract_mismatch then
+      "prior_state_contract_mismatch"
     else if reference_mismatch then "reference_mismatch"
     else "accepted"
   in
@@ -2069,6 +2378,8 @@ let run_prepared_session_transition session prepared_transition =
         "advanced_session_root", `String (Session.root advanced);
         "advance_receipt_root", `String (Receipt.root advance_receipt);
         "output_contract", output_contract.output_contract_json;
+        "prior_state_contract",
+        prior_state_contract.prior_state_contract_json;
         "output_payload", `String output_payload;
         "output_payload_sha256", `String (sha256 output_payload);
         "output_root", `String output_root;
@@ -2097,9 +2408,15 @@ let run_prepared_session_transition session prepared_transition =
   advanced,
   {
     session_stage_json = transition_json;
+    session_stage_transition_id = transition.transition_id;
     session_stage_phase = transition.phase;
-    session_stage_output_payload = output_payload;
-    session_stage_output_root = output_root;
+    session_stage_output_payload = Some output_payload;
+    session_stage_output_root = Some output_root;
+    session_stage_selected_index = output_contract.selected_index;
+    session_stage_prior_state_contract_bound =
+      prior_state_contract.prior_state_contract_bound;
+    session_stage_prior_state_contract_mismatch =
+      prior_state_contract.prior_state_contract_mismatch;
     session_stage_committed_state_transport_bound =
       committed_state_transport_bound;
     session_stage_output_contract_mismatch =
@@ -2263,6 +2580,9 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
                  "phase", `String transition.phase;
                  "output_contract",
                  output_contract_declared_json transition.output_contract;
+                 "prior_state_contract",
+                 prior_state_contract_declared_json
+                   transition.prior_state_contract;
                ]
                 @ fields)
            | value -> value
@@ -2483,13 +2803,21 @@ let missing_resident_runtime_capabilities =
 
 let remaining_session_runtime_capabilities
     ~decode_token_contract_bound
+    ~decode_prior_state_contract_required
+    ~decode_prior_state_contract_bound
     ~committed_state_transport_bound =
   `List
     ((if committed_state_transport_bound then []
       else [`String "committed_target_state_payload_transport"])
      @
-     if decode_token_contract_bound then []
-     else [`String "decode_loop_token_contract"])
+     (if decode_token_contract_bound then []
+      else [`String "decode_loop_token_contract"])
+     @
+     if
+       decode_prior_state_contract_required
+       && not decode_prior_state_contract_bound
+     then [`String "decode_loop_prior_state_contract"]
+     else [])
 
 let independent_batch_runtime_semantics =
   `Assoc [
@@ -2522,6 +2850,7 @@ let session_runtime_semantics
     ~runtime_readiness_status
     ~next_runtime_blocker
     ~decode_token_contract_status
+    ~decode_prior_state_contract_status
     ~missing_runtime_capabilities
     ~committed_state_supported
     ~committed_state_transport_bound
@@ -2569,6 +2898,8 @@ let session_runtime_semantics
     "runtime_readiness_status", `String runtime_readiness_status;
     "next_runtime_blocker", `String next_runtime_blocker;
     "decode_token_contract_status", `String decode_token_contract_status;
+    "decode_prior_state_contract_status",
+    `String decode_prior_state_contract_status;
     "missing_runtime_capabilities",
     missing_runtime_capabilities;
   ]
@@ -2585,6 +2916,8 @@ let transition_report_json ?output_contract transition stage_json =
       [
         "transition_id", `String transition.transition_id;
         "phase", `String transition.phase;
+        "prior_state_contract",
+        prior_state_contract_declared_json transition.prior_state_contract;
       ]
       @ contract_fields
       @ fields)
@@ -2649,6 +2982,10 @@ let last_string values =
   | [] -> None
   | value :: _ -> Some value
 
+let list_tail = function
+  | [] -> []
+  | _ :: rest -> rest
+
 let run_resident_inference_session ~cache ~prepared_transitions bundle =
   let first_plan =
     match prepared_transitions with
@@ -2660,15 +2997,31 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     | Error error -> fail (Session.error_message error)
     | Ok opened -> opened
   in
-  let final_advanced, results =
-    List.fold_left
-      (fun (session, results) prepared ->
-         let advanced, result =
-           run_prepared_session_transition session prepared
-         in
-         advanced, result :: results)
-      (opened, [])
-      prepared_transitions
+  let rec run_loop session results previous_decode_selected_index = function
+    | [] -> session, results, previous_decode_selected_index
+    | prepared :: rest ->
+      let advanced, result =
+        run_prepared_session_transition
+          ~previous_decode_selected_index
+          session
+          prepared
+      in
+      let previous_decode_selected_index =
+        if String.equal result.session_stage_phase "decode" then
+          match result.session_stage_selected_index with
+          | None -> previous_decode_selected_index
+          | Some selected_index ->
+            Some (result.session_stage_transition_id, selected_index)
+        else previous_decode_selected_index
+      in
+      let results = result :: results in
+      if result.session_stage_prior_state_contract_mismatch then
+        advanced, results, previous_decode_selected_index
+      else
+        run_loop advanced results previous_decode_selected_index rest
+  in
+  let final_advanced, results, _ =
+    run_loop opened [] None prepared_transitions
   in
   let results = List.rev results in
   let finalized, final_receipt =
@@ -2708,6 +3061,11 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       (fun result -> result.session_stage_output_contract_mismatch)
       results
   in
+  let prior_state_contract_mismatch =
+    List.exists
+      (fun result -> result.session_stage_prior_state_contract_mismatch)
+      results
+  in
   let decode_results =
     List.filter
       (fun result -> String.equal result.session_stage_phase "decode")
@@ -2724,6 +3082,23 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     else if decode_token_contract_bound then "bound"
     else "not_bound"
   in
+  let decode_feedback_results = list_tail decode_results in
+  let decode_prior_state_contract_required =
+    List.length decode_results > 1
+  in
+  let decode_prior_state_contract_bound =
+    not decode_prior_state_contract_required
+    || List.for_all
+         (fun result ->
+            result.session_stage_prior_state_contract_bound)
+         decode_feedback_results
+  in
+  let decode_prior_state_contract_status =
+    if prior_state_contract_mismatch then "mismatch"
+    else if not decode_prior_state_contract_required then "not_required"
+    else if decode_prior_state_contract_bound then "bound"
+    else "not_bound"
+  in
   let first_session_abi_root =
     (Plan.target first_plan).Target.session_abi_root
   in
@@ -2738,18 +3113,27 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
   in
   let next_runtime_blocker =
     if output_contract_mismatch then "decode_loop_token_contract_mismatch"
+    else if prior_state_contract_mismatch then
+      "decode_loop_prior_state_contract_mismatch"
     else if not committed_state_transport_bound then
       "committed_target_state_payload_transport_not_bound"
-    else if not decode_token_contract_bound then "decode_loop_token_contract_not_bound"
+    else if not decode_token_contract_bound then
+      "decode_loop_token_contract_not_bound"
+    else if not decode_prior_state_contract_bound then
+      "decode_loop_prior_state_contract_not_bound"
     else "none"
   in
   let missing_runtime_capabilities =
     remaining_session_runtime_capabilities
       ~decode_token_contract_bound
+      ~decode_prior_state_contract_required
+      ~decode_prior_state_contract_bound
       ~committed_state_transport_bound
   in
   let status =
     if output_contract_mismatch then "output_contract_mismatch"
+    else if prior_state_contract_mismatch then
+      "prior_state_contract_mismatch"
     else if reference_mismatch then "reference_mismatch"
     else if not (String.equal next_runtime_blocker "none") then
       "runtime_incomplete"
@@ -2757,12 +3141,12 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
   in
   let last_transition_output_root =
     results
-    |> List.map (fun result -> result.session_stage_output_root)
+    |> List.filter_map (fun result -> result.session_stage_output_root)
     |> last_string
   in
   let last_transition_output_payload =
     results
-    |> List.map (fun result -> result.session_stage_output_payload)
+    |> List.filter_map (fun result -> result.session_stage_output_payload)
     |> last_string
   in
   let runtime_semantics =
@@ -2771,6 +3155,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       ~runtime_readiness_status:"resident_session_candidate"
       ~next_runtime_blocker
       ~decode_token_contract_status
+      ~decode_prior_state_contract_status
       ~missing_runtime_capabilities
       ~committed_state_supported
       ~committed_state_transport_bound
@@ -2866,6 +3251,8 @@ let run_inference_session_file ~timing_mode path =
           preflight.continuation_runtime_readiness_status
         ~next_runtime_blocker:preflight.continuation_next_runtime_blocker
         ~decode_token_contract_status:"not_bound"
+        ~decode_prior_state_contract_status:
+          (if bundle.decode_steps <= 1 then "not_required" else "not_bound")
         ~missing_runtime_capabilities:missing_resident_runtime_capabilities
         ~committed_state_supported:false
         ~committed_state_transport_bound:false
@@ -2958,6 +3345,7 @@ let run_inference_session_file ~timing_mode path =
         ~next_runtime_blocker:
           "session_continuation_state_carry_not_supported"
         ~decode_token_contract_status
+        ~decode_prior_state_contract_status:"not_required"
         ~missing_runtime_capabilities:missing_resident_runtime_capabilities
         ~committed_state_supported:false
         ~committed_state_transport_bound:false

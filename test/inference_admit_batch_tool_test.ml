@@ -269,6 +269,18 @@ let continuation_token_code =
 let committed_state_payload = "state:0"
 let committed_state_payload_root = sha256 committed_state_payload
 
+let selected_index_u64le_payload index =
+  Bytes.init 8 (fun offset ->
+    Char.chr ((index lsr (offset * 8)) land 0xff))
+  |> Bytes.to_string
+
+let feedback_prefill_payload = "prefill"
+let feedback_selected_index = 258
+let feedback_selected_index_offset = 2
+let feedback_selected_index_payload =
+  "ix" ^ selected_index_u64le_payload feedback_selected_index
+let feedback_selected_index_payload_root = sha256 feedback_selected_index_payload
+
 let committed_state_token_code =
   [|
     VM.JDEST Abi.advance_label;
@@ -295,11 +307,56 @@ let committed_state_token_code =
     VM.STOP;
   |]
 
+let committed_state_feedback_code =
+  [|
+    VM.JDEST Abi.advance_label;
+    VM.MLOAD (20, Abi.sequence_cell);
+    VM.LDI (21, VM.VInt Z.zero);
+    VM.EQ (22, 20, 21);
+    VM.JIF (22, 101);
+    VM.LDI (21, VM.VInt Z.one);
+    VM.EQ (22, 20, 21);
+    VM.JIF (22, 102);
+    VM.MLOAD (5, Abi.committed_target_state_root_cell);
+    VM.FLOAD (6, 5);
+    VM.MSTORE (30, 6);
+    VM.LDI (2, VM.VInt (Z.of_int feedback_selected_index));
+    VM.MSTORE (10, 2);
+    VM.LDI (0, VM.VInt (Z.of_int 10));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+    VM.JDEST 101;
+    VM.LDI (5, VM.VString feedback_prefill_payload);
+    VM.FSTORE (6, 5);
+    VM.MSTORE (Abi.committed_target_state_root_cell, 6);
+    VM.LDI (2, VM.VInt Z.zero);
+    VM.MSTORE (10, 2);
+    VM.LDI (0, VM.VInt (Z.of_int 10));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+    VM.JDEST 102;
+    VM.LDI (5, VM.VString feedback_selected_index_payload);
+    VM.FSTORE (6, 5);
+    VM.MSTORE (Abi.committed_target_state_root_cell, 6);
+    VM.LDI (2, VM.VInt (Z.of_int feedback_selected_index));
+    VM.MSTORE (10, 2);
+    VM.LDI (0, VM.VInt (Z.of_int 10));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+  |]
+
 let selected_index_contract ?(output_base = 10) () =
   `Assoc [
     "kind", `String "selected_index";
     "output_base", `Int output_base;
     "output_count", `Int 1;
+  ]
+
+let selected_index_feedback_contract ?(offset = 0) source_transition_id =
+  `Assoc [
+    "kind", `String "previous_selected_index_u64le";
+    "source_transition_id", `String source_transition_id;
+    "offset", `Int offset;
   ]
 
 let write_batch_fixture
@@ -480,6 +537,7 @@ let write_session_bundle_fixture
     ?code
     ?phase_for_index
     ?output_contract_for_index
+    ?prior_state_contract_for_index
     ?request_root
     ?model_deployment_root
     ?second_request_nonce
@@ -520,6 +578,14 @@ let write_session_bundle_fixture
               | None -> []
               | Some value -> ["output_contract", value])
          in
+         let prior_state_contract_fields =
+           match prior_state_contract_for_index with
+           | None -> []
+           | Some prior_state_contract ->
+             (match prior_state_contract index with
+              | None -> []
+              | Some value -> ["prior_state_contract", value])
+         in
          `Assoc
            ([
              "transition_id", `String (Printf.sprintf "token-%03d" index);
@@ -533,6 +599,7 @@ let write_session_bundle_fixture
                   else "decode");
            ]
             @ output_contract_fields
+            @ prior_state_contract_fields
             @ [
               "stage", (if index = 1 then second_stage else stage);
             ]))
@@ -1465,6 +1532,217 @@ let check_session_bundle_binds_committed_state_transport () =
      | _ -> failwith "expected two committed-state transitions")
   | _ -> failwith "report must be an object"
 
+let check_session_bundle_binds_decode_prior_state_contract () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~decode_steps:(Some 2)
+      ~session_abi_root:Abi.committed_state_root
+      ~code:committed_state_feedback_code
+      ~output_contract_for_index:(fun index ->
+        if index > 0 then Some (selected_index_contract ())
+        else None)
+      ~prior_state_contract_for_index:(fun index ->
+        if index = 2 then
+          Some
+            (selected_index_feedback_contract
+               ~offset:feedback_selected_index_offset
+               "token-001")
+        else None)
+      ~transition_count:3
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "feedback-contract bundle exits cleanly" (code = 0);
+  match report with
+  | `Assoc fields ->
+    check
+      "feedback-contract bundle accepted"
+      (String.equal (string_json "status" fields) "accepted");
+    check
+      "feedback blocker cleared"
+      (String.equal (string_json "next_runtime_blocker" fields) "none");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "feedback decode token contract bound"
+      (String.equal
+         (string_json "decode_token_contract_status" semantics)
+         "bound");
+    check
+      "feedback contract bound"
+      (String.equal
+         (string_json "decode_prior_state_contract_status" semantics)
+         "bound");
+    check
+      "feedback missing capabilities clear"
+      (list_json "missing_runtime_capabilities" semantics = []);
+    check_session_hash report;
+    (match list_json "transitions" fields with
+     | [`Assoc prefill; `Assoc first_decode; `Assoc second_decode] ->
+       check
+         "prefill prior feedback absent"
+         (String.equal
+            (string_json
+               "status"
+               (assoc_json "prior_state_contract" prefill))
+            "not_declared");
+       check
+         "first decode feedback absent"
+         (String.equal
+            (string_json
+               "status"
+               (assoc_json "prior_state_contract" first_decode))
+            "not_declared");
+       let feedback =
+         assoc_json "prior_state_contract" second_decode
+       in
+       check
+         "second decode feedback matched"
+         (String.equal (string_json "status" feedback) "matched");
+       check
+         "second decode feedback kind"
+         (String.equal
+            (string_json "kind" feedback)
+            "previous_selected_index_u64le");
+       check
+         "second decode feedback source"
+         (String.equal
+            (string_json "source_transition_id" feedback)
+            "token-001");
+       check
+         "second decode feedback index"
+         (String.equal
+            (string_json "selected_index" feedback)
+            (string_of_int feedback_selected_index));
+       check
+         "second decode prior state root"
+         (String.equal
+            (string_json
+               "prior_committed_target_state_root"
+               second_decode)
+            feedback_selected_index_payload_root);
+       check
+         "last transition payload"
+         (String.equal
+            (string_json "last_transition_output_payload" fields)
+            ("base=10|length=1|values=int:"
+             ^ string_of_int feedback_selected_index))
+     | _ -> failwith "expected three feedback transitions")
+  | _ -> failwith "report must be an object"
+
+let check_session_bundle_rejects_decode_prior_state_contract_mismatch () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~decode_steps:(Some 2)
+      ~session_abi_root:Abi.committed_state_root
+      ~code:committed_state_feedback_code
+      ~output_contract_for_index:(fun index ->
+        if index > 0 then Some (selected_index_contract ())
+        else None)
+      ~prior_state_contract_for_index:(fun index ->
+        if index = 2 then
+          Some
+            (selected_index_feedback_contract
+               ~offset:(feedback_selected_index_offset + 1)
+               "token-001")
+        else None)
+      ~transition_count:3
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "feedback-contract mismatch exits nonzero" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check
+      "feedback-contract mismatch status"
+      (String.equal
+         (string_json "status" fields)
+         "prior_state_contract_mismatch");
+    check
+      "feedback-contract mismatch blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "decode_loop_prior_state_contract_mismatch");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "feedback contract mismatch status"
+      (String.equal
+         (string_json "decode_prior_state_contract_status" semantics)
+         "mismatch");
+    check_session_hash report;
+    (match list_json "transitions" fields with
+     | [_; _; `Assoc second_decode] ->
+       check
+         "second decode transition mismatch"
+         (String.equal
+            (string_json "status" second_decode)
+            "prior_state_contract_mismatch");
+       let feedback =
+         assoc_json "prior_state_contract" second_decode
+       in
+       check
+         "second decode feedback mismatch"
+         (String.equal (string_json "status" feedback) "mismatch");
+       check
+         "second decode feedback mismatch reason"
+         (String.equal
+            (string_json "reason" feedback)
+            "prior_committed_target_state_payload_too_short")
+     | _ -> failwith "expected three feedback transitions")
+  | _ -> failwith "report must be an object"
+
+let check_session_bundle_rejects_nonadjacent_prior_state_contract () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~decode_steps:(Some 2)
+      ~session_abi_root:Abi.committed_state_root
+      ~code:committed_state_feedback_code
+      ~output_contract_for_index:(fun index ->
+        if index > 0 then Some (selected_index_contract ())
+        else None)
+      ~prior_state_contract_for_index:(fun index ->
+        if index = 2 then
+          Some
+            (selected_index_feedback_contract
+               ~offset:feedback_selected_index_offset
+               "token-000")
+        else None)
+      ~transition_count:3
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "nonadjacent prior-state exits nonzero" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check
+      "nonadjacent prior-state status"
+      (String.equal
+         (string_json "status" fields)
+         "prior_state_contract_mismatch");
+    check
+      "nonadjacent prior-state blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "decode_loop_prior_state_contract_mismatch");
+    check_session_hash report;
+    (match list_json "transitions" fields with
+     | [_; _; `Assoc second_decode] ->
+       let contract = assoc_json "prior_state_contract" second_decode in
+       check
+         "nonadjacent prior-state mismatch reason"
+         (String.equal
+            (string_json "reason" contract)
+            "source_transition_not_previous_decode");
+       check
+         "nonadjacent prior-state previous decode"
+         (String.equal
+            (string_json "previous_decode_transition_id" contract)
+            "token-001")
+     | _ -> failwith "expected three prior-state transitions")
+  | _ -> failwith "report must be an object"
+
 let check_session_bundle_rejects_multiple_prefills () =
   with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
   let bundle_path =
@@ -1762,6 +2040,9 @@ let () =
   check_session_bundle_accepts_v2_multi_transition ();
   check_session_bundle_binds_decode_token_contract ();
   check_session_bundle_binds_committed_state_transport ();
+  check_session_bundle_binds_decode_prior_state_contract ();
+  check_session_bundle_rejects_decode_prior_state_contract_mismatch ();
+  check_session_bundle_rejects_nonadjacent_prior_state_contract ();
   check_session_bundle_rejects_multiple_prefills ();
   check_session_bundle_rejects_decode_token_contract_mismatch ();
   check_session_bundle_rejects_invalid_phase_order ();

@@ -238,7 +238,26 @@ let resident_lifecycle_json =
         `List [
           `String "vocabulary_bounds";
           `String "argmax_algorithm_correctness";
-          `String "autoregressive_feedback";
+        ];
+      ];
+    ];
+    "prior_state_contracts",
+    `Assoc [
+      "previous_selected_index_u64le",
+      `Assoc [
+        "authority", `String "decode-prior-state-inclusion";
+        "source", `String "prior committed target-state payload";
+        "encoding", `String "little-endian-u64";
+        "binding",
+        `String
+          "selected_index emitted by a previous decode transition must appear at the declared byte offset before the next decode";
+        "not_bound_by_this_contract",
+        `List [
+          `String "vocabulary_bounds";
+          `String "argmax_algorithm_correctness";
+          `String "tokenizer_semantics";
+          `String "decode_program_consumption";
+          `String "autoregressive_feedback_semantics";
         ];
       ];
     ];

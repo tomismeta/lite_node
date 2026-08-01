@@ -225,6 +225,12 @@ canonical output payload and payload digest next to `output_root`, and a
 target-owned decode transition can declare a `selected_index` `output_contract`
 to expose a root-bound VM-emitted one-cell token output. When the decode program
 uses `ARGMAX_FP`, opcode evidence supplies the ARGMAX provenance.
+For multi-decode loops, a later decode may also declare a
+`previous_selected_index_u64le` `prior_state_contract`; LiteNode checks that
+the immediately preceding decode's VM-emitted selected index is present in the
+prior committed target-state payload at the declared byte offset before running
+that transition. This is a generic byte/root inclusion contract, not tokenizer
+semantics or proof that the program consumed the value.
 
 Compatibility checks:
 

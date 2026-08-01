@@ -225,6 +225,12 @@ payload and its SHA-256 next to `output_root`; a decode transition may declare a
 selected index without tokenizer or model-family knowledge. If the target
 program uses `ARGMAX_FP`, opcode evidence provides the
 ARGMAX provenance.
+For more than one decode transition, the session bundle can bind a
+`previous_selected_index_u64le` `prior_state_contract` on each later decode.
+That contract is intentionally narrow: it proves the prior committed
+target-state payload contains the immediately previous decode's selected index
+as little-endian `u64` at the declared offset before the transition runs; it
+does not claim tokenizer semantics or prove the program consumed the value.
 `--scan-policy` is the faster frontier-discovery mode. It decodes the program
 envelope and reports every visible inference opcode-policy violation as JSON,
 without admitting new opcodes or running a session. It cannot be combined with
