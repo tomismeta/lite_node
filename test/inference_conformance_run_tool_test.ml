@@ -755,6 +755,55 @@ let string_list name fields =
     | `String value -> value
     | _ -> failwith ("json field must be a string list: " ^ name))
 
+let dependency_entry_opcodes entries =
+  entries
+  |> List.filter_map (function
+    | `Assoc fields ->
+      (match assoc_value "opcode" fields with
+       | `String opcode -> Some opcode
+       | _ -> None)
+    | _ -> None)
+  |> List.sort_uniq String.compare
+
+let check_transcendental_dependency_catalog
+    report
+    ~entry_count
+    ~dependency_count
+    ~opcodes =
+  match report with
+  | `Assoc fields ->
+    let catalog_fields = assoc_json "transcendental_dependency_catalog" fields in
+    check
+      "transcendental dependency catalog schema"
+      (String.equal
+         (string_value "schema" catalog_fields)
+         "octra.inference.transcendental-dependency-catalog.v1");
+    check
+      "transcendental dependency catalog authority"
+      (String.equal (string_value "authority" catalog_fields) "none");
+    check
+      "transcendental dependency catalog source"
+      (String.equal
+         (string_value "source" catalog_fields)
+         "litenode_runtime_profile");
+    check
+      "transcendental dependency catalog entry count"
+      (int_value "entry_count" catalog_fields = entry_count);
+    check
+      "transcendental dependency count"
+      (int_value "dependency_count" catalog_fields = dependency_count);
+    check
+      "transcendental dependency catalog root"
+      (String.equal
+         (string_value "transcendental_dependency_catalog_root" fields)
+         (Profile.transcendental_dependency_catalog_root
+            (`Assoc catalog_fields)));
+    check
+      "transcendental dependency opcodes"
+      (dependency_entry_opcodes (list_value "entries" catalog_fields)
+       = List.sort_uniq String.compare opcodes)
+  | _ -> failwith "report must be object"
+
 let producer_repair_hints report =
   match report with
   | `Assoc fields -> list_value "producer_repair_hints" fields
@@ -1074,7 +1123,12 @@ let check_good_template_reports_bound_abi () =
       (String.equal (gate_status "abi_declaration_binding_gate" report) "accepted");
     check
       "good report has no producer repair hints"
-      (producer_repair_hints report = []))
+      (producer_repair_hints report = []);
+    check_transcendental_dependency_catalog
+      report
+      ~entry_count:0
+      ~dependency_count:0
+      ~opcodes:[])
 
 let check_dynamic_q1_effort_vector () =
   with_temp_dir (fun dir ->
@@ -2839,7 +2893,12 @@ let check_p0_plus_rejected_results_empty_when_accepted () =
         (list_value "deterministic_replacement_plans" fields = []);
       check
         "P0-plus accepted repair hints empty"
-        (list_value "producer_repair_hints" fields = [])
+        (list_value "producer_repair_hints" fields = []);
+      check_transcendental_dependency_catalog
+        report
+        ~entry_count:1
+        ~dependency_count:1
+        ~opcodes:["SOFTMAX_FP"]
     | _ -> failwith "report must be object")
 
 let check_p0_plus_rejected_results_report_outputs () =

@@ -270,6 +270,22 @@ let opt_bool_field name fields =
   | Some (`Bool value) -> Some value
   | _ -> None
 
+let profile_gate_opcodes gates =
+  gates
+  |> List.filter_map (function
+    | `Assoc fields -> opt_string_field "opcode" fields
+    | _ -> None)
+  |> List.sort_uniq String.compare
+
+let transcendental_dependency_catalog_report_fields profile_gates =
+  let opcodes = profile_gate_opcodes profile_gates in
+  let catalog = Profile.transcendental_dependency_catalog_json ~opcodes in
+  [
+    "transcendental_dependency_catalog", catalog;
+    "transcendental_dependency_catalog_root",
+    `String (Profile.transcendental_dependency_catalog_root catalog);
+  ]
+
 let profile_gate_json opcode fields =
   let add_source source = function
     | `Assoc gate -> `Assoc (gate @ ["profile_source", `String source])
@@ -4185,7 +4201,7 @@ let run_p0_plus_pack path =
          ~required:!require_validator_readiness
          validator_readiness_gate_json
   in
-  `Assoc [
+  `Assoc ([
     "status", `String (if accepted then "accepted" else "rejected");
     "execution_status", `String execution_status;
     "diagnostic_only", `Bool true;
@@ -4213,6 +4229,9 @@ let run_p0_plus_pack path =
     Profile.consensus_blocker_catalog_json profile_gates;
     "consensus_blocker_class_counts",
     Profile.consensus_blocker_class_counts_json profile_gates;
+  ]
+  @ transcendental_dependency_catalog_report_fields profile_gates
+  @ [
     "profile_root_binding_status_counts",
     Profile.root_binding_counts_json root_binding_counts;
     "profile_root_binding_classification_counts",
@@ -4250,7 +4269,7 @@ let run_p0_plus_pack path =
     `List (p0_plus_deterministic_replacement_plans results);
     "rejected_results", `List (p0_plus_rejected_results results);
     "results", `List (List.map snd results);
-  ]
+  ])
 
 let run_index path =
   let root_dir = Filename.dirname path in
@@ -4468,7 +4487,7 @@ let run_index path =
          validator_readiness_gate_json
   in
   let status = if accepted then "accepted" else "rejected" in
-  `Assoc [
+  `Assoc ([
     "status", `String status;
     "execution_status", `String execution_status;
     "diagnostic_only", `Bool true;
@@ -4514,6 +4533,9 @@ let run_index path =
     Profile.consensus_blocker_catalog_json profile_gates;
     "consensus_blocker_class_counts",
     Profile.consensus_blocker_class_counts_json profile_gates;
+  ]
+  @ transcendental_dependency_catalog_report_fields profile_gates
+  @ [
     "profile_root_binding_status_counts",
     Profile.root_binding_counts_json root_binding_counts;
     "profile_root_binding_classification_counts",
@@ -4552,7 +4574,7 @@ let run_index path =
     "rejected_count",
     `Int (List.length (List.filter (fun (ok, _) -> not ok) results));
     "results", `List (List.map snd results);
-  ]
+  ])
 
 let () =
   Arg.parse args (fun value -> fail ("unexpected argument: " ^ value)) usage;
