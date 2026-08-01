@@ -2439,10 +2439,87 @@ let check_q1_required_failure_expectations () =
        ];
      ])
 
+let check_p0_vm_semantics_contracts () =
+  List.iter
+    (fun opcode ->
+       match Template.vm_semantics_contract_json ~opcode with
+       | Some (`Assoc semantics) ->
+         check
+           (opcode ^ " vm semantics schema")
+           (String.equal
+              (string_value "schema" semantics)
+              "octra.inference.vm-semantics.v1");
+         check
+           (opcode ^ " vm semantics opcode")
+           (String.equal (string_value "opcode" semantics) opcode);
+         check
+           (opcode ^ " vm semantics has signature")
+           (String.length (string_value "signature" semantics) > 0);
+         (match Template.vm_semantics_root_for_opcode ~opcode with
+          | Some root ->
+            check (opcode ^ " vm semantics root is hex") (root_ok root);
+            (match
+               Template.vm_semantics_binding_json
+                 ~opcode
+                 ~vm_semantics_root:root
+             with
+             | `Assoc binding ->
+               check
+                 (opcode ^ " vm semantics binding accepted")
+                 (String.equal (string_value "status" binding) "matched")
+             | _ -> failwith (opcode ^ " vm semantics binding must be object"))
+          | None -> failwith (opcode ^ " missing vm semantics root"))
+       | _ -> failwith (opcode ^ " missing vm semantics contract"))
+    Template.p0_opcodes;
+  (match Template.vm_semantics_contract_json ~opcode:"SOFTMAX_FP" with
+   | Some (`Assoc semantics) ->
+     check
+       "softmax semantics marks host exp"
+       (list_contains_substring
+          "native host exp"
+          (string_list_value "arithmetic_policy" semantics));
+     check
+       "softmax semantics marks local-only"
+       (contains_substring "local-only" (string_value "consensus_note" semantics))
+   | _ -> failwith "missing softmax vm semantics contract");
+  (match Template.vm_semantics_contract_json ~opcode:"GATED_DELTA_RULE_FP" with
+   | Some (`Assoc semantics) ->
+     check
+       "gated delta semantics pins correction term"
+       (list_contains_substring
+          "delta[row] = (v[row] - memory[row]) * beta"
+          (string_list_value "arithmetic_policy" semantics));
+     check
+       "gated delta semantics marks host exp"
+       (list_contains_substring
+          "native host exp"
+          (string_list_value "arithmetic_policy" semantics));
+     check
+       "gated delta semantics marks local-only"
+       (contains_substring "local-only" (string_value "consensus_note" semantics))
+   | _ -> failwith "missing gated delta vm semantics contract");
+  (match Template.vm_semantics_contract_json ~opcode:"RMSNORM_FP_EPS" with
+   | Some (`Assoc semantics) ->
+     check
+       "rmsnorm semantics pins inverse sqrt"
+       (list_contains_substring
+          "inverse_sqrt"
+          (string_list_value "arithmetic_policy" semantics))
+   | _ -> failwith "missing rmsnorm vm semantics contract");
+  (match Template.vm_semantics_contract_json ~opcode:"L2NORM_FP" with
+   | Some (`Assoc semantics) ->
+     check
+       "l2norm semantics pins inverse sqrt"
+       (list_contains_substring
+          "inverse_sqrt"
+          (string_list_value "arithmetic_policy" semantics))
+   | _ -> failwith "missing l2norm vm semantics contract")
+
 let () =
   check_accepts_template ();
   check_q1_profile_obligations ();
   check_q1_required_failure_expectations ();
+  check_p0_vm_semantics_contracts ();
   check_profile_root ();
   check_profile_root_binding_counts ();
   check_profile_root_binding_catalog ();

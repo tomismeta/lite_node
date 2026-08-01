@@ -151,15 +151,18 @@ The resulting recommendations are:
 The next `octra-inference` pass should strengthen the corpus rather than
 broaden demos:
 
-1. Add per-fixture input/output byte manifests suitable for direct LiteNode
+1. Include the LiteNode `inference_profile_catalog.exe --p0` JSON used for the
+   run, and bind every template's `numerical_profile_root` and
+   `vm_semantics_root` to that catalog.
+2. Add per-fixture input/output byte manifests suitable for direct LiteNode
    conformance ingestion.
-2. Add exact oracle pseudocode or Rust snippets for every P0 primitive case.
-3. Split fixed-point differential results by representation:
+3. Add exact oracle pseudocode or Rust snippets for every P0 primitive case.
+4. Split fixed-point differential results by representation:
    - Q16.16;
    - candidate wider fixed point if available;
    - host-FP reference.
-4. Add top-k ordering deltas for logits, not only selected-token deltas.
-5. Return a P0-only minimized fixture pack for LiteNode CI.
+5. Add top-k ordering deltas for logits, not only selected-token deltas.
+6. Return a P0-only minimized fixture pack for LiteNode CI.
 
 ## Constraints
 
@@ -198,11 +201,14 @@ qualification corpus for LiteNode.
 3. Include ordinary, boundary, overflow, underflow, malformed, aliasing,
 failure-atomicity, signed-zero, non-finite rejection, and near-tie-logit cases.
 
-4. Compare host-FP against Q16/fixed-point candidates for Bonsai cutpoints and
+4. Include LiteNode's `inference_profile_catalog.exe --p0` JSON and bind every
+P0 template's `numerical_profile_root` and `vm_semantics_root` to that catalog.
+
+5. Compare host-FP against Q16/fixed-point candidates for Bonsai cutpoints and
 report exact roots, max absolute error, max relative error, token-ranking
 changes, selected-token changes, and first divergent layer/cutpoint.
 
-5. Do not modify LiteNode. Do not add model-specific VM concepts. Return a
+6. Do not modify LiteNode. Do not add model-specific VM concepts. Return a
 machine-readable operation mapping, fixture corpus, rerun commands, and a
 recommendation for each operation: q16-exact viable, wider fixed point needed,
 deterministic software FP required, or host-fp local only.

@@ -41,6 +41,9 @@ let usage =
 let unique values =
   List.sort_uniq String.compare values
 
+let sha256 raw =
+  Digestif.SHA256.(digest_string raw |> to_hex)
+
 let opcodes () =
   let values =
     match List.rev !requested_opcodes, !use_p0, !use_all with
@@ -58,10 +61,56 @@ let validate_opcodes opcodes =
        | None -> fail ("opcode has no current inference runtime profile: " ^ opcode))
     opcodes
 
+let vm_semantics_entry opcode =
+  match
+    Template.vm_semantics_root_for_opcode ~opcode,
+    Template.vm_semantics_contract_json ~opcode
+  with
+  | Some root, Some contract ->
+    `Assoc [
+      "opcode", `String opcode;
+      "status", `String "available";
+      "vm_semantics_root", `String root;
+      "vm_semantics_contract", contract;
+    ]
+  | _ ->
+    `Assoc [
+      "opcode", `String opcode;
+      "status", `String "unavailable";
+      "vm_semantics_root", `Null;
+      "vm_semantics_contract", `Null;
+    ]
+
+let vm_semantics_catalog_json opcodes =
+  let entries =
+    opcodes
+    |> unique
+    |> List.map vm_semantics_entry
+  in
+  `List entries
+
+let vm_semantics_catalog_root catalog =
+  sha256
+    ("octra:inference:vm-semantics-catalog\000"
+     ^ Yojson.Safe.to_string catalog)
+
+let attach_vm_semantics_catalog opcodes = function
+  | `Assoc fields ->
+    let catalog = vm_semantics_catalog_json opcodes in
+    `Assoc
+      (fields
+       @ [
+         "vm_semantics_root_catalog", catalog;
+         "vm_semantics_catalog_root",
+         `String (vm_semantics_catalog_root catalog);
+       ])
+  | value -> value
+
 let () =
   Arg.parse args (fun value -> fail ("unexpected argument: " ^ value)) usage;
   let opcodes = opcodes () in
   validate_opcodes opcodes;
   print_endline
     (Yojson.Safe.pretty_to_string
-       (Profile.current_runtime_profile_catalog_json ~opcodes))
+       (Profile.current_runtime_profile_catalog_json ~opcodes
+        |> attach_vm_semantics_catalog opcodes))

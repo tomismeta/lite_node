@@ -244,6 +244,252 @@ let vm_semantics_contract_json ~opcode =
           `String "program effort also includes surrounding VM instructions such as STOP";
         ];
       ])
+  | "RMSNORM_FP_EPS" ->
+    Some
+      (`Assoc [
+        "schema", `String "octra.inference.vm-semantics.v1";
+        "opcode", `String opcode;
+        "bytecode", `String "0x8d";
+        "signature", `String "RMSNORM_FP_EPS(addr, count, gamma, epsilon)";
+        "register_roles",
+        `List [
+          `String "addr: in-place input/output base cell";
+          `String "count: number of binary64 cells";
+          `String "gamma: gamma scale base cell";
+          `String "epsilon: finite positive binary64 bit pattern";
+        ];
+        "memory_units",
+        `List [
+          `String "input, output, and gamma use one binary64 bit pattern per VM cell";
+          `String "the opcode mutates the addr span in place after complete validation";
+        ];
+        "shape_policy",
+        `List [
+          `String "count must be positive";
+          `String "addr and gamma spans must be valid large VM memory spans";
+          `String "addr and gamma spans must not overlap";
+        ];
+        "epsilon_policy",
+        `List [
+          `String "epsilon is read from its register as a binary64 bit pattern";
+          `String "epsilon must be finite and greater than positive zero";
+        ];
+        "arithmetic_policy",
+        `List [
+          `String "read the full input and gamma spans before writeback";
+          `String "sum_sq starts as positive zero binary64";
+          `String "for index ascending: sum_sq += input[index] * input[index]";
+          `String "mean_sq = sum_sq / count using deterministic finite binary64 division";
+          `String "inverse_input = mean_sq + epsilon";
+          `String "inv_rms = deterministic finite binary64 inverse_sqrt(inverse_input)";
+          `String "output[index] = (input[index] * inv_rms) * gamma[index]";
+          `String "all multiply, add, divide, sqrt, and output multiply steps use the deterministic finite binary64 core";
+        ];
+        "read_write_policy",
+        `List [
+          `String "compute every output cell before mutating addr";
+          `String "reject before writeback on missing cells, non-finite cells, invalid epsilon, arithmetic failure, invalid span, or effort exhaustion";
+        ];
+        "output_policy",
+        `List [
+          `String "outputs are stored as binary64 bit patterns in addr order";
+          `String "the opcode does not mutate session ABI registers";
+        ];
+        "effort_policy",
+        `List [
+          `String "opcode base effort is 50";
+          `String "dynamic effort is count * 4";
+          `String "program effort also includes surrounding VM instructions such as STOP";
+        ];
+      ])
+  | "L2NORM_FP" ->
+    Some
+      (`Assoc [
+        "schema", `String "octra.inference.vm-semantics.v1";
+        "opcode", `String opcode;
+        "bytecode", `String "0x8e";
+        "signature", `String "L2NORM_FP(addr, count, epsilon)";
+        "register_roles",
+        `List [
+          `String "addr: in-place input/output base cell";
+          `String "count: number of binary64 cells";
+          `String "epsilon: finite positive binary64 bit pattern";
+        ];
+        "memory_units",
+        `List [
+          `String "input and output use one binary64 bit pattern per VM cell";
+          `String "the opcode mutates the addr span in place after complete validation";
+        ];
+        "shape_policy",
+        `List [
+          `String "count must be positive";
+          `String "addr span must be a valid large VM memory span";
+        ];
+        "epsilon_policy",
+        `List [
+          `String "epsilon is read from its register as a binary64 bit pattern";
+          `String "epsilon must be finite and greater than positive zero";
+        ];
+        "arithmetic_policy",
+        `List [
+          `String "read the full input span before writeback";
+          `String "sum_sq starts as positive zero binary64";
+          `String "for index ascending: sum_sq += input[index] * input[index]";
+          `String "inverse_input = sum_sq + epsilon";
+          `String "inv_norm = deterministic finite binary64 inverse_sqrt(inverse_input)";
+          `String "output[index] = input[index] * inv_norm";
+          `String "all multiply, add, sqrt, and output multiply steps use the deterministic finite binary64 core";
+        ];
+        "read_write_policy",
+        `List [
+          `String "compute every output cell before mutating addr";
+          `String "reject before writeback on missing cells, non-finite cells, invalid epsilon, arithmetic failure, invalid span, or effort exhaustion";
+        ];
+        "output_policy",
+        `List [
+          `String "outputs are stored as binary64 bit patterns in addr order";
+          `String "the opcode does not mutate session ABI registers";
+        ];
+        "effort_policy",
+        `List [
+          `String "opcode base effort is 40";
+          `String "dynamic effort is count * 3";
+          `String "program effort also includes surrounding VM instructions such as STOP";
+        ];
+      ])
+  | "SOFTMAX_FP" ->
+    Some
+      (`Assoc [
+        "schema", `String "octra.inference.vm-semantics.v1";
+        "opcode", `String opcode;
+        "bytecode", `String "0x94";
+        "signature", `String "SOFTMAX_FP(dest, scores, count)";
+        "register_roles",
+        `List [
+          `String "dest: output probability base cell";
+          `String "scores: input score base cell";
+          `String "count: number of binary64 score cells";
+        ];
+        "memory_units",
+        `List [
+          `String "scores and dest use one binary64 bit pattern per VM cell";
+          `String "dest may equal scores for exact in-place execution";
+        ];
+        "shape_policy",
+        `List [
+          `String "count must be positive and at most 8192";
+          `String "dest and scores spans must be valid large VM memory spans";
+          `String "dest/scores overlap is rejected unless the spans are exactly the same range";
+        ];
+        "arithmetic_policy",
+        `List [
+          `String "read the full score span before writeback";
+          `String "max_score starts at scores[0]";
+          `String "for index ascending: replace max_score only when compare(scores[index], max_score) is greater than zero";
+          `String "shifted[index] = scores[index] - max_score using deterministic finite binary64 subtraction";
+          `String "every shifted score must compare less than or equal to positive zero";
+          `String "exp(shifted[index]) currently uses native host exp and is local-only";
+          `String "sum_exp starts as positive zero binary64 and accumulates exps in index order";
+          `String "output[index] = exp[index] / sum_exp using deterministic finite binary64 division";
+        ];
+        "read_write_policy",
+        `List [
+          `String "compute every output probability before mutating dest";
+          `String "reject before writeback on missing scores, non-finite values, invalid span, zero/nonpositive sum, arithmetic failure, or effort exhaustion";
+        ];
+        "output_policy",
+        `List [
+          `String "outputs are stored as binary64 bit patterns in dest order";
+          `String "the opcode does not mutate session ABI registers";
+        ];
+        "consensus_note",
+        `String "native host exp keeps this VM semantics contract local-only until a deterministic exp profile replaces it";
+        "effort_policy",
+        `List [
+          `String "opcode base effort is 100";
+          `String "dynamic effort is count * 8";
+          `String "program effort also includes surrounding VM instructions such as STOP";
+        ];
+      ])
+  | "GATED_DELTA_RULE_FP" ->
+    Some
+      (`Assoc [
+        "schema", `String "octra.inference.vm-semantics.v1";
+        "opcode", `String opcode;
+        "bytecode", `String "0x8c";
+        "signature",
+        `String
+          "GATED_DELTA_RULE_FP(output, state_dst, q, k, v, log_decay, beta, state, t, q_heads, k_heads, v_heads, key_dim, value_dim)";
+        "register_roles",
+        `List [
+          `String "output: recurrent output base cell";
+          `String "state_dst: next recurrent state base cell";
+          `String "q/k/v: query, key, and value input base cells";
+          `String "log_decay: per timestep/value-head log decay base cell";
+          `String "beta: per timestep/value-head beta base cell";
+          `String "state: previous recurrent state base cell";
+          `String "t: timestep count";
+          `String "q_heads/k_heads/v_heads: head counts";
+          `String "key_dim/value_dim: per-head dimensions";
+        ];
+        "memory_units",
+        `List [
+          `String "all tensor and state spans use one binary64 bit pattern per VM cell";
+          `String "state layout is v_heads * value_dim * key_dim in head-major, row-major order";
+          `String "output layout is timesteps * v_heads * value_dim in timestep-major order";
+        ];
+        "shape_policy",
+        `List [
+          `String "timesteps, q_heads, k_heads, v_heads, key_dim, and value_dim must all be positive";
+          `String "q span cells = timesteps * q_heads * key_dim";
+          `String "k span cells = timesteps * k_heads * key_dim";
+          `String "v span cells = timesteps * v_heads * value_dim";
+          `String "log_decay and beta span cells = timesteps * v_heads";
+          `String "state cells = v_heads * value_dim * key_dim";
+          `String "output cells = timesteps * v_heads * value_dim";
+          `String "all spans must be valid large VM memory spans";
+        ];
+        "aliasing_policy",
+        `List [
+          `String "output and state_dst must not overlap";
+          `String "input spans q, k, v, log_decay, and beta must not overlap output or state_dst";
+          `String "state may equal state_dst exactly for in-place state update";
+          `String "state must not partially overlap state_dst and must not overlap output";
+        ];
+        "arithmetic_policy",
+        `List [
+          `String "read all input and state spans before writeback";
+          `String "state is copied before recurrence mutation";
+          `String "scale = deterministic finite binary64 inverse_sqrt(key_dim)";
+          `String "for timestep ascending and value-head ascending: q_head = head mod q_heads, k_head = head mod k_heads";
+          `String "decay = exp(log_decay[timestep, head]) using native host exp gated to finite nonpositive input";
+          `String "state[head,:,:] *= decay in row-major state order";
+          `String "memory[row] = sum_col state[row,col] * k[col] in col ascending order";
+          `String "delta[row] = (v[row] - memory[row]) * beta[timestep, head]";
+          `String "state[row,col] += k[col] * delta[row] in row-major order";
+          `String "output[row] = sum_col state[row,col] * q[col] * scale in col ascending order";
+          `String "all non-exp multiply, add, subtract, divide, and sqrt steps use the deterministic finite binary64 core";
+        ];
+        "read_write_policy",
+        `List [
+          `String "compute complete output and next-state buffers before mutating either destination";
+          `String "reject before writeback on invalid spans, invalid overlap, missing cells, non-finite cells, positive/non-finite log_decay, arithmetic failure, product overflow, or effort exhaustion";
+        ];
+        "output_policy",
+        `List [
+          `String "output cells are written first in output layout order";
+          `String "state_dst cells are written second in state layout order";
+          `String "the opcode does not mutate session ABI registers";
+        ];
+        "consensus_note",
+        `String "native host exp keeps this VM semantics contract local-only until deterministic decay semantics replace it";
+        "effort_policy",
+        `List [
+          `String "opcode base effort is 200";
+          `String "dynamic effort is 4 * timesteps * v_heads * value_dim * key_dim + 2 * timesteps * v_heads * value_dim + timesteps * v_heads";
+          `String "program effort also includes surrounding VM instructions such as STOP";
+        ];
+      ])
   | _ -> None
 
 let vm_semantics_root_for_opcode ~opcode =
