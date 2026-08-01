@@ -516,6 +516,7 @@ let q1_contract_shape_consistent fields =
                  field "registers_match" abi,
                  opt_string_field "output_payload_status" abi,
                  field "output_payload_error" abi,
+                 field "output_payload" abi,
                  field "output_payload_sha256" abi with
            | Some expected_base,
              Some observed_base,
@@ -524,6 +525,7 @@ let q1_contract_shape_consistent fields =
              Some (`Bool registers_match),
              Some payload_status,
              Some `Null,
+             Some (`String payload),
              Some (`String payload_sha256) ->
              Some
                (expected_base,
@@ -532,6 +534,7 @@ let q1_contract_shape_consistent fields =
                 observed_count,
                 registers_match,
                 payload_status,
+                payload,
                 payload_sha256)
            | _ -> None)
         | None -> None
@@ -575,6 +578,7 @@ let q1_contract_shape_consistent fields =
                observed_abi_count,
                registers_match,
                payload_status,
+               payload,
                payload_sha256) ->
          let expected_required_bytes =
            match checked_mul n (k / 128) with
@@ -607,6 +611,7 @@ let q1_contract_shape_consistent fields =
          && registers_match
          && String.equal payload_status "accepted"
          && hex_string payload_sha256
+         && String.equal (sha256 payload) payload_sha256
          && output_subspan_has_span expected_abi_base output_cells
          && expected_abi_count = output_cells
          && observed_abi_count = output_cells

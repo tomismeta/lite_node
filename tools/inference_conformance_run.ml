@@ -2122,6 +2122,11 @@ let executable_abi_result state template =
     observed_r0 = Some expected_r0 && observed_r1 = Some expected_r1
   in
   let payload_result = output_payload state in
+  let payload =
+    match payload_result with
+    | Ok payload -> `String payload
+    | Error _ -> `Null
+  in
   let payload_sha256 =
     match payload_result with
     | Ok payload -> `String (sha256 payload)
@@ -2154,6 +2159,7 @@ let executable_abi_result state template =
     "registers_match", `Bool registers_match;
     "output_payload_status", `String payload_status;
     "output_payload_error", payload_error;
+    "output_payload", payload;
     "output_payload_sha256", payload_sha256;
   ]
 

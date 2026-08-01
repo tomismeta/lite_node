@@ -22,6 +22,9 @@ let check label condition =
 let hex_root char =
   String.make 64 char
 
+let sha256 raw =
+  Digestif.SHA256.(digest_string raw |> to_hex)
+
 let current_profile_root opcode =
   match Profile.current_runtime_profile ~opcode with
   | Some profile_name ->
@@ -419,6 +422,7 @@ let result
     else
       required_failure_contract_fields
   in
+  let output_payload = "base=10000|length=6|values=int:0,int:1,int:2,int:3,int:4,int:5" in
   `Assoc [
     "opcode", `String opcode;
     "profile_root_binding",
@@ -492,7 +496,8 @@ let result
       "registers_match", `Bool true;
       "output_payload_status", `String "accepted";
       "output_payload_error", `Null;
-      "output_payload_sha256", `String (hex_root '9');
+      "output_payload", `String output_payload;
+      "output_payload_sha256", `String (sha256 output_payload);
     ];
     "status", `String "accepted";
     "vm_run", `String "accepted";
@@ -2647,6 +2652,34 @@ let check_matrix_rejects_q1_executable_abi_nonhex_payload_sha () =
            (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_q1_executable_abi_payload_sha_forgery () =
+  with_temp_dir (fun dir ->
+    let forged runner_sha system machine =
+      report ~runner_sha system machine
+      |> replace_executable_abi_field
+           "output_payload_sha256"
+           (`String (hex_root '9'))
+    in
+    let a =
+      write_report dir "a.cjson" (forged (hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (forged (hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "Q1 executable ABI payload sha forgery exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "Q1 executable ABI payload sha forgery blocker"
+        (List.mem
+           "q1_contract_shape_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_signs_q1_output_span_base () =
   with_temp_dir (fun dir ->
     let a =
@@ -3028,6 +3061,7 @@ let () =
   check_matrix_rejects_q1_executable_abi_payload_contradiction ();
   check_matrix_rejects_q1_executable_abi_register_contradiction ();
   check_matrix_rejects_q1_executable_abi_nonhex_payload_sha ();
+  check_matrix_rejects_q1_executable_abi_payload_sha_forgery ();
   check_matrix_signs_q1_output_span_base ();
   check_matrix_rejects_q1_contract_shape_oversized_intlit ();
   check_matrix_rejects_q1_failure_contract_not_applicable ();
