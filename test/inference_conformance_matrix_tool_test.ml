@@ -950,6 +950,46 @@ let check_matrix_rejects_missing_required_opcode () =
            "required_opcode_missing")
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_required_opcode_missing_from_one_report () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~opcode:"RMSNORM_FP_EPS"
+           ~required_failure_contract_status:"not_applicable"
+           "Linux"
+           "x86_64")
+    in
+    let code, json =
+      run_matrix ~args:["--opcode"; "LINEAR_Q1_G128_FP"] [a; b]
+    in
+    check "per-report required opcode matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "aggregate required opcode coverage accepted"
+        (String.equal
+           (string_value "opcode_coverage_status" fields)
+           "accepted");
+      check
+        "per-report required opcode coverage rejected"
+        (String.equal
+           (string_value "per_report_opcode_coverage_status" fields)
+           "rejected");
+      check
+        "per-report required opcode blocker"
+        (List.mem "required_opcode_missing_per_report" (blockers fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_missing_runner_hash () =
   with_temp_dir (fun dir ->
     let a = write_report dir "a.cjson" (report "Darwin" "arm64") in
@@ -2451,6 +2491,7 @@ let () =
   check_matrix_rejects_reused_runner_hash ();
   check_matrix_accepts_required_opcode_reports ();
   check_matrix_rejects_missing_required_opcode ();
+  check_matrix_rejects_required_opcode_missing_from_one_report ();
   check_matrix_rejects_missing_runner_hash ();
   check_matrix_rejects_invalid_runner_hash ();
   check_matrix_rejects_corpus_mismatch ();

@@ -1190,6 +1190,15 @@ let matrix_report paths =
       (fun opcode -> List.exists (String.equal opcode) result_opcodes)
       required_opcodes
   in
+  let per_report_opcode_coverage_ready =
+    List.for_all
+      (fun summary ->
+         List.for_all
+           (fun opcode ->
+              List.exists (String.equal opcode) summary.result_opcodes)
+           required_opcodes)
+      summaries
+  in
   let matrix_signature =
     signatures
     |> List.sort String.compare
@@ -1208,7 +1217,7 @@ let matrix_report paths =
     && List.length profile_catalog_roots = 1
     && missing_template_corpus_root_count = 0
     && List.length template_corpus_roots = 1
-    && opcode_coverage_ready
+    && per_report_opcode_coverage_ready
   in
   let blockers =
     []
@@ -1240,6 +1249,9 @@ let matrix_report paths =
     |> add_if
          (not opcode_coverage_ready)
          "required_opcode_missing"
+    |> add_if
+         (opcode_coverage_ready && not per_report_opcode_coverage_ready)
+         "required_opcode_missing_per_report"
   in
   let validator_readiness_blockers =
     unique (blockers @ per_report_matrix_blockers @ per_report_validator_blockers)
@@ -1286,6 +1298,9 @@ let matrix_report paths =
            "rejected");
       "opcode_coverage_status",
       `String (if opcode_coverage_ready then "accepted" else "rejected");
+      "per_report_opcode_coverage_status",
+      `String
+        (if per_report_opcode_coverage_ready then "accepted" else "rejected");
       "cross_platform_status",
       `String (if matrix_accepted then "accepted" else "rejected");
       "next_blocker", next_blocker_json validator_readiness_blockers;
@@ -1330,6 +1345,9 @@ let matrix_report paths =
     `List (List.map (fun value -> `String value) required_opcodes);
     "opcode_coverage_status",
     `String (if opcode_coverage_ready then "accepted" else "rejected");
+    "per_report_opcode_coverage_status",
+    `String
+      (if per_report_opcode_coverage_ready then "accepted" else "rejected");
     "result_opcodes",
     `List (List.map (fun value -> `String value) result_opcodes);
     "result_signature_schema", `String result_signature_schema;
