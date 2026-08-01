@@ -13,7 +13,7 @@ Include at startup:
 *)
 
 let schema =
-  "octra.inference.conformance.result-signature.v5"
+  "octra.inference.conformance.result-signature.v6"
 
 let fail message =
   failwith message
@@ -70,6 +70,7 @@ let subspan_signature = function
   | `Assoc fields ->
     `Assoc [
       "name", `String (string_field "name" fields);
+      "base_address", `Int (int_field "base_address" fields);
       "length_f64_cells", `Int (int_field "length_f64_cells" fields);
       "expected_sha256", `String (string_field "expected_sha256" fields);
       "observed_sha256", `String (string_field "observed_sha256" fields);

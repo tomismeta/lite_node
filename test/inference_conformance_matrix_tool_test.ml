@@ -28,6 +28,12 @@ let string_value name fields =
   | `String value -> value
   | _ -> failwith ("json field must be a string: " ^ name)
 
+let int_value name fields =
+  match assoc_value name fields with
+  | `Int value -> value
+  | `Intlit value -> int_of_string value
+  | _ -> failwith ("json field must be an int: " ^ name)
+
 let string_list_value name fields =
   match assoc_value name fields with
   | `List values ->
@@ -769,7 +775,7 @@ let check_matrix_accepts_bound_reports () =
         "matrix carries result signature schema"
         (String.equal
            (string_value "result_signature_schema" fields)
-           "octra.inference.conformance.result-signature.v5");
+           "octra.inference.conformance.result-signature.v6");
       check
         "matrix carries runner hashes"
         (List.length (string_list_value "runner_executable_sha256s" fields) = 2)
@@ -1846,6 +1852,33 @@ let check_matrix_rejects_q1_contract_shape_output_span_base_mismatch () =
            (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_signs_q1_output_span_base () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Linux" "x86_64"
+         |> replace_result_subspan_field "base_address" (`Int 10001))
+    in
+    let code, json = run_matrix [a; b] in
+    check "Q1 output span base signature mismatch exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "Q1 output span base changes result signature"
+        (int_value "result_signature_count" fields = 2);
+      check
+        "Q1 output span base signature blocker"
+        (List.mem "result_mismatch_across_platforms" (blockers fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_q1_contract_shape_oversized_intlit () =
   with_temp_dir (fun dir ->
     let forged =
@@ -2058,6 +2091,7 @@ let () =
   check_matrix_rejects_q1_contract_shape_observed_effort_forgery ();
   check_matrix_rejects_q1_contract_shape_output_cells_mismatch ();
   check_matrix_rejects_q1_contract_shape_output_span_base_mismatch ();
+  check_matrix_signs_q1_output_span_base ();
   check_matrix_rejects_q1_contract_shape_oversized_intlit ();
   check_matrix_rejects_q1_failure_contract_not_applicable ();
   check_matrix_accepts_non_q1_failure_contract_not_applicable ();

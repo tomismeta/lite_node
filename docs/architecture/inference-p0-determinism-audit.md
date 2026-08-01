@@ -168,7 +168,7 @@ LiteNode branch: codex/inference-runtime-foundation
 latest local commits:
   9f6b67d conformance: accept named q1 output spans
   6c1cc94 conformance: validate q1 matrix shape metadata
-result_signature_schema: octra.inference.conformance.result-signature.v5
+result_signature_schema: octra.inference.conformance.result-signature.v6
 local focused tests: accepted
 static Q1 template checks: cover m/k/n bounds, byte_offset, q1_owner span,
   output manifest size, ABI output-count register isolation, expected effort,
@@ -182,13 +182,13 @@ matrix Q1 result validation: recomputes byte_offset + required_bytes,
 matrix forged-evidence tests: reject coordinated forged shape, byte-offset
   span, output count, observed effort, opcode effort, missing mutation payload,
   and oversized JSON integer evidence
-next validator-readiness blocker: producer must re-emit v5 Q1/P0 evidence
+next validator-readiness blocker: producer must re-emit v6 Q1/P0 evidence
   against this LiteNode commit, then run at least two distinct platform/runner
   observations through inference_conformance_matrix.exe
 ```
 
 Earlier focused Q1 checkpoint on 2026-07-31, using the immutable
-effort-authority P0 index before the current v5 Q1 shape contract and
+effort-authority P0 index before the current v6 Q1 shape contract and
 executable ABI gating:
 
 ```text
@@ -311,7 +311,7 @@ program/opcode effort must equal the recomputed expected effort.
 Cross-platform agreement is therefore not limited to the happy path, and a
 shared forged shape does not qualify a report. The
 matrix also carries `result_signature_schema =
-octra.inference.conformance.result-signature.v5`; the runner rejects a pinned
+octra.inference.conformance.result-signature.v6`; the runner rejects a pinned
 matrix whose signature schema is missing or stale. This prevents an older
 matrix from qualifying current Q1 evidence after the punitive failure signature
 changes. Each matrix row must also carry the same signature schema and opcode
