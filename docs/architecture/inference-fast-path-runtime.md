@@ -137,6 +137,12 @@ ordering explicit:
 {
   "status": "accepted",
   "batch_report_sha256": "<diagnostic-sha256>",
+  "runtime_semantics": {
+    "session_mode": "independent_session_per_stage",
+    "stage_lifecycle": ["open_session", "advance_session", "finalize_session"],
+    "batch_cache_scope": ["owner_bytes", "model_range_pins"],
+    "continuation_supported": false
+  },
   "last_stage_output_root": "<root>",
   "unsupported_opcodes": [],
   "missing_capabilities": [],
@@ -172,6 +178,12 @@ The batch response does not prove model correctness. It proves that LiteNode
 admitted and executed the supplied rooted stages under the existing VM and
 session contracts. `batch_report_sha256` is diagnostic evidence over the
 reported deterministic fields, not a session root and not a receipt root.
+`runtime_semantics` is additive diagnostic metadata and is excluded from
+`batch_report_sha256`.
+`runtime_semantics` is an explicit claim boundary: current batch mode reuses
+local owner bytes and model-range pins, but it still opens, advances, and
+finalizes an independent session per stage. It does not carry target state
+across stages.
 
 ## Session Semantics
 
@@ -191,6 +203,18 @@ The initial implementation can be conservative:
 This keeps canonical roots in `Inference_session`. It does not require target
 state or checkpoints to become session identity and it does not invent an
 aggregate session root.
+
+The harness reports this directly as:
+
+```text
+session_mode = independent_session_per_stage
+continuation_supported = false
+batch_cache_scope = owner_bytes, model_range_pins
+```
+
+The next runtime blocker remains session-state carry: a resident inference
+session must preserve rooted target state across prefill/decode advances
+instead of reopening an independent session for each stage.
 
 Compatibility checks:
 

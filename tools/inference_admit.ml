@@ -1494,6 +1494,23 @@ let run_batch_file ~timing_mode path =
   let status =
     if reference_mismatch then "reference_mismatch" else "accepted"
   in
+  let runtime_semantics =
+    `Assoc [
+      "session_mode", `String "independent_session_per_stage";
+      "stage_lifecycle",
+      `List [
+        `String "open_session";
+        `String "advance_session";
+        `String "finalize_session";
+      ];
+      "batch_cache_scope",
+      `List [
+        `String "owner_bytes";
+        `String "model_range_pins";
+      ];
+      "continuation_supported", `Bool false;
+    ]
+  in
   let batch_payload =
     "octra.inference.run_batch.report.v1:"
     ^ Yojson.Safe.to_string
@@ -1510,6 +1527,7 @@ let run_batch_file ~timing_mode path =
       "batch_path", `String batch.batch_path;
       "stage_count", `Int (List.length results);
       "batch_report_sha256", `String (sha256 batch_payload);
+      "runtime_semantics", runtime_semantics;
       "last_stage_output_root", `String last_output_root;
       "unsupported_opcodes", unique_json_strings unsupported;
       "missing_capabilities", unique_json_strings missing;
