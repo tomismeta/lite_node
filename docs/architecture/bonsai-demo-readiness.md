@@ -205,16 +205,19 @@ request's `input_root` and fit the requirement's `max_view_bytes` limit.
 supported shape executes one target-owned stage labeled `prefill` or `decode`
 through the same open/advance/finalize machinery and reports
 `session_report_sha256`, transition roots, receipts, and diagnostic runtime
-semantics. Multi-transition bundles are intentionally rejected with
-`session_continuation_state_carry_not_supported` until the harness routes them
-through the ABI-v2 repeated-advance path. The rejection includes a hash-bound
-`continuation_preflight`
-diagnostic plan: each requested transition is prepared through the same
-input/range/plan-creation path as the stage runner, root uniformity and
-explicit `identity_blockers`, `declaration_blockers`, and top-level
-request/deployment claims are reported. Identity failures become the immediate
-`next_runtime_blocker`, followed by declaration failures, then state carry;
-`execution_attempted=false` remains explicit.
+semantics. ABI-v2 multi-transition bundles with uniform target, request, model
+range, deployment, and session ABI roots now route through one opened session,
+repeated `advance`, and one finalization. The accepted report binds
+`opened_session_root`, per-transition `advanced_session_root`,
+`output_prefix_root`, and `final_receipt_root`. ABI-v1 or mismatched
+multi-transition bundles still fail closed with a hash-bound
+`continuation_preflight` diagnostic plan: each requested transition is prepared
+through the same input/range/plan-creation path as the stage runner, root
+uniformity and explicit `identity_blockers`, `declaration_blockers`, and
+top-level request/deployment claims are reported. The remaining product
+blocker is no longer repeated advance itself; it is binding target-owned
+`prefill`/`decode` phase semantics, committed state payload transport, and
+decode-loop token outputs.
 `--scan-policy` is the faster frontier-discovery mode. It decodes the program
 envelope and reports every visible inference opcode-policy violation as JSON,
 without admitting new opcodes or running a session. It cannot be combined with

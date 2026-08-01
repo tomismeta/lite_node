@@ -230,27 +230,54 @@ let request_from_json = function
     }
   | _ -> failwith "request must be an object"
 
-let write_batch_fixture dir =
+let continuation_code =
+  [|
+    VM.JDEST Abi.advance_label;
+    VM.MLOAD (2, Abi.sequence_cell);
+    VM.MSTORE (10, 2);
+    VM.MLOAD (2, Abi.logical_position_cell);
+    VM.MSTORE (11, 2);
+    VM.MLOAD (2, Abi.output_root_cell);
+    VM.MSTORE (12, 2);
+    VM.MLOAD (2, Abi.output_prefix_root_cell);
+    VM.MSTORE (13, 2);
+    VM.MLOAD (2, Abi.committed_target_state_root_cell);
+    VM.MSTORE (14, 2);
+    VM.LDI (0, VM.VInt (Z.of_int 10));
+    VM.LDI (1, VM.VInt (Z.of_int 5));
+    VM.STOP;
+  |]
+
+let write_batch_fixture
+    ?(session_abi_root = Abi.v1_root)
+    ?code
+    dir =
   let stage_dir = Filename.concat dir "stage" in
   Unix.mkdir stage_dir 0o700;
   let code =
-    [|
-      VM.JDEST Abi.advance_label;
-      VM.LDI (2, VM.VInt (Z.of_int 7));
-      VM.MSTORE (10, 2);
-      VM.LDI (0, VM.VInt (Z.of_int 10));
-      VM.LDI (1, VM.VInt Z.one);
-      VM.STOP;
-    |]
+    match code with
+    | Some code -> code
+    | None ->
+      [|
+        VM.JDEST Abi.advance_label;
+        VM.LDI (2, VM.VInt (Z.of_int 7));
+        VM.MSTORE (10, 2);
+        VM.LDI (0, VM.VInt (Z.of_int 10));
+        VM.LDI (1, VM.VInt Z.one);
+        VM.STOP;
+      |]
   in
+  let continuation = String.equal session_abi_root Abi.v2_root in
+  let max_output_bytes = if continuation then 512 else 64 in
+  let max_scratch_bytes = if continuation then 2048 else 128 in
   let capability = Req.{ name = "storage.authenticated-range"; root = hex_root 'd' } in
   let limits =
     Req.{
       max_model_bytes = 64;
       max_view_bytes = 64;
       max_session_bytes = 1024;
-      max_scratch_bytes = 128;
-      max_output_bytes = 64;
+      max_scratch_bytes;
+      max_output_bytes;
       max_advance_effort = 4096;
     }
   in
@@ -281,7 +308,7 @@ let write_batch_fixture dir =
       model_root = hex_root 'e';
       execution_descriptor_root = hex_root '1';
       store_root = hex_root '2';
-      session_abi_root = Abi.v1_root;
+      session_abi_root;
       entrypoints = [{
         entry_name = Abi.advance_entrypoint;
         entry_label = Abi.advance_label;
@@ -311,7 +338,7 @@ let write_batch_fixture dir =
       entrypoint = Abi.advance_entrypoint;
       input_root = sha256 request_input;
       request_nonce = hex_root '5';
-      max_output_bytes = 64;
+      max_output_bytes;
       max_advance_effort = 4096;
     }
   in
@@ -387,12 +414,16 @@ let stage_json_from_batch batch_path =
 let write_session_bundle_fixture
     ?(schema = Some "octra.inference.session.bundle")
     ?(decode_steps = Some 1)
+    ?session_abi_root
+    ?code
     ?request_root
     ?model_deployment_root
     ?second_request_nonce
     ?(transition_count = 1)
     dir =
-  let batch_path = write_batch_fixture dir in
+  let batch_path =
+    write_batch_fixture ?session_abi_root ?code dir
+  in
   let stage = stage_json_from_batch batch_path in
   let second_stage =
     match second_request_nonce with
@@ -546,7 +577,9 @@ let check_runtime_semantics report =
        ])
   | _ -> failwith "report must be an object"
 
-let check_session_runtime_semantics semantics =
+let check_session_runtime_semantics
+    ?(next_runtime_blocker = "session_continuation_state_carry_not_supported")
+    semantics =
   check
     "session runtime diagnostic"
     (bool_json "diagnostic_only" semantics);
@@ -571,7 +604,7 @@ let check_session_runtime_semantics semantics =
     "session next blocker"
     (String.equal
        (string_json "next_runtime_blocker" semantics)
-       "session_continuation_state_carry_not_supported")
+       next_runtime_blocker)
 
 let check_batch_hash report =
   match report with
@@ -614,6 +647,10 @@ let check_session_hash report =
         "decode_steps", `Int (int_json "decode_steps" fields);
         "runtime_semantics", assoc_value "runtime_semantics" fields;
         "next_runtime_blocker", assoc_value "next_runtime_blocker" fields;
+        "opened_session_root", assoc_value "opened_session_root" fields;
+        "final_session_root", assoc_value "final_session_root" fields;
+        "final_receipt_root", assoc_value "final_receipt_root" fields;
+        "output_prefix_root", assoc_value "output_prefix_root" fields;
         "last_transition_output_root",
         assoc_value "last_transition_output_root" fields;
         "unsupported_opcodes", assoc_value "unsupported_opcodes" fields;
@@ -690,6 +727,14 @@ let check_session_bundle_single_transition () =
     check
       "session last output root"
       (String.length (string_json "last_transition_output_root" fields) = 64);
+    check "single opened root null" (assoc_value "opened_session_root" fields = `Null);
+    check "single final root null" (assoc_value "final_session_root" fields = `Null);
+    check
+      "single final receipt root null"
+      (assoc_value "final_receipt_root" fields = `Null);
+    check
+      "single output prefix root null"
+      (assoc_value "output_prefix_root" fields = `Null);
     let semantics = assoc_json "runtime_semantics" fields in
     check_session_runtime_semantics semantics;
     check
@@ -756,7 +801,9 @@ let check_session_bundle_rejects_multi_transition () =
       (String.equal (string_json "status" fields) "rejected");
     check "multi-transition count" (int_json "transition_count" fields = 2);
     let semantics = assoc_json "runtime_semantics" fields in
-    check_session_runtime_semantics semantics;
+    check_session_runtime_semantics
+      ~next_runtime_blocker:"session_abi_v2_required"
+      semantics;
     check
       "multi-transition mode"
       (String.equal
@@ -771,7 +818,7 @@ let check_session_bundle_rejects_multi_transition () =
       "multi-transition blocker"
       (String.equal
          (string_json "next_runtime_blocker" fields)
-         "session_continuation_state_carry_not_supported");
+         "session_abi_v2_required");
     check "no executed transitions" (list_json "transitions" fields = []);
     check_session_hash report;
     let preflight = assoc_json "continuation_preflight" fields in
@@ -787,7 +834,7 @@ let check_session_bundle_rejects_multi_transition () =
       "preflight next blocker"
       (String.equal
          (string_json "next_runtime_blocker" preflight)
-         "session_continuation_state_carry_not_supported");
+         "session_abi_v2_required");
     check
       "preflight did not execute"
       (not (bool_json "execution_attempted" preflight));
@@ -863,10 +910,7 @@ let check_session_bundle_rejects_multi_transition () =
            ("preflight blocker " ^ expected)
            (List.exists (( = ) (`String expected)) blockers))
       [
-        "session_abi_continuation_input_not_defined";
-        "execution_state_payload_not_available";
-        "repeated_advance_not_supported";
-        "atomic_state_commit_not_implemented";
+        "session_abi_v2_required";
       ];
     (match list_json "transition_plan" preflight with
      | [`Assoc first; `Assoc second] ->
@@ -935,6 +979,157 @@ let check_session_bundle_rejects_multi_transition () =
        check_plan_entry 0 "token-000" "decode" first;
        check_plan_entry 1 "token-001" "prefill" second
      | _ -> failwith "expected two preflight transitions")
+  | _ -> failwith "report must be an object"
+
+let check_session_bundle_accepts_v2_multi_transition () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~session_abi_root:Abi.v2_root
+      ~code:continuation_code
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "v2 multi-transition exits cleanly" (code = 0);
+  match report with
+  | `Assoc fields ->
+    check
+      "v2 multi-transition accepted"
+      (String.equal (string_json "status" fields) "accepted");
+    check "v2 transition count" (int_json "transition_count" fields = 2);
+    check "v2 decode steps" (int_json "decode_steps" fields = 1);
+    check
+      "v2 no continuation preflight in accepted report"
+      (List.assoc_opt "continuation_preflight" fields = None);
+    let opened_session_root = string_json "opened_session_root" fields in
+    let final_session_root = string_json "final_session_root" fields in
+    let final_receipt_root = string_json "final_receipt_root" fields in
+    let output_prefix_root = string_json "output_prefix_root" fields in
+    let last_transition_output_root =
+      string_json "last_transition_output_root" fields
+    in
+    List.iter
+      (fun (label, root) ->
+         check
+           ("v2 root " ^ label)
+           (String.length root = 64))
+      [
+        "opened_session_root", opened_session_root;
+        "final_session_root", final_session_root;
+        "final_receipt_root", final_receipt_root;
+        "output_prefix_root", output_prefix_root;
+        "last_transition_output_root", last_transition_output_root;
+      ];
+    check
+      "v2 session root advanced"
+      (not (String.equal opened_session_root final_session_root));
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "v2 resident mode"
+      (String.equal
+         (string_json "session_mode" semantics)
+         "resident_multi_transition_session");
+    check
+      "v2 continuation supported"
+      (bool_json "continuation_supported" semantics);
+    check
+      "v2 state carry"
+      (String.equal
+         (string_json "state_carry" semantics)
+         "abi_v2_progress_cells");
+    check
+      "v2 resident cache scope"
+      (list_json "resident_cache_scope" semantics
+       = [`String "session"]);
+    check
+      "v2 resident readiness"
+      (String.equal
+         (string_json "runtime_readiness_status" semantics)
+         "resident_session_candidate");
+    check
+      "v2 remaining runtime blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" semantics)
+         "prefill_decode_phase_contract_not_bound");
+    check
+      "v2 remaining missing capabilities"
+      (list_json "missing_runtime_capabilities" semantics
+       = [
+         `String "prefill_decode_phase_contract";
+         `String "committed_target_state_payload_transport";
+         `String "decode_loop_argmax_session_output";
+       ]);
+    check_session_hash report;
+    (match list_json "transitions" fields with
+     | [`Assoc first; `Assoc second] ->
+       let check_transition expected_id expected_phase transition =
+         check
+           ("v2 transition id " ^ expected_id)
+           (String.equal
+              (string_json "transition_id" transition)
+              expected_id);
+         check
+           ("v2 transition phase " ^ expected_id)
+           (String.equal (string_json "phase" transition) expected_phase);
+         check
+           ("v2 transition stage " ^ expected_id)
+           (String.equal (string_json "stage_id" transition) "unit-stage");
+         check
+           ("v2 transition accepted " ^ expected_id)
+           (String.equal (string_json "status" transition) "accepted");
+         check
+           ("v2 transition session accepted " ^ expected_id)
+           (String.equal
+              (string_json "session_status" transition)
+              "accepted");
+         check
+           ("v2 transition unchecked reference " ^ expected_id)
+           (String.equal
+              (string_json "reference_status" transition)
+              "unchecked");
+         List.iter
+           (fun field ->
+              check
+                (Printf.sprintf "v2 transition %s root %s" expected_id field)
+                (String.length (string_json field transition) = 64))
+           [
+             "program_root";
+             "target_root";
+             "request_root";
+             "model_ranges_root";
+             "prior_session_root";
+             "advanced_session_root";
+             "advance_receipt_root";
+             "output_root";
+             "output_prefix_root";
+             "candidate_root";
+           ]
+       in
+       check_transition "token-000" "decode" first;
+       check_transition "token-001" "prefill" second;
+       check
+         "first prior is opened session"
+         (String.equal
+            (string_json "prior_session_root" first)
+            opened_session_root);
+       check
+         "second prior is first advanced session"
+         (String.equal
+            (string_json "prior_session_root" second)
+            (string_json "advanced_session_root" first));
+       check
+         "last output is second output"
+         (String.equal
+            last_transition_output_root
+            (string_json "output_root" second));
+       check
+         "outputs differ across progress"
+         (not
+            (String.equal
+               (string_json "output_root" first)
+               (string_json "output_root" second)))
+     | _ -> failwith "expected two resident transitions")
   | _ -> failwith "report must be an object"
 
 let check_session_bundle_reports_top_level_claim_mismatch () =
@@ -1092,6 +1287,7 @@ let () =
   check_session_bundle_single_transition ();
   check_session_bundle_hash_binds_decode_steps ();
   check_session_bundle_rejects_multi_transition ();
+  check_session_bundle_accepts_v2_multi_transition ();
   check_session_bundle_reports_top_level_claim_mismatch ();
   check_session_bundle_reports_identity_mismatch ();
   check_session_bundle_reports_declaration_mismatch ();

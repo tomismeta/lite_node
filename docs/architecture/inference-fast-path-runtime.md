@@ -213,11 +213,13 @@ batch_cache_scope = owner_bytes, model_range_pins
 ```
 
 The next runtime blocker has narrowed. The core session runtime now has an
-ABI-v2 continuation context for repeated advances, but the batch harness still
-opens an independent session for each stage. The product runtime must route
-multi-transition bundles through one v2 session, then bind target-owned
-prefill/decode phase semantics instead of reopening an independent session for
-each stage.
+ABI-v2 continuation context for repeated advances, and
+`--run-inference-session` can route uniform ABI-v2 multi-transition bundles
+through one opened session, repeated advance, and one finalization. The batch
+harness still opens an independent session for each stage. The product runtime
+must now bind target-owned `prefill`/`decode` phase semantics, state payload
+transport, and decode-loop token output while avoiding caller-selected layer
+orchestration.
 
 Compatibility checks:
 
@@ -369,9 +371,10 @@ ordinary program admission, encrypted execution policy, or consensus behavior.
 5. Return compact per-stage receipts and timings, with no aggregate session
    root.
 6. Use recurrent timing to choose the first optimization target.
-7. Add the product-facing session bundle harness. The first accepted shape is
-   a single target-owned stage labeled `prefill` or `decode`; multi-transition
-   bundles must fail closed with the state-carry blocker.
+7. Add the product-facing session bundle harness. The first accepted shapes are
+   a single target-owned stage labeled `prefill` or `decode`, plus uniform
+   ABI-v2 multi-transition bundles that reuse one opened session. ABI-v1 or
+   mismatched multi-transition bundles must still fail closed.
 8. Only then consider resident prepared views or native strict kernels.
 9. Require one target-owned prefill/decode program before claiming product
    session execution.

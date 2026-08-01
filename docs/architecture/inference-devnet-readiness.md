@@ -47,7 +47,7 @@ session/runtime packaging.
 | Recurrent-heavy performance fixture on rebased LiteNode | `/home/exedev/evidence/octra-inference/litenode-recurrent-heavy-reemitted-2ca5dfd-754b0a5-20260729` | accepted |
 | Prefill session bundle shape | `/home/exedev/evidence/octra-inference/prefill-session-bundle-55cd597-20260730-121116` | producer-shaped; not continuous LiteNode execution |
 | Batch runtime readiness | local `--run-batch` report `runtime_semantics` | diagnostic-only; current mode is `independent_session_per_stage`; core ABI-v2 continuation exists, but batch mode still does not use it |
-| Session bundle harness | local `--run-inference-session` report | accepts one target-owned stage labeled `prefill` or `decode`; multi-transition bundles are rejected with a hash-bound `continuation_preflight` until the harness routes them through ABI-v2 repeated advance |
+| Session bundle harness | local `--run-inference-session` report | accepts one target-owned stage labeled `prefill` or `decode`; uniform ABI-v2 multi-transition bundles now run through one opened session, repeated advance, and one finalization; ABI-v1 or mismatched bundles still reject with hash-bound `continuation_preflight` |
 
 The `/private/tmp` reports above are local rerun snapshots, not durable
 artifacts. The durable identity of the current local rerun is:
@@ -179,13 +179,13 @@ d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
    runtime now has an ABI-v2 continuation input: sequence, logical position,
    output root, output-prefix root, and optional committed target-state root are
    seeded into fixed VM memory cells before each advance. ABI v1 remains
-   one-shot. The remaining product harness work is to route
-   `--run-inference-session` multi-transition bundles through the v2 repeated
-   advance path. A separate state-transport step is still required if a target
-   declares non-empty committed target state; today's proven path keeps that
-   root absent and does not persist a canonical state payload. After routing
-   and state transport, bind target-owned `prefill` and `decode` phase
-   semantics. The label is not yet a VM-proven prefill/decode phase contract.
+   one-shot. The local session harness now routes uniform ABI-v2
+   multi-transition bundles through one opened session, repeated advance, and
+   one finalization. A separate state-transport step is still required if a
+   target declares non-empty committed target state; today's proven path keeps
+   that root absent and does not persist a canonical state payload. The next
+   product step is to bind target-owned `prefill` and `decode` phase semantics.
+   The label is not yet a VM-proven prefill/decode phase contract.
 6. Re-run one Bonsai prompt-to-token proof under the target-owned session shape.
 7. Re-run recurrent-heavy and logits-tail performance gates against that shape.
 8. Only then prepare the mergeable branch by reducing evidence-only scaffolding
