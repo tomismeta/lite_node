@@ -89,6 +89,26 @@ let tool_path () =
 let sha256 raw =
   Digestif.SHA256.(digest_string raw |> to_hex)
 
+let json_string value =
+  Yojson.Safe.to_string (`String value)
+
+let fixture_value_root ~name raw =
+  let digest = sha256 raw in
+  let canonical =
+    String.concat
+      ""
+      [
+        "{\"bytes\":";
+        string_of_int (String.length raw);
+        ",\"domain\":\"fixture-value\",\"label\":";
+        json_string name;
+        ",\"schema\":1,\"sha256\":\"";
+        digest;
+        "\"}";
+      ]
+  in
+  sha256 ("octra-inference/determinism-fixture\n" ^ canonical)
+
 let current_profile () =
   match Profile.current_runtime_profile ~opcode with
   | Some profile -> profile
@@ -283,7 +303,8 @@ let q1_failure_cases ?(output_cells = 1) ?(lower_effort = 199) () =
 
 let q1_template ?(session_abi_root = Abi.v1_root)
     ?(m = 1) ?(k = 128) ?(n = 1) ?expected_effort
-    ?failure_cases ?(output_count_unit = "cells") ?(r1 = 1) () =
+    ?failure_cases ?(output_count_unit = "cells") ?(r1 = 1)
+    ?(input_name = "lhs") () =
   let input = input_for ~m ~k in
   let q1_owner = q1_owner_for ~k ~n in
   let expected_output = expected_output_for ~m ~k ~n in
@@ -318,7 +339,7 @@ let q1_template ?(session_abi_root = Abi.v1_root)
     "input_memory_ranges",
     `List [
       `Assoc [
-        "name", `String "lhs";
+        "name", `String input_name;
         "source", source "fixtures/lhs.f64le.bin" input;
         "range_binding", `Assoc ["encoding", `String "f64le"];
         "vm_memory",
@@ -384,7 +405,7 @@ let q1_template ?(session_abi_root = Abi.v1_root)
           "base_address", `Int 10000;
           "length_f64_cells", `Int (m * n);
           "sha256", `String (sha256 expected_output);
-          "root", `String (sha256 expected_output);
+          "root", `String (fixture_value_root ~name:"expected" expected_output);
         ];
       ];
     ];
@@ -902,7 +923,7 @@ let check_truncated_decoded_input_manifest_reports_ingress_rejected () =
     let code, report =
       run_conformance
         dir
-        (q1_template ~failure_cases ())
+        (q1_template ~failure_cases ~input_name:"input" ())
         [
           "--strict-effort";
           "--include-failures";
@@ -961,7 +982,7 @@ let check_zero_decoded_input_truncation_is_not_ingress_rejected () =
     let code, report =
       run_conformance
         dir
-        (q1_template ~failure_cases ())
+        (q1_template ~failure_cases ~input_name:"input" ())
         [
           "--strict-effort";
           "--include-failures";
@@ -1118,6 +1139,53 @@ let check_require_failure_cases_rejects_wrong_q1_mutation_shape () =
             "q1_failure_case_mutation_mismatch_negative_byte_offset"
             (string_list "blockers" gate))
      | _ -> failwith "report must be object"))
+
+let check_q1_failure_shape_accepts_input_lhs_alias () =
+  with_temp_dir (fun dir ->
+    let failure_cases =
+      q1_failure_cases ()
+      |> List.map
+           (replace_failure_mutations
+              "nonfinite_input_nan"
+              [
+                mutation
+                  "replace_first_f64_input_cell"
+                  "input"
+                  ["value_bits", `Intlit "9221120237041090560"];
+              ])
+      |> List.map
+           (replace_failure_mutations
+              "nonfinite_input_infinity"
+              [
+                mutation
+                  "replace_first_f64_input_cell"
+                  "input"
+                  ["value_bits", `Intlit "9218868437227405312"];
+              ])
+    in
+    let code, report =
+      run_conformance
+        dir
+        (q1_template ~failure_cases ~input_name:"input" ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "Q1 lhs alias runner exits zero" (code = 0);
+    let result = first_result report in
+    let nan = failure_case_fields result "nonfinite_input_nan" in
+    let infinity = failure_case_fields result "nonfinite_input_infinity" in
+    check
+      "Q1 lhs alias nan mutation accepted"
+      (String.equal (string_value "mutation_shape_status" nan) "accepted");
+    check
+      "Q1 lhs alias infinity mutation accepted"
+      (String.equal
+         (string_value "mutation_shape_status" infinity)
+         "accepted"))
 
 let check_require_failure_cases_rejects_composite_q1_mutation_shape () =
   with_temp_dir (fun dir ->
@@ -2035,6 +2103,7 @@ let () =
   check_require_failure_cases_rejects_missing_q1_case ();
   check_require_failure_cases_rejects_wrong_q1_expectation ();
   check_require_failure_cases_rejects_wrong_q1_mutation_shape ();
+  check_q1_failure_shape_accepts_input_lhs_alias ();
   check_require_failure_cases_rejects_composite_q1_mutation_shape ();
   check_require_failure_cases_rejects_exact_partial_alias_shape ();
   check_accept_snapshot_requires_exact_output ();

@@ -123,6 +123,26 @@ let read_json path =
 let sha256 raw =
   Digestif.SHA256.(digest_string raw |> to_hex)
 
+let json_string value =
+  Yojson.Safe.to_string (`String value)
+
+let fixture_value_root ~name raw =
+  let digest = sha256 raw in
+  let canonical =
+    String.concat
+      ""
+      [
+        "{\"bytes\":";
+        string_of_int (String.length raw);
+        ",\"domain\":\"fixture-value\",\"label\":";
+        json_string name;
+        ",\"schema\":1,\"sha256\":\"";
+        digest;
+        "\"}";
+      ]
+  in
+  sha256 ("octra-inference/determinism-fixture\n" ^ canonical)
+
 let backend_type_string = function
   | Sys.Native -> "native"
   | Sys.Bytecode -> "bytecode"
@@ -1577,6 +1597,10 @@ let set_output_abi_registers state template =
 let find_input name inputs =
   match List.find_opt (fun input -> String.equal input.input_name name) inputs with
   | Some input -> input
+  | None when String.equal name "lhs" ->
+    (match List.find_opt (fun input -> String.equal input.input_name "input") inputs with
+     | Some input -> input
+     | None -> fail ("unknown input target: " ^ name))
   | None -> fail ("unknown input target: " ^ name)
 
 let set_f64_cell_bits state addr bits =
@@ -1878,6 +1902,9 @@ let q1_nonfinite_fp16_scale_mutation mutations =
        | None -> false)
     mutations
 
+let q1_lhs_target mutation =
+  mutation_targets "lhs" mutation || mutation_targets "input" mutation
+
 let q1_required_mutation_shape_blockers template values case mutations =
   let single_mutation =
     match mutations with
@@ -1890,7 +1917,7 @@ let q1_required_mutation_shape_blockers template values case mutations =
       List.exists
         (fun mutation ->
            mutation_is "replace_first_f64_input_cell" mutation
-           && mutation_targets "lhs" mutation
+           && q1_lhs_target mutation
            && mutation_z_value "value_bits" mutation
               = Some (z_of_unsigned_i64_string "9221120237041090560"))
         mutations
@@ -1898,7 +1925,7 @@ let q1_required_mutation_shape_blockers template values case mutations =
       List.exists
         (fun mutation ->
            mutation_is "replace_first_f64_input_cell" mutation
-           && mutation_targets "lhs" mutation
+           && q1_lhs_target mutation
            && mutation_z_value "value_bits" mutation
               = Some (z_of_unsigned_i64_string "9218868437227405312"))
         mutations
@@ -2227,10 +2254,11 @@ let subspan_result state value =
        let expected_sha = string_field "sha256" fields in
        let expected_root = opt_string_field "root" fields in
        let actual_sha = sha256 raw in
+       let actual_root = fixture_value_root ~name raw in
        let root_matched =
          match expected_root with
          | None -> true
-         | Some root -> String.equal root actual_sha
+         | Some root -> String.equal root actual_root
        in
        let matched = String.equal actual_sha expected_sha && root_matched in
        matched,
@@ -2242,7 +2270,7 @@ let subspan_result state value =
          "observed_sha256", `String actual_sha;
          "expected_root",
          (match expected_root with None -> `Null | Some root -> `String root);
-         "observed_root", `String actual_sha;
+         "observed_root", `String actual_root;
          "root_matched", `Bool root_matched;
          "matched", `Bool matched;
        ])
@@ -2463,7 +2491,6 @@ let failure_case_result root_dir opcode template registers values op case =
     let state = state ~limit:effort_limit () in
     let inputs = load_inputs root_dir state template registers in
     set_registers state registers values;
-    set_output_abi_registers state template;
     let mutation_results =
       List.map (apply_mutation state registers values inputs) mutations
     in
@@ -2702,7 +2729,6 @@ let execute_template root_dir entry =
   let state = state () in
   ignore (load_inputs root_dir state template registers);
   set_registers state registers values;
-  set_output_abi_registers state template;
   let op = op_for opcode registers in
   let abi_declaration_binding =
     Template.abi_declaration_binding_json (`Assoc template)
@@ -2714,6 +2740,7 @@ let execute_template root_dir entry =
       state
       [|op; VM.STOP|]
   in
+  set_output_abi_registers state template;
   let output = assoc_field "output" template in
   let subspans = list_field "subspans" output in
   let span_results =
