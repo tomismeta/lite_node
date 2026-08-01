@@ -190,6 +190,7 @@ let manifest name path raw =
     "path", `String path;
     "bytes", `Int (String.length raw);
     "sha256", `String (sha256 raw);
+    "root", `String (fixture_value_root ~name raw);
   ]
 
 let expected_manifest ?layout name path raw =
@@ -2812,6 +2813,9 @@ let check_p0_plus_rejected_results_empty_when_accepted () =
         "P0-plus rejected summary empty"
         (list_value "rejected_results" fields = []);
       check
+        "P0-plus accepted replacement plans empty"
+        (list_value "deterministic_replacement_plans" fields = []);
+      check
         "P0-plus accepted repair hints empty"
         (list_value "producer_repair_hints" fields = [])
     | _ -> failwith "report must be object")
@@ -2843,6 +2847,9 @@ let check_p0_plus_rejected_results_report_outputs () =
       check
         "P0-plus mixed repair hints empty"
         (list_value "producer_repair_hints" fields = []);
+      check
+        "P0-plus generic mismatch replacement plans empty"
+        (list_value "deterministic_replacement_plans" fields = []);
       (match list_value "rejected_results" fields with
        | [`Assoc rejected_fields] ->
          check
@@ -2870,6 +2877,9 @@ let check_p0_plus_rejected_results_report_outputs () =
            (String.equal
               (string_value "next_action" rejected_fields)
               "inspect_vm_semantics_or_fixture_authority");
+         check
+           "P0-plus rejected replacement plan absent"
+           (assoc_value "deterministic_replacement_plan" rejected_fields = `Null);
          (match list_value "outputs" rejected_fields with
           | [`Assoc output_fields] ->
             check
@@ -2892,6 +2902,84 @@ let check_p0_plus_rejected_results_report_outputs () =
           | _ -> failwith "expected one rejected output")
        | _ -> failwith "expected one rejected result")
     | _ -> failwith "report must be object")
+
+let check_p0_plus_softmax_gap_reports_diagnostic_replacement_plan () =
+  let outputs =
+    [
+      `Assoc [
+        "name", `String "expected_probabilities";
+        "status", `String "mismatch";
+      ];
+    ]
+  in
+  let plan =
+    Octra_vm.Inference_conformance_diagnostics.p0_plus_replacement_plan
+      ~opcode:"SOFTMAX_FP"
+      ~case_name:"wide-1024-stable-tail"
+      ~classification:"host_transcendental_portability_gap"
+      ~outputs
+  in
+  match plan with
+  | Some (`Assoc plan_fields) ->
+    check
+      "Softmax gap plan schema"
+      (String.equal
+         (string_value "schema" plan_fields)
+         "octra.inference.deterministic-replacement-plan.v1");
+    check
+      "Softmax gap plan diagnostic"
+      (bool_value "diagnostic_only" plan_fields);
+    check
+      "Softmax gap plan authority"
+      (String.equal (string_value "authority" plan_fields) "none");
+    check
+      "Softmax gap plan opcode"
+      (String.equal (string_value "opcode" plan_fields) "SOFTMAX_FP");
+    check
+      "Softmax gap plan case"
+      (String.equal
+         (string_value "case" plan_fields)
+         "wide-1024-stable-tail");
+    check
+      "Softmax gap plan classification"
+      (String.equal
+         (string_value "current_classification" plan_fields)
+         "host_transcendental_portability_gap");
+    check
+      "Softmax gap plan status"
+      (String.equal
+         (string_value "status" plan_fields)
+         "required_before_consensus");
+    check
+      "Softmax gap plan replacement"
+      (String.equal
+         (string_value "preferred_replacement" plan_fields)
+         "protocol-owned software exp over finite nonpositive binary64 inputs");
+    check
+      "Softmax gap plan gates"
+      (List.mem
+         (`String "cross_platform_matrix_matches")
+         (list_value "acceptance_gates" plan_fields));
+    check
+      "Softmax gap plan carries observed outputs"
+      (list_value "observed_outputs" plan_fields = outputs);
+    check
+      "Generic mismatch produces no plan"
+      (Octra_vm.Inference_conformance_diagnostics.p0_plus_replacement_plan
+         ~opcode:"SOFTMAX_FP"
+         ~case_name:"wide-1024-stable-tail"
+         ~classification:"deterministic_output_mismatch"
+         ~outputs
+       = None);
+    check
+      "Other opcode produces no plan"
+      (Octra_vm.Inference_conformance_diagnostics.p0_plus_replacement_plan
+         ~opcode:"ARGMAX_FP"
+         ~case_name:"wide-1024-stable-tail"
+         ~classification:"host_transcendental_portability_gap"
+         ~outputs
+       = None)
+  | _ -> failwith "expected Softmax replacement plan"
 
 let check_p0_plus_softmax_gap_requires_known_fixture_identity () =
   with_temp_dir (fun dir ->
@@ -2919,6 +3007,9 @@ let check_p0_plus_softmax_gap_requires_known_fixture_identity () =
     check "Softmax lookalike gap exits nonzero" (code = 1);
     match report with
     | `Assoc fields ->
+      check
+        "Softmax lookalike replacement plans empty"
+        (list_value "deterministic_replacement_plans" fields = []);
       (match list_value "rejected_results" fields with
        | [`Assoc rejected_fields] ->
          check
@@ -2931,6 +3022,9 @@ let check_p0_plus_softmax_gap_requires_known_fixture_identity () =
            (String.equal
               (string_value "next_action" rejected_fields)
               "inspect_vm_semantics_or_fixture_authority");
+         check
+           "Softmax lookalike replacement plan absent"
+           (assoc_value "deterministic_replacement_plan" rejected_fields = `Null);
          (match list_value "outputs" rejected_fields with
           | [`Assoc output_fields] ->
             let detail = assoc_json "mismatch_detail" output_fields in
@@ -2977,4 +3071,5 @@ let () =
   check_cross_platform_matrix_forged_row_root_rejects ();
   check_p0_plus_rejected_results_empty_when_accepted ();
   check_p0_plus_rejected_results_report_outputs ();
+  check_p0_plus_softmax_gap_reports_diagnostic_replacement_plan ();
   check_p0_plus_softmax_gap_requires_known_fixture_identity ()

@@ -18,6 +18,7 @@ module Fp64 = Octra_vm.Inference_fp64
 module Profile = Octra_vm.Inference_numerical_profile
 module Signature = Octra_vm.Inference_conformance_signature
 module Template = Octra_vm.Inference_conformance_template
+module Diagnostics = Octra_vm.Inference_conformance_diagnostics
 
 let template_index = ref None
 let p0_plus_pack = ref None
@@ -3963,6 +3964,13 @@ let execute_p0_plus_fixture root_dir entry =
       ~ran
       ~matched
   in
+  let replacement_plan =
+    Diagnostics.p0_plus_replacement_plan
+      ~opcode
+      ~case_name
+      ~classification:determinism_classification
+      ~outputs
+  in
   let profile_gates = p0_plus_profile_gates opcode fixture in
   let profile_root_bindings =
     p0_plus_profile_root_bindings fixture profile_gates
@@ -3981,6 +3989,10 @@ let execute_p0_plus_fixture root_dir entry =
     "output_status", `String (if matched then "matched" else "mismatch");
     "determinism_classification", `String determinism_classification;
     "next_action", `String next_action;
+    "deterministic_replacement_plan",
+    (match replacement_plan with
+     | Some plan -> plan
+     | None -> `Null);
     "observed_effort", `Int effort;
     "outputs", `List outputs;
   ]
@@ -4002,6 +4014,8 @@ let p0_plus_rejected_results results =
                "determinism_classification",
                field_or_null "determinism_classification" fields;
                "next_action", field_or_null "next_action" fields;
+               "deterministic_replacement_plan",
+               field_or_null "deterministic_replacement_plan" fields;
                "outputs", field_or_null "outputs" fields;
              ])
          | _ ->
@@ -4014,6 +4028,16 @@ let p0_plus_rejected_results results =
                "outputs", `List [];
              ]))
     results
+
+let p0_plus_deterministic_replacement_plans results =
+  results
+  |> List.filter_map (function
+    | _, `Assoc fields ->
+      (match field "deterministic_replacement_plan" fields with
+       | Some (`Assoc _ as plan) -> Some plan
+       | _ -> None)
+    | _ -> None)
+  |> List.sort_uniq compare
 
 let template_corpus_entry root_dir entry =
   let template_path = string_field "vm_execution_template" entry in
@@ -4222,6 +4246,8 @@ let run_p0_plus_pack path =
       ~unprofiled_count:0
       ~root_binding_counts
       status_counts;
+    "deterministic_replacement_plans",
+    `List (p0_plus_deterministic_replacement_plans results);
     "rejected_results", `List (p0_plus_rejected_results results);
     "results", `List (List.map snd results);
   ]
