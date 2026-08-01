@@ -3243,16 +3243,13 @@ let exec_one st op =
               | Some shifted_bits ->
                 (match Inference_fp64.compare shifted_bits 0L with
                  | Some cmp when cmp <= 0 ->
-                   let shifted = Int64.float_of_bits shifted_bits in
-                   let value = exp shifted in
-                   let value_bits = Int64.bits_of_float value in
-                   Array.unsafe_set exps index value_bits;
-                   if not (finite_fp64 shifted && finite_fp64 value) then
-                     ok := false
-                   else
-                     (match Inference_fp64.add !sum_exp_bits value_bits with
-                      | Some next -> sum_exp_bits := next
-                      | None -> ok := false)
+                   (match host_fp64_exp_nonpositive_bits shifted_bits with
+                    | Some value_bits ->
+                      Array.unsafe_set exps index value_bits;
+                      (match Inference_fp64.add !sum_exp_bits value_bits with
+                       | Some next -> sum_exp_bits := next
+                       | None -> ok := false)
+                    | None -> ok := false)
                  | _ -> ok := false)
               | None -> ok := false
             done;
