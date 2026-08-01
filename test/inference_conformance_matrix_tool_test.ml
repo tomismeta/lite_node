@@ -1941,6 +1941,34 @@ let check_matrix_rejects_q1_executable_abi_register_contradiction () =
            (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_q1_executable_abi_nonhex_payload_sha () =
+  with_temp_dir (fun dir ->
+    let forged runner_sha system machine =
+      report ~runner_sha system machine
+      |> replace_executable_abi_field
+           "output_payload_sha256"
+           (`String (String.make 64 'z'))
+    in
+    let a =
+      write_report dir "a.cjson" (forged (hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (forged (hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "Q1 executable ABI nonhex payload sha exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "Q1 executable ABI nonhex payload sha blocker"
+        (List.mem
+           "q1_contract_shape_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_signs_q1_output_span_base () =
   with_temp_dir (fun dir ->
     let a =
@@ -2182,6 +2210,7 @@ let () =
   check_matrix_rejects_q1_contract_shape_output_span_base_mismatch ();
   check_matrix_rejects_q1_executable_abi_payload_contradiction ();
   check_matrix_rejects_q1_executable_abi_register_contradiction ();
+  check_matrix_rejects_q1_executable_abi_nonhex_payload_sha ();
   check_matrix_signs_q1_output_span_base ();
   check_matrix_rejects_q1_contract_shape_oversized_intlit ();
   check_matrix_rejects_q1_failure_contract_not_applicable ();

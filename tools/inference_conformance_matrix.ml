@@ -129,6 +129,10 @@ let hex_nibble = function
   | 'A' .. 'F' as value -> Some (10 + Char.code value - Char.code 'A')
   | _ -> None
 
+let hex_string value =
+  String.length value = 64
+  && String.for_all (fun ch -> Option.is_some (hex_nibble ch)) value
+
 let q1_fp16_bits_from_hex_le value =
   if String.length value <> 4 then None
   else
@@ -489,7 +493,7 @@ let q1_contract_shape_consistent fields =
          && expected_abi_base = observed_abi_base
          && registers_match
          && String.equal payload_status "accepted"
-         && String.length payload_sha256 = 64
+         && hex_string payload_sha256
          && output_subspan_has_span expected_abi_base output_cells
          && expected_abi_count = output_cells
          && observed_abi_count = output_cells
