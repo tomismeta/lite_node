@@ -787,6 +787,16 @@ let report_summary path =
         results
     in
     let has_results = result_fields <> [] in
+    let results_accepted =
+      List.for_all
+        (fun fields -> opt_status_is_accepted "status" fields)
+        result_fields
+    in
+    let vm_runs_accepted =
+      List.for_all
+        (fun fields -> opt_status_is_accepted "vm_run" fields)
+        result_fields
+    in
     let strict_effort =
       List.for_all
         (fun fields ->
@@ -894,6 +904,8 @@ let report_summary path =
       && opt_status_is_accepted "status" fields
       && opt_status_is_accepted "execution_status" fields
       && has_results
+      && results_accepted
+      && vm_runs_accepted
       && (match failure_gate with
           | Some fields -> opt_status_is_accepted "status" fields
           | None -> false)
@@ -928,6 +940,8 @@ let report_summary path =
            (not (opt_status_is_accepted "execution_status" fields))
            "execution_rejected"
       |> add_if (not has_results) "missing_results"
+      |> add_if (not results_accepted) "result_rejected"
+      |> add_if (not vm_runs_accepted) "vm_run_rejected"
       |> add_if
            (not
               (match failure_gate with

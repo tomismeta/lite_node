@@ -2264,6 +2264,64 @@ let check_matrix_rejects_empty_results () =
            (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_result_status_rejected () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Linux" "x86_64"
+         |> replace_result_field "status" (`String "rejected"))
+    in
+    let code, json = run_matrix [a; b] in
+    check "result rejected matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "result rejected top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      check
+        "result rejected validator blocker"
+        (List.mem
+           "result_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_vm_run_rejected () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Linux" "x86_64"
+         |> replace_result_field "vm_run" (`String "rejected"))
+    in
+    let code, json = run_matrix [a; b] in
+    check "vm run rejected matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "vm run rejected top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      check
+        "vm run rejected validator blocker"
+        (List.mem
+           "vm_run_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_vm_semantics_binding_mismatch () =
   with_temp_dir (fun dir ->
     let a =
@@ -2432,6 +2490,8 @@ let () =
   check_matrix_rejects_q1_failure_contract_not_applicable ();
   check_matrix_accepts_non_q1_failure_contract_not_applicable ();
   check_matrix_rejects_empty_results ();
+  check_matrix_rejects_result_status_rejected ();
+  check_matrix_rejects_vm_run_rejected ();
   check_matrix_rejects_abi_declaration_binding_mismatch ();
   check_matrix_rejects_executable_abi_binding_mismatch ();
   check_matrix_prioritizes_executable_abi_not_run ();
