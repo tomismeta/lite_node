@@ -465,7 +465,7 @@ let result
     "subspans",
     `List [
       `Assoc [
-        "name", `String "output";
+        "name", `String "expected";
         "length_f64_cells", `Int 6;
         "expected_sha256", `String (hex_root 'a');
         "observed_sha256", `String (hex_root 'a');

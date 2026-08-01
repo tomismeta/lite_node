@@ -373,17 +373,28 @@ let q1_contract_shape_consistent fields =
     match opt_assoc_field "q1_contract_shape" fields with
     | Some shape ->
       let shape_int name = json_int_field name shape in
-      let output_subspan_cells =
+      let output_subspan_has_cells cells =
         match field "subspans" fields with
-        | Some (`List [`Assoc subspan]) ->
-          (match opt_string_field "name" subspan with
-           | Some "output" -> json_int_field "length_f64_cells" subspan
-           | _ -> None)
-        | _ -> None
+        | Some (`List subspans) ->
+          List.exists
+            (function
+              | `Assoc subspan ->
+                json_int_field "length_f64_cells" subspan = Some cells
+                &&
+                (match field "matched" subspan with
+                 | Some (`Bool true) -> true
+                 | _ -> false)
+              | _ -> false)
+            subspans
+        | _ -> false
       in
-      let executable_abi_count =
+      let executable_abi_counts =
         match opt_assoc_field "executable_abi_binding" fields with
-        | Some abi -> json_int_field "expected_r1" abi
+        | Some abi ->
+          (match json_int_field "expected_r1" abi,
+                 json_int_field "observed_r1" abi with
+           | Some expected, Some observed -> Some (expected, observed)
+           | _ -> None)
         | None -> None
       in
       (match
@@ -402,8 +413,7 @@ let q1_contract_shape_consistent fields =
          json_int_field "observed_program_effort" fields,
          json_int_field "expected_opcode_effort" fields,
          json_int_field "observed_opcode_effort" fields,
-         output_subspan_cells,
-         executable_abi_count
+         executable_abi_counts
        with
        | Some m,
          Some k,
@@ -420,8 +430,7 @@ let q1_contract_shape_consistent fields =
          Some observed_program_effort,
          Some expected_opcode_effort,
          Some observed_opcode_effort,
-         Some output_subspan_cells,
-         Some executable_abi_count ->
+         Some (expected_abi_count, observed_abi_count) ->
          let expected_required_bytes =
            match checked_mul n (k / 128) with
            | Some blocks -> checked_mul blocks 18
@@ -449,8 +458,9 @@ let q1_contract_shape_consistent fields =
          && k mod 128 = 0
          && checked_mul m k = Some lhs_cells
          && expected_output_cells = Some output_cells
-         && output_subspan_cells = output_cells
-         && executable_abi_count = output_cells
+         && output_subspan_has_cells output_cells
+         && expected_abi_count = output_cells
+         && observed_abi_count = output_cells
          && expected_required_bytes = Some required_bytes
          &&
          (match required_source_span with
