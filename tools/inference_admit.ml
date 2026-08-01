@@ -1896,9 +1896,25 @@ let preflight_identity_blockers
        "declared_model_deployment_root_mismatch"
   |> List.rev
 
-let preflight_declaration_blockers ~decode_steps_match =
+let valid_phase_sequence phases =
+  let rec loop seen_decode = function
+    | [] -> true
+    | phase :: rest when String.equal phase "prefill" ->
+      (not seen_decode) && loop seen_decode rest
+    | phase :: rest when String.equal phase "decode" ->
+      loop true rest
+    | _ -> false
+  in
+  loop false phases
+
+let preflight_declaration_blockers
+    ~decode_steps_match
+    ~phase_sequence_valid =
   []
   |> add_if (not decode_steps_match) "decode_steps_mismatch"
+  |> add_if
+       (not phase_sequence_valid)
+       "prefill_decode_phase_sequence_mismatch"
   |> List.rev
 
 let continuation_runtime_status
@@ -2051,6 +2067,7 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
     | _ -> false
   in
   let decode_steps_match = decode_transitions = bundle.decode_steps in
+  let phase_sequence_valid = valid_phase_sequence phases in
   let request_root_status =
     declared_string_status bundle.declared_request_root request_roots
   in
@@ -2070,7 +2087,9 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
       ~model_deployment_root_status
   in
   let declaration_blockers =
-    preflight_declaration_blockers ~decode_steps_match
+    preflight_declaration_blockers
+      ~decode_steps_match
+      ~phase_sequence_valid
   in
   let runtime_readiness_status, next_runtime_blocker =
     continuation_runtime_status
@@ -2100,6 +2119,8 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
       "declared_phase_sequence", list_json phases;
       "declared_decode_transitions", `Int decode_transitions;
       "decode_steps_match", `Bool decode_steps_match;
+      "prefill_decode_phase_sequence_valid",
+      `Bool phase_sequence_valid;
       "identity_checks",
       `Assoc [
         "target_root_uniform", `Bool target_root_uniform;
@@ -2181,7 +2202,6 @@ let missing_resident_runtime_capabilities =
 
 let remaining_v2_runtime_capabilities =
   `List [
-    `String "prefill_decode_phase_contract";
     `String "committed_target_state_payload_transport";
     `String "decode_loop_argmax_session_output";
   ]
@@ -2365,7 +2385,8 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     session_runtime_semantics
       ~transition_count:(List.length bundle.transitions)
       ~runtime_readiness_status:"resident_session_candidate"
-      ~next_runtime_blocker:"prefill_decode_phase_contract_not_bound"
+      ~next_runtime_blocker:
+        "committed_target_state_payload_transport_not_bound"
       ~continuation_supported:true
   in
   let payload =
@@ -2375,7 +2396,8 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       ~transition_count:(List.length bundle.transitions)
       ~decode_steps:bundle.decode_steps
       ~runtime_semantics
-      ~next_runtime_blocker:"prefill_decode_phase_contract_not_bound"
+      ~next_runtime_blocker:
+        "committed_target_state_payload_transport_not_bound"
       ~opened_session_root:(Some (Session.root opened))
       ~final_session_root:(Some (Session.root finalized))
       ~final_receipt_root:(Some (Receipt.root final_receipt))
@@ -2396,7 +2418,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       "session_report_sha256", `String (session_report_sha256 payload);
       "runtime_semantics", runtime_semantics;
       "next_runtime_blocker",
-      `String "prefill_decode_phase_contract_not_bound";
+      `String "committed_target_state_payload_transport_not_bound";
       "opened_session_root", `String (Session.root opened);
       "final_session_root", `String (Session.root finalized);
       "final_receipt_root", `String (Receipt.root final_receipt);

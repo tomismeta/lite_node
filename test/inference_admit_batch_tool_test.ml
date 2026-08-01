@@ -416,6 +416,7 @@ let write_session_bundle_fixture
     ?(decode_steps = Some 1)
     ?session_abi_root
     ?code
+    ?phase_for_index
     ?request_root
     ?model_deployment_root
     ?second_request_nonce
@@ -450,7 +451,14 @@ let write_session_bundle_fixture
       (fun index ->
          `Assoc [
            "transition_id", `String (Printf.sprintf "token-%03d" index);
-           "phase", `String (if index = 0 then "decode" else "prefill");
+           "phase",
+           `String
+             (match phase_for_index with
+              | Some phase -> phase index
+              | None ->
+                if transition_count = 1 then "decode"
+                else if index = 0 then "prefill"
+                else "decode");
            "stage", (if index = 1 then second_stage else stage);
          ])
   in
@@ -863,7 +871,7 @@ let check_session_bundle_rejects_multi_transition () =
     check
       "preflight phase sequence"
       (list_json "declared_phase_sequence" preflight
-       = [`String "decode"; `String "prefill"]);
+       = [`String "prefill"; `String "decode"]);
     check
       "preflight decode transition count"
       (int_json "declared_decode_transitions" preflight = 1);
@@ -976,8 +984,8 @@ let check_session_bundle_rejects_multi_transition () =
              "output_root";
            ]
        in
-       check_plan_entry 0 "token-000" "decode" first;
-       check_plan_entry 1 "token-001" "prefill" second
+       check_plan_entry 0 "token-000" "prefill" first;
+       check_plan_entry 1 "token-001" "decode" second
      | _ -> failwith "expected two preflight transitions")
   | _ -> failwith "report must be an object"
 
@@ -1051,12 +1059,11 @@ let check_session_bundle_accepts_v2_multi_transition () =
       "v2 remaining runtime blocker"
       (String.equal
          (string_json "next_runtime_blocker" semantics)
-         "prefill_decode_phase_contract_not_bound");
+         "committed_target_state_payload_transport_not_bound");
     check
       "v2 remaining missing capabilities"
       (list_json "missing_runtime_capabilities" semantics
        = [
-         `String "prefill_decode_phase_contract";
          `String "committed_target_state_payload_transport";
          `String "decode_loop_argmax_session_output";
        ]);
@@ -1106,8 +1113,8 @@ let check_session_bundle_accepts_v2_multi_transition () =
              "candidate_root";
            ]
        in
-       check_transition "token-000" "decode" first;
-       check_transition "token-001" "prefill" second;
+       check_transition "token-000" "prefill" first;
+       check_transition "token-001" "decode" second;
        check
          "first prior is opened session"
          (String.equal
@@ -1130,6 +1137,55 @@ let check_session_bundle_accepts_v2_multi_transition () =
                (string_json "output_root" first)
                (string_json "output_root" second)))
      | _ -> failwith "expected two resident transitions")
+  | _ -> failwith "report must be an object"
+
+let check_session_bundle_rejects_invalid_phase_order () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~session_abi_root:Abi.v2_root
+      ~code:continuation_code
+      ~phase_for_index:(fun index ->
+        if index = 0 then "decode" else "prefill")
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "phase-order bundle exits nonzero" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check_session_hash report;
+    check
+      "phase-order top-level blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "prefill_decode_phase_sequence_mismatch");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "phase-order readiness"
+      (String.equal
+         (string_json "runtime_readiness_status" semantics)
+         "declaration_rejected");
+    let preflight = assoc_json "continuation_preflight" fields in
+    check
+      "phase-order preflight readiness"
+      (String.equal
+         (string_json "runtime_readiness_status" preflight)
+         "declaration_rejected");
+    check
+      "phase sequence invalid"
+      (not (bool_json "prefill_decode_phase_sequence_valid" preflight));
+    check
+      "decode steps still match"
+      (bool_json "decode_steps_match" preflight);
+    check
+      "phase-order declaration blocker"
+      (list_json "declaration_blockers" preflight
+       = [`String "prefill_decode_phase_sequence_mismatch"]);
+    check
+      "phase-order blocker list"
+      (list_json "blockers" preflight
+       = [`String "prefill_decode_phase_sequence_mismatch"])
   | _ -> failwith "report must be an object"
 
 let check_session_bundle_reports_top_level_claim_mismatch () =
@@ -1288,6 +1344,7 @@ let () =
   check_session_bundle_hash_binds_decode_steps ();
   check_session_bundle_rejects_multi_transition ();
   check_session_bundle_accepts_v2_multi_transition ();
+  check_session_bundle_rejects_invalid_phase_order ();
   check_session_bundle_reports_top_level_claim_mismatch ();
   check_session_bundle_reports_identity_mismatch ();
   check_session_bundle_reports_declaration_mismatch ();

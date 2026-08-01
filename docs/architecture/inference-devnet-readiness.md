@@ -143,9 +143,8 @@ d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
    harness overhead, but full prompt runtime still needs resident execution,
    cached authenticated ranges, and measured kernel optimization. Batch reports
    now make this explicit in diagnostic `runtime_semantics`: owner-byte and
-   model-range pin caches are supported, while resident session state carry,
-   prefill/decode phase ownership, and decode-loop ARGMAX outputs remain the
-   runtime blocker.
+   model-range pin caches are supported, while committed state payload
+   transport and decode-loop ARGMAX outputs remain runtime blockers.
 
 4. Multi-platform conformance.
    Strict P0 reports must run across the intended validator platforms and
@@ -181,11 +180,13 @@ d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
    seeded into fixed VM memory cells before each advance. ABI v1 remains
    one-shot. The local session harness now routes uniform ABI-v2
    multi-transition bundles through one opened session, repeated advance, and
-   one finalization. A separate state-transport step is still required if a
-   target declares non-empty committed target state; today's proven path keeps
-   that root absent and does not persist a canonical state payload. The next
-   product step is to bind target-owned `prefill` and `decode` phase semantics.
-   The label is not yet a VM-proven prefill/decode phase contract.
+   one finalization. The harness also binds the generic phase sequence as
+   `prefill*` followed by `decode*`, with `decode_steps` matching the declared
+   decode count. A separate state-transport step is still required if a target
+   declares non-empty committed target state; today's proven path keeps that
+   root absent and does not persist a canonical state payload. The next product
+   step is to bind decode-loop token outputs and any required committed state
+   payload.
 6. Re-run one Bonsai prompt-to-token proof under the target-owned session shape.
 7. Re-run recurrent-heavy and logits-tail performance gates against that shape.
 8. Only then prepare the mergeable branch by reducing evidence-only scaffolding

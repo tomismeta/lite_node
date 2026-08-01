@@ -217,9 +217,10 @@ ABI-v2 continuation context for repeated advances, and
 `--run-inference-session` can route uniform ABI-v2 multi-transition bundles
 through one opened session, repeated advance, and one finalization. The batch
 harness still opens an independent session for each stage. The product runtime
-must now bind target-owned `prefill`/`decode` phase semantics, state payload
-transport, and decode-loop token output while avoiding caller-selected layer
-orchestration.
+must now bind committed state payload transport and decode-loop token output
+while avoiding caller-selected layer orchestration. The generic phase sequence
+is bound as `prefill*` followed by `decode*`, with `decode_steps` matching the
+declared decode transition count.
 
 Compatibility checks:
 
