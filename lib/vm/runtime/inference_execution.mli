@@ -20,6 +20,7 @@ type execution_profile = {
 
 type result = {
   effort_used : int;
+  output_payload : string;
   output_root : string;
   candidate_root : string;
 }

@@ -29,6 +29,7 @@ type t = {
   phase : phase;
   logical_position : int;
   committed_target_state_root : string option;
+  output_payload : string option;
   output_root : string;
   output_prefix_root : string;
   candidate_root : string;
@@ -220,6 +221,7 @@ let open_session ~plan =
     phase = Open;
     logical_position = 0;
     committed_target_state_root = None;
+    output_payload = None;
     output_root = initial_output_root request_root;
     output_prefix_root = initial_output_prefix_root request_root;
     candidate_root = initial_candidate_root ~request_root ~model_ranges_root;
@@ -280,6 +282,7 @@ let advance_with_profile ?profile ~plan ~expected_sequence session =
                sequence = next_sequence;
                phase = Advanced;
                logical_position = next_position;
+               output_payload = Some execution.output_payload;
                output_root = execution.output_root;
                output_prefix_root =
                  append_output_prefix
@@ -344,6 +347,7 @@ let sequence session = session.sequence
 let phase session = session.phase
 let logical_position session = session.logical_position
 let committed_target_state_root session = session.committed_target_state_root
+let output_payload session = session.output_payload
 let output_prefix_root session = session.output_prefix_root
 let output_root session = session.output_root
 let candidate_root session = session.candidate_root

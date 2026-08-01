@@ -125,6 +125,7 @@ type batch_cache = {
 
 type batch_stage_result = {
   stage_json : Yojson.Safe.t;
+  stage_output_payload : string;
   stage_output_root : string;
   stage_reference_mismatch : bool;
   stage_unsupported_opcodes : string list;
@@ -134,6 +135,7 @@ type batch_stage_result = {
 
 type session_stage_result = {
   session_stage_json : Yojson.Safe.t;
+  session_stage_output_payload : string;
   session_stage_output_root : string;
   session_stage_reference_mismatch : bool;
   session_stage_unsupported_opcodes : string list;
@@ -1673,6 +1675,11 @@ let run_batch_stage ~cache ~timing_mode stage =
     | Ok result -> result
   in
   timing_mark timer "finalize_session";
+  let output_payload =
+    match Session.output_payload finalized with
+    | Some payload -> payload
+    | None -> fail "missing finalized session output payload"
+  in
   let output_root = Session.output_root finalized in
   let reference_status, reference_mismatch, root_match =
     match stage.expected_output_root with
@@ -1716,6 +1723,8 @@ let run_batch_stage ~cache ~timing_mode stage =
           "final_session_root", `String (Session.root finalized);
           "advance_receipt_root", `String (Receipt.root advance_receipt);
           "final_receipt_root", `String (Receipt.root final_receipt);
+          "output_payload", `String output_payload;
+          "output_payload_sha256", `String (sha256 output_payload);
           "output_root", `String output_root;
           "output_prefix_root", `String (Session.output_prefix_root finalized);
           "candidate_root", `String (Session.candidate_root finalized);
@@ -1727,6 +1736,7 @@ let run_batch_stage ~cache ~timing_mode stage =
         @ opcode_profile_fields
             (timer.mode, execution_profile, opcode_profile)
         @ timing_fields timer);
+    stage_output_payload = output_payload;
     stage_output_root = output_root;
     stage_reference_mismatch = reference_mismatch;
     stage_unsupported_opcodes = unsupported;
@@ -1774,6 +1784,11 @@ let run_prepared_session_transition session prepared_transition =
        | Ok (advanced, receipt) -> advanced, receipt, [], [])
   in
   timing_mark timer "advance_session";
+  let output_payload =
+    match Session.output_payload advanced with
+    | Some payload -> payload
+    | None -> fail "missing advanced session output payload"
+  in
   let output_root = Session.output_root advanced in
   let reference_status, reference_mismatch, root_match =
     match transition.stage.expected_output_root with
@@ -1816,6 +1831,8 @@ let run_prepared_session_transition session prepared_transition =
         "prior_session_root", `String prior_session_root;
         "advanced_session_root", `String (Session.root advanced);
         "advance_receipt_root", `String (Receipt.root advance_receipt);
+        "output_payload", `String output_payload;
+        "output_payload_sha256", `String (sha256 output_payload);
         "output_root", `String output_root;
         "output_prefix_root", `String (Session.output_prefix_root advanced);
         "candidate_root", `String (Session.candidate_root advanced);
@@ -1830,6 +1847,7 @@ let run_prepared_session_transition session prepared_transition =
   advanced,
   {
     session_stage_json = transition_json;
+    session_stage_output_payload = output_payload;
     session_stage_output_root = output_root;
     session_stage_reference_mismatch = reference_mismatch;
     session_stage_unsupported_opcodes = unsupported;
@@ -2203,7 +2221,7 @@ let missing_resident_runtime_capabilities =
 let remaining_v2_runtime_capabilities =
   `List [
     `String "committed_target_state_payload_transport";
-    `String "decode_loop_argmax_session_output";
+    `String "decode_loop_token_contract";
   ]
 
 let independent_batch_runtime_semantics =
@@ -2281,6 +2299,7 @@ let session_report_payload
     ~final_session_root
     ~final_receipt_root
     ~output_prefix_root
+    ~last_transition_output_payload
     ~last_transition_output_root
     ~unsupported_opcodes
     ~missing_capabilities
@@ -2297,6 +2316,10 @@ let session_report_payload
     "final_session_root", nullable_string_json final_session_root;
     "final_receipt_root", nullable_string_json final_receipt_root;
     "output_prefix_root", nullable_string_json output_prefix_root;
+    "last_transition_output_payload",
+    nullable_string_json last_transition_output_payload;
+    "last_transition_output_payload_sha256",
+    nullable_string_json (Option.map sha256 last_transition_output_payload);
     "last_transition_output_root",
     nullable_string_json last_transition_output_root;
     "unsupported_opcodes", unique_json_strings unsupported_opcodes;
@@ -2381,6 +2404,11 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     |> List.map (fun result -> result.session_stage_output_root)
     |> last_string
   in
+  let last_transition_output_payload =
+    results
+    |> List.map (fun result -> result.session_stage_output_payload)
+    |> last_string
+  in
   let runtime_semantics =
     session_runtime_semantics
       ~transition_count:(List.length bundle.transitions)
@@ -2402,6 +2430,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       ~final_session_root:(Some (Session.root finalized))
       ~final_receipt_root:(Some (Receipt.root final_receipt))
       ~output_prefix_root:(Some (Session.output_prefix_root finalized))
+      ~last_transition_output_payload
       ~last_transition_output_root
       ~unsupported_opcodes:unsupported
       ~missing_capabilities:missing
@@ -2423,6 +2452,11 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       "final_session_root", `String (Session.root finalized);
       "final_receipt_root", `String (Receipt.root final_receipt);
       "output_prefix_root", `String (Session.output_prefix_root finalized);
+      "last_transition_output_payload",
+      nullable_string_json last_transition_output_payload;
+      "last_transition_output_payload_sha256",
+      nullable_string_json
+        (Option.map sha256 last_transition_output_payload);
       "last_transition_output_root",
       nullable_string_json last_transition_output_root;
       "unsupported_opcodes", unique_json_strings unsupported;
@@ -2482,6 +2516,7 @@ let run_inference_session_file ~timing_mode path =
         ~final_session_root:None
         ~final_receipt_root:None
         ~output_prefix_root:None
+        ~last_transition_output_payload:None
         ~last_transition_output_root:None
         ~unsupported_opcodes:preflight.continuation_unsupported_opcodes
         ~missing_capabilities:preflight.continuation_missing_capabilities
@@ -2501,6 +2536,8 @@ let run_inference_session_file ~timing_mode path =
         "final_session_root", `Null;
         "final_receipt_root", `Null;
         "output_prefix_root", `Null;
+        "last_transition_output_payload", `Null;
+        "last_transition_output_payload_sha256", `Null;
         "last_transition_output_root", `Null;
         "next_runtime_blocker",
         `String preflight.continuation_next_runtime_blocker;
@@ -2555,6 +2592,7 @@ let run_inference_session_file ~timing_mode path =
         ~final_session_root:None
         ~final_receipt_root:None
         ~output_prefix_root:None
+        ~last_transition_output_payload:(Some result.stage_output_payload)
         ~last_transition_output_root:(Some result.stage_output_root)
         ~unsupported_opcodes:result.stage_unsupported_opcodes
         ~missing_capabilities:result.stage_missing_capabilities
@@ -2576,6 +2614,9 @@ let run_inference_session_file ~timing_mode path =
         "final_session_root", `Null;
         "final_receipt_root", `Null;
         "output_prefix_root", `Null;
+        "last_transition_output_payload", `String result.stage_output_payload;
+        "last_transition_output_payload_sha256",
+        `String (sha256 result.stage_output_payload);
         "last_transition_output_root", `String result.stage_output_root;
         "unsupported_opcodes",
         unique_json_strings result.stage_unsupported_opcodes;

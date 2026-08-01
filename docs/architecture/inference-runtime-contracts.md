@@ -238,6 +238,13 @@ candidate state in the plain runner. The convention is bound into the output
 root with the target's `session_abi_root`; a future ABI descriptor may replace
 the fixed convention without changing the surrounding session protocol.
 
+Local session reports may include `output_payload` and `output_payload_sha256`
+next to `output_root`. The payload is a client witness, not a second authority:
+`output_root` commits to the target, session ABI, and exact payload bytes. A
+decode target that writes a single `ARGMAX_FP` selected index through this ABI
+can therefore return a root-bound token id without adding tokenizer or
+model-family knowledge to LiteNode.
+
 This is an execution boundary, not a model-format contract. Token sequences,
 logits, tensor layouts, and sampling behavior remain target-owned.
 

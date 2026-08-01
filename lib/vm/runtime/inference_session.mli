@@ -72,6 +72,7 @@ val sequence : t -> int
 val phase : t -> phase
 val logical_position : t -> int
 val committed_target_state_root : t -> string option
+val output_payload : t -> string option
 val output_prefix_root : t -> string
 val output_root : t -> string
 val candidate_root : t -> string

@@ -134,7 +134,7 @@ let argmax_output_code values =
       |];
     ]
 
-let run_result ?(write_output = true) ?(max_output_bytes = 64)
+let run_payload_result ?(write_output = true) ?(max_output_bytes = 64)
     ?(max_scratch_bytes = 4096)
     ?capabilities
     ?code_range_root ?program ?(input = "") bytes =
@@ -223,8 +223,28 @@ let run_result ?(write_output = true) ?(max_output_bytes = 64)
   match
     Session.advance ~plan ~expected_sequence:0 session
   with
-  | Ok (advanced, _) -> Ok (Session.output_root advanced)
+  | Ok (advanced, _) ->
+    (match Session.output_payload advanced with
+     | None -> Error "missing output payload"
+     | Some payload -> Ok (payload, Session.output_root advanced))
   | Error error -> Error (Session.error_message error)
+
+let run_result ?write_output ?max_output_bytes ?max_scratch_bytes
+    ?capabilities
+    ?code_range_root ?program ?input bytes =
+  match
+    run_payload_result
+      ?write_output
+      ?max_output_bytes
+      ?max_scratch_bytes
+      ?capabilities
+      ?code_range_root
+      ?program
+      ?input
+      bytes
+  with
+  | Ok (_, root) -> Ok root
+  | Error error -> Error error
 
 let run bytes =
   match run_result bytes with
@@ -616,19 +636,25 @@ let check_output_contract () =
 let check_argmax_output_contract () =
   let argmax_cap = capability "tensor.argmax" (hex_root '6') in
   let left =
-    run_result
+    run_payload_result
       ~program:(argmax_output_code [1.0; 5.0; 5.0])
       ~capabilities:[argmax_cap]
       "owner"
   in
   let right =
-    run_result
+    run_payload_result
       ~program:(argmax_output_code [1.0; 5.0; 6.0])
       ~capabilities:[argmax_cap]
       "owner"
   in
   match left, right with
-  | Ok left, Ok right ->
+  | Ok (left_payload, left), Ok (right_payload, right) ->
+    check
+      "argmax payload selects first maximum"
+      (String.equal left_payload "base=200|length=1|values=int:1");
+    check
+      "argmax payload selects later maximum"
+      (String.equal right_payload "base=200|length=1|values=int:2");
     check "argmax output root shape" (String.length left = 64);
     check "argmax output roots selected index" (not (String.equal left right))
   | Error error, _

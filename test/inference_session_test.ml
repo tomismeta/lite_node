@@ -261,8 +261,8 @@ let check_v2_continuation_lifecycle () =
        ~expected_sequence:0
        session
    with
-   | Error error -> failwith (Session.error_message error)
-   | Ok (profiled, _, execution_profile, _) ->
+  | Error error -> failwith (Session.error_message error)
+  | Ok (profiled, _, execution_profile, _) ->
      check
        "v2 profiled output root"
        (String.equal (Session.output_root profiled) (Session.output_root first));
@@ -278,6 +278,16 @@ let check_v2_continuation_lifecycle () =
              String.equal row.phase "bind_session_context")
           execution_profile));
   let first_output_root = Session.output_root first in
+  check
+    "v2 first output payload retained"
+    (match Session.output_payload first with
+     | Some _ -> true
+     | None -> false);
+  check
+    "v2 first session root vector"
+    (String.equal
+       (Session.root first)
+       "95ffc0a6f5561d15bc1cc48773a2deed45dddf06366b85f9b53668549dee5e90");
   check
     "v2 first output root vector"
     (String.equal
@@ -301,6 +311,16 @@ let check_v2_continuation_lifecycle () =
       advanced
     | Error error -> failwith (Session.error_message error)
   in
+  check
+    "v2 second output payload retained"
+    (match Session.output_payload second with
+     | Some _ -> true
+     | None -> false);
+  check
+    "v2 second session root vector"
+    (String.equal
+       (Session.root second)
+       "5035bb88cca463399860005b9bf63fc8b1b4d5ba172b4a78e84332c684924fdc");
   check
     "v2 second output root vector"
     (String.equal

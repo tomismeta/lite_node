@@ -144,7 +144,10 @@ d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
    cached authenticated ranges, and measured kernel optimization. Batch reports
    now make this explicit in diagnostic `runtime_semantics`: owner-byte and
    model-range pin caches are supported, while committed state payload
-   transport and decode-loop ARGMAX outputs remain runtime blockers.
+   transport and the decode-loop token contract remain runtime blockers.
+   Session reports now expose each canonical output payload and payload digest
+   alongside the output root, so `ARGMAX_FP` selected-index payloads can be
+   returned once the target decode transition declares that output as the token.
 
 4. Multi-platform conformance.
    Strict P0 reports must run across the intended validator platforms and
@@ -185,8 +188,8 @@ d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
    decode count. A separate state-transport step is still required if a target
    declares non-empty committed target state; today's proven path keeps that
    root absent and does not persist a canonical state payload. The next product
-   step is to bind decode-loop token outputs and any required committed state
-   payload.
+   step is to bind the decode-loop token contract and any required committed
+   state payload.
 6. Re-run one Bonsai prompt-to-token proof under the target-owned session shape.
 7. Re-run recurrent-heavy and logits-tail performance gates against that shape.
 8. Only then prepare the mergeable branch by reducing evidence-only scaffolding

@@ -109,6 +109,14 @@ let int_json name fields =
   | `Intlit value -> int_of_string value
   | _ -> failwith ("json field must be an int: " ^ name)
 
+let check_payload_sha fields ~payload_field ~sha_field =
+  let payload = string_json payload_field fields in
+  let digest = string_json sha_field fields in
+  check
+    (sha_field ^ " binds " ^ payload_field)
+    (String.equal digest (sha256 payload));
+  payload
+
 let capability_json Req.{ name; root } =
   `Assoc ["name", `String name; "root", `String root]
 
@@ -659,6 +667,10 @@ let check_session_hash report =
         "final_session_root", assoc_value "final_session_root" fields;
         "final_receipt_root", assoc_value "final_receipt_root" fields;
         "output_prefix_root", assoc_value "output_prefix_root" fields;
+        "last_transition_output_payload",
+        assoc_value "last_transition_output_payload" fields;
+        "last_transition_output_payload_sha256",
+        assoc_value "last_transition_output_payload_sha256" fields;
         "last_transition_output_root",
         assoc_value "last_transition_output_root" fields;
         "unsupported_opcodes", assoc_value "unsupported_opcodes" fields;
@@ -701,6 +713,11 @@ let check_legacy_report_fields report =
        check
          "stage reference"
          (String.equal (string_json "reference_status" stage) "unchecked");
+       ignore
+         (check_payload_sha
+            stage
+            ~payload_field:"output_payload"
+            ~sha_field:"output_payload_sha256");
        ignore (assoc_value "execution_timing" stage);
        ignore (assoc_value "opcode_timing" stage)
      | _ -> failwith "expected one stage")
@@ -735,6 +752,11 @@ let check_session_bundle_single_transition () =
     check
       "session last output root"
       (String.length (string_json "last_transition_output_root" fields) = 64);
+    ignore
+      (check_payload_sha
+         fields
+         ~payload_field:"last_transition_output_payload"
+         ~sha_field:"last_transition_output_payload_sha256");
     check "single opened root null" (assoc_value "opened_session_root" fields = `Null);
     check "single final root null" (assoc_value "final_session_root" fields = `Null);
     check
@@ -828,6 +850,12 @@ let check_session_bundle_rejects_multi_transition () =
          (string_json "next_runtime_blocker" fields)
          "session_abi_v2_required");
     check "no executed transitions" (list_json "transitions" fields = []);
+    check
+      "no rejected output payload"
+      (assoc_value "last_transition_output_payload" fields = `Null);
+    check
+      "no rejected output payload sha"
+      (assoc_value "last_transition_output_payload_sha256" fields = `Null);
     check_session_hash report;
     let preflight = assoc_json "continuation_preflight" fields in
     check
@@ -1017,6 +1045,12 @@ let check_session_bundle_accepts_v2_multi_transition () =
     let last_transition_output_root =
       string_json "last_transition_output_root" fields
     in
+    let last_transition_output_payload =
+      check_payload_sha
+        fields
+        ~payload_field:"last_transition_output_payload"
+        ~sha_field:"last_transition_output_payload_sha256"
+    in
     List.iter
       (fun (label, root) ->
          check
@@ -1065,7 +1099,7 @@ let check_session_bundle_accepts_v2_multi_transition () =
       (list_json "missing_runtime_capabilities" semantics
        = [
          `String "committed_target_state_payload_transport";
-         `String "decode_loop_argmax_session_output";
+         `String "decode_loop_token_contract";
        ]);
     check_session_hash report;
     (match list_json "transitions" fields with
@@ -1100,18 +1134,23 @@ let check_session_bundle_accepts_v2_multi_transition () =
               check
                 (Printf.sprintf "v2 transition %s root %s" expected_id field)
                 (String.length (string_json field transition) = 64))
-           [
-             "program_root";
-             "target_root";
-             "request_root";
-             "model_ranges_root";
-             "prior_session_root";
-             "advanced_session_root";
-             "advance_receipt_root";
-             "output_root";
-             "output_prefix_root";
-             "candidate_root";
-           ]
+         [
+           "program_root";
+           "target_root";
+           "request_root";
+           "model_ranges_root";
+           "prior_session_root";
+           "advanced_session_root";
+           "advance_receipt_root";
+           "output_root";
+           "output_prefix_root";
+           "candidate_root";
+          ];
+         ignore
+           (check_payload_sha
+              transition
+              ~payload_field:"output_payload"
+              ~sha_field:"output_payload_sha256")
        in
        check_transition "token-000" "prefill" first;
        check_transition "token-001" "decode" second;
@@ -1131,11 +1170,22 @@ let check_session_bundle_accepts_v2_multi_transition () =
             last_transition_output_root
             (string_json "output_root" second));
        check
+         "last payload is second payload"
+         (String.equal
+            last_transition_output_payload
+            (string_json "output_payload" second));
+       check
          "outputs differ across progress"
          (not
             (String.equal
                (string_json "output_root" first)
-               (string_json "output_root" second)))
+               (string_json "output_root" second)));
+       check
+         "payloads differ across progress"
+         (not
+            (String.equal
+               (string_json "output_payload" first)
+               (string_json "output_payload" second)))
      | _ -> failwith "expected two resident transitions")
   | _ -> failwith "report must be an object"
 

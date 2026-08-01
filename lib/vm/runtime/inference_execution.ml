@@ -15,6 +15,7 @@ Include at startup:
 
 type result = {
   effort_used : int;
+  output_payload : string;
   output_root : string;
   candidate_root : string;
 }
@@ -388,6 +389,7 @@ let run_internal ?profile ?session_context ~plan () =
                Ok
                  ( {
                      effort_used = state.Contract_vm.effort_used;
+                     output_payload = output;
                      output_root;
                      candidate_root;
                    },
