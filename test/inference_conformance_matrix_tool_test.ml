@@ -466,6 +466,7 @@ let result
     `List [
       `Assoc [
         "name", `String "expected";
+        "base_address", `Int 10000;
         "length_f64_cells", `Int 6;
         "expected_sha256", `String (hex_root 'a');
         "observed_sha256", `String (hex_root 'a');
@@ -611,6 +612,43 @@ let replace_q1_contract_shape_field name value = function
                    (("q1_contract_shape", shape)
                     :: List.filter
                          (fun (key, _) -> not (String.equal key "q1_contract_shape"))
+                         result_fields)
+               | value -> value)
+             results)
+      | _ -> failwith "results must be a list"
+    in
+    replace_assoc_field "results" results report
+  | _ -> failwith "report must be object"
+
+let replace_result_subspan_field name value = function
+  | `Assoc fields as report ->
+    let results =
+      match assoc_value "results" fields with
+      | `List results ->
+        `List
+          (List.map
+             (function
+               | `Assoc result_fields ->
+                 let subspans =
+                   match assoc_value "subspans" result_fields with
+                   | `List subspans ->
+                     `List
+                       (List.map
+                          (function
+                            | `Assoc subspan_fields ->
+                              `Assoc
+                                ((name, value)
+                                 :: List.filter
+                                      (fun (key, _) -> not (String.equal key name))
+                                      subspan_fields)
+                            | value -> value)
+                          subspans)
+                   | _ -> failwith "subspans must be a list"
+                 in
+                 `Assoc
+                   (("subspans", subspans)
+                    :: List.filter
+                         (fun (key, _) -> not (String.equal key "subspans"))
                          result_fields)
                | value -> value)
              results)
@@ -1782,6 +1820,32 @@ let check_matrix_rejects_q1_contract_shape_output_cells_mismatch () =
            (string_list_value "validator_readiness_blockers" fields))
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_rejects_q1_contract_shape_output_span_base_mismatch () =
+  with_temp_dir (fun dir ->
+    let forged runner_sha system machine =
+      report ~runner_sha system machine
+      |> replace_result_subspan_field "base_address" (`Int 10001)
+    in
+    let a =
+      write_report dir "a.cjson" (forged (hex_root '1') "Darwin" "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (forged (hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "Q1 output span base mismatch exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "Q1 output span base mismatch blocker"
+        (List.mem
+           "q1_contract_shape_rejected"
+           (string_list_value "validator_readiness_blockers" fields))
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_q1_contract_shape_oversized_intlit () =
   with_temp_dir (fun dir ->
     let forged =
@@ -1993,6 +2057,7 @@ let () =
   check_matrix_rejects_q1_contract_shape_byte_offset_span ();
   check_matrix_rejects_q1_contract_shape_observed_effort_forgery ();
   check_matrix_rejects_q1_contract_shape_output_cells_mismatch ();
+  check_matrix_rejects_q1_contract_shape_output_span_base_mismatch ();
   check_matrix_rejects_q1_contract_shape_oversized_intlit ();
   check_matrix_rejects_q1_failure_contract_not_applicable ();
   check_matrix_accepts_non_q1_failure_contract_not_applicable ();
