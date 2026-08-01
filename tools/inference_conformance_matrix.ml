@@ -259,6 +259,12 @@ let opt_string_from_assoc name fields =
   | Some (`String value) -> Some value
   | _ -> None
 
+let transcendental_dependency_catalog_root_from_report fields =
+  match field "transcendental_dependency_catalog" fields with
+  | Some (`Assoc _ as catalog) ->
+    Some (Profile.transcendental_dependency_catalog_root catalog)
+  | _ -> None
+
 let opt_hex_string = function
   | Some value -> hex_string value
   | None -> false
@@ -1031,6 +1037,9 @@ let report_summary path =
     let transcendental_dependency_catalog_root =
       opt_string_field "transcendental_dependency_catalog_root" fields
     in
+    let computed_transcendental_dependency_catalog_root =
+      transcendental_dependency_catalog_root_from_report fields
+    in
     let template_corpus_root =
       opt_string_field "template_corpus_root" fields
     in
@@ -1108,6 +1117,14 @@ let report_summary path =
     let transcendental_dependency_catalog_root_valid =
       opt_hex_string transcendental_dependency_catalog_root
     in
+    let transcendental_dependency_catalog_root_matched =
+      match
+        transcendental_dependency_catalog_root,
+        computed_transcendental_dependency_catalog_root
+      with
+      | Some declared, Some computed -> String.equal declared computed
+      | _ -> false
+    in
     let template_corpus_root_valid = opt_hex_string template_corpus_root in
     let runner_executable_sha256_valid =
       opt_hex_string runner_executable_sha256
@@ -1141,6 +1158,7 @@ let report_summary path =
       && executable_abi_bindings_matched
       && profile_catalog_root_valid
       && transcendental_dependency_catalog_root_valid
+      && transcendental_dependency_catalog_root_matched
       && template_corpus_root_valid
       && runner_executable_sha256_valid
     in
@@ -1223,6 +1241,13 @@ let report_summary path =
            (Option.is_some transcendental_dependency_catalog_root
             && not transcendental_dependency_catalog_root_valid)
            "invalid_transcendental_dependency_catalog_root"
+      |> add_if
+           (Option.is_none computed_transcendental_dependency_catalog_root)
+           "missing_transcendental_dependency_catalog"
+      |> add_if
+           (Option.is_some computed_transcendental_dependency_catalog_root
+            && not transcendental_dependency_catalog_root_matched)
+           "transcendental_dependency_catalog_root_mismatch"
       |> add_if
            (Option.is_none runner_executable_sha256)
            "missing_runner_executable_sha256"
@@ -1314,6 +1339,16 @@ let report_summary path =
       (match transcendental_dependency_catalog_root with
        | Some root -> `String root
        | None -> `Null);
+      "computed_transcendental_dependency_catalog_root",
+      (match computed_transcendental_dependency_catalog_root with
+       | Some root -> `String root
+       | None -> `Null);
+      "transcendental_dependency_catalog_root_status",
+      `String
+        (if transcendental_dependency_catalog_root_matched then
+           "matched"
+         else
+           "rejected");
       "template_corpus_root",
       (match template_corpus_root with
        | Some root -> `String root

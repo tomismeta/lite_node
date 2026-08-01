@@ -257,6 +257,10 @@ let q1_required_failure_expectations =
     "lower_effort_limit", "reject_before_write";
   ]
 
+let default_transcendental_dependency_catalog () =
+  Profile.transcendental_dependency_catalog_json
+    ~opcodes:["LINEAR_Q1_G128_FP"]
+
 let q1_failure_contract_json expectations =
   `Assoc [
     "opcode", `String "LINEAR_Q1_G128_FP";
@@ -573,12 +577,25 @@ let report
     ?required_failure_contract_blockers
     ?include_required_contract_payload
     ?required_failure_contract_payload
-    ?(transcendental_dependency_catalog_root = hex_root 'f')
+    ?transcendental_dependency_catalog
+    ?transcendental_dependency_catalog_root
     ?(validator_readiness_blockers = ["cross_platform_conformance_missing"])
     ?(result_signature_schema = "octra.inference.conformance.result-signature.v6")
     ?failure
     system
     machine =
+  let transcendental_dependency_catalog =
+    match transcendental_dependency_catalog with
+    | Some catalog -> catalog
+    | None -> default_transcendental_dependency_catalog ()
+  in
+  let transcendental_dependency_catalog_root =
+    match transcendental_dependency_catalog_root with
+    | Some root -> root
+    | None ->
+      Profile.transcendental_dependency_catalog_root
+        transcendental_dependency_catalog
+  in
   `Assoc [
     "status", `String "accepted";
     "execution_status", `String "accepted";
@@ -588,6 +605,8 @@ let report
     "selected_opcodes", `List [`String opcode];
     "template_corpus_root", `String corpus;
     "profile_catalog_root", `String (hex_root 'c');
+    "transcendental_dependency_catalog",
+    transcendental_dependency_catalog;
     "transcendental_dependency_catalog_root",
     `String transcendental_dependency_catalog_root;
     "failure_case_gate", `Assoc ["status", `String "accepted"];
@@ -927,7 +946,10 @@ let check_matrix_accepts_bound_reports () =
       check
         "matrix carries one transcendental dependency catalog root"
         (string_list_value "transcendental_dependency_catalog_roots" fields =
-         [hex_root 'f']);
+         [
+           Profile.transcendental_dependency_catalog_root
+             (default_transcendental_dependency_catalog ());
+         ]);
       check
         "matrix carries platform runner observation count"
         (match assoc_value "distinct_platform_runner_observation_count" fields with
@@ -1526,6 +1548,43 @@ let check_matrix_rejects_missing_transcendental_dependency_catalog_root () =
            (List.mem
               "missing_transcendental_dependency_catalog_root"
               (blockers report_fields))
+       | _ -> failwith "missing report rows")
+    | _ -> failwith "matrix output must be object")
+
+let check_matrix_rejects_missing_transcendental_dependency_catalog () =
+  with_temp_dir (fun dir ->
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report ~runner_sha:(hex_root '1') "Darwin" "arm64"
+         |> remove_assoc_field "transcendental_dependency_catalog")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report ~runner_sha:(hex_root '2') "Linux" "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "missing transcendental catalog body matrix exits nonzero" (code = 1);
+    match json with
+    | `Assoc fields ->
+      check
+        "missing transcendental catalog body top-level blocker"
+        (List.mem "runner_report_rejected" (blockers fields));
+      (match assoc_value "reports" fields with
+       | `List (`Assoc report_fields :: _) ->
+         check
+           "source row missing transcendental catalog body blocker"
+           (List.mem
+              "missing_transcendental_dependency_catalog"
+              (blockers report_fields));
+         check
+           "source row transcendental catalog root rejected"
+           (String.equal
+              (string_value "transcendental_dependency_catalog_root_status" report_fields)
+              "rejected")
        | _ -> failwith "missing report rows")
     | _ -> failwith "matrix output must be object")
 
@@ -3208,6 +3267,7 @@ let () =
   check_matrix_rejects_invalid_profile_catalog_root ();
   check_matrix_rejects_transcendental_dependency_catalog_mismatch ();
   check_matrix_rejects_missing_transcendental_dependency_catalog_root ();
+  check_matrix_rejects_missing_transcendental_dependency_catalog ();
   check_matrix_rejects_invalid_transcendental_dependency_catalog_root ();
   check_matrix_rejects_failure_case_mismatch ();
   check_matrix_rejects_failure_mutation_payload_mismatch ();
