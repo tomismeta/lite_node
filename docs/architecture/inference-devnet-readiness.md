@@ -47,6 +47,7 @@ session/runtime packaging.
 | Recurrent-heavy performance fixture on rebased LiteNode | `/home/exedev/evidence/octra-inference/litenode-recurrent-heavy-reemitted-2ca5dfd-754b0a5-20260729` | accepted |
 | Prefill session bundle shape | `/home/exedev/evidence/octra-inference/prefill-session-bundle-55cd597-20260730-121116` | producer-shaped; not continuous LiteNode execution |
 | Batch runtime readiness | local `--run-batch` report `runtime_semantics` | diagnostic-only; current mode is `independent_session_per_stage`, with `session_continuation_state_carry_not_supported` as the next runtime blocker |
+| Session bundle harness | local `--run-inference-session` report | accepts one target-owned stage labeled `prefill` or `decode` and rejects multi-transition bundles until canonical state carry is implemented |
 
 The `/private/tmp` reports above are local rerun snapshots, not durable
 artifacts. The durable identity of the current local rerun is:
@@ -170,7 +171,11 @@ d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
 4. Wire conformance into CI for schema, positive execution, strict effort, and
    counted failure/atomicity.
 5. Build the target-owned prefill/decode session path; do not continue relying
-   on caller-visible layer orchestration as product runtime.
+   on caller-visible layer orchestration as product runtime. The first
+   LiteNode harness step exists as `--run-inference-session`: it accepts a
+   single target-owned stage labeled `prefill` or `decode` and reports the
+   exact state-carry blocker for multi-transition sessions. The label is not
+   yet a VM-proven prefill/decode phase contract.
 6. Re-run one Bonsai prompt-to-token proof under the target-owned session shape.
 7. Re-run recurrent-heavy and logits-tail performance gates against that shape.
 8. Only then prepare the mergeable branch by reducing evidence-only scaffolding

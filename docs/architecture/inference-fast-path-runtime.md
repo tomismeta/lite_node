@@ -366,8 +366,11 @@ ordinary program admission, encrypted execution policy, or consensus behavior.
 5. Return compact per-stage receipts and timings, with no aggregate session
    root.
 6. Use recurrent timing to choose the first optimization target.
-7. Only then consider resident prepared views or native strict kernels.
-8. Require one target-owned prefill/decode program before claiming product
+7. Add the product-facing session bundle harness. The first accepted shape is
+   a single target-owned stage labeled `prefill` or `decode`; multi-transition
+   bundles must fail closed with the state-carry blocker.
+8. Only then consider resident prepared views or native strict kernels.
+9. Require one target-owned prefill/decode program before claiming product
    session execution.
 
 ## Acceptance Criteria

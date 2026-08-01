@@ -55,6 +55,7 @@ type paths = {
   mutable run_session : bool;
   mutable scan_policy : bool;
   mutable run_batch : string option;
+  mutable run_inference_session : string option;
   mutable timing_mode : timing_mode;
 }
 
@@ -100,6 +101,18 @@ type batch_stage = {
 type batch = {
   batch_path : string;
   stages : batch_stage list;
+}
+
+type session_transition = {
+  transition_id : string;
+  phase : string;
+  stage : batch_stage;
+}
+
+type session_bundle = {
+  session_path : string;
+  decode_steps : int;
+  transitions : session_transition list;
 }
 
 type batch_cache = {
@@ -275,6 +288,39 @@ let optional_string_field name fields =
   | Ok (Some (`String value)) -> Ok (Some value)
   | Ok (Some _) -> Error ("field must be a string: " ^ name)
   | Error error -> Error error
+
+let require_schema expected fields =
+  match string_field "schema" fields with
+  | Ok value when String.equal value expected -> Ok ()
+  | Ok value ->
+    Error
+      (Printf.sprintf
+         "unsupported schema: expected %s actual %s"
+         expected
+         value)
+  | Error error -> Error error
+
+let optional_string_metadata names fields =
+  let rec loop = function
+    | [] -> Ok ()
+    | name :: rest ->
+      (match optional_string_field name fields with
+       | Ok _ -> loop rest
+       | Error error -> Error error)
+  in
+  loop names
+
+let optional_object_metadata names fields =
+  let rec loop = function
+    | [] -> Ok ()
+    | name :: rest ->
+      (match optional_field name fields with
+       | Ok None -> loop rest
+       | Ok (Some (`Assoc _)) -> loop rest
+       | Ok (Some _) -> Error ("field must be an object: " ^ name)
+       | Error error -> Error error)
+  in
+  loop names
 
 let optional_nullable_string_field name fields =
   match optional_field name fields with
@@ -1150,10 +1196,160 @@ let parse_batch_json batch_path (json : Yojson.Safe.t) =
        loop [] stages))
   | _ -> Error "batch must be an object"
 
+let valid_session_phase = function
+  | "prefill"
+  | "decode" -> true
+  | _ -> false
+
+let parse_session_transition ~bundle_base ~top_support = function
+  | `Assoc fields ->
+    (match check_known fields ["transition_id"; "phase"; "stage"] with
+     | Error error -> Error error
+     | Ok () ->
+       (match
+          string_field "transition_id" fields,
+          string_field "phase" fields,
+          field "stage" fields
+        with
+        | Ok transition_id, Ok phase, Ok stage_json ->
+          if transition_id = "" then Error "transition_id must not be empty"
+          else if not (valid_session_phase phase) then
+            Error ("unsupported session transition phase: " ^ phase)
+          else
+            (match
+               parse_batch_stage
+                 ~batch_base:bundle_base
+                 ~top_support
+                 stage_json
+             with
+             | Error error -> Error error
+             | Ok stage -> Ok { transition_id; phase; stage })
+        | Error error, _, _
+        | _, Error error, _
+        | _, _, Error error -> Error error))
+  | _ -> Error "session transition must be an object"
+
+let parse_session_bundle_json session_path (json : Yojson.Safe.t) =
+  let bundle_base = dirname session_path in
+  match json with
+  | `Assoc fields ->
+    (match
+       check_known
+         fields
+         [
+           "claim";
+           "created_utc";
+           "decode_steps";
+           "harness";
+           "harness_sha256";
+           "lite_node_commit";
+           "model_deployment_root";
+           "octra_inference_commit";
+           "request_root";
+           "schema";
+           "schema_version";
+           "session";
+           "support";
+           "transitions";
+           "type";
+         ]
+     with
+     | Error error -> Error error
+     | Ok () ->
+       (match
+          require_schema "octra.inference.session.bundle" fields,
+          optional_string_metadata
+            [
+              "claim";
+              "created_utc";
+              "harness";
+              "harness_sha256";
+              "lite_node_commit";
+              "model_deployment_root";
+              "octra_inference_commit";
+              "request_root";
+              "schema_version";
+              "type";
+            ]
+            fields,
+          optional_object_metadata ["session"] fields
+        with
+        | Error error, _, _
+        | _, Error error, _
+        | _, _, Error error -> Error error
+        | Ok (), Ok (), Ok () ->
+       let top_support =
+         match optional_string_field "support" fields with
+         | Ok None -> Ok None
+         | Ok (Some path) -> Ok (Some (resolve_path ~base:bundle_base path))
+         | Error error -> Error error
+       in
+       let decode_steps =
+         match int_field "decode_steps" fields with
+         | Ok value when value >= 0 -> Ok value
+         | Ok _ -> Error "decode_steps must be non-negative"
+         | Error error -> Error error
+       in
+       (match top_support, decode_steps, list_field "transitions" fields with
+        | Error error, _, _
+        | _, Error error, _
+        | _, _, Error error -> Error error
+        | Ok top_support, Ok decode_steps, Ok transitions ->
+          if List.length transitions = 0 then
+            Error "session bundle must contain at least one transition"
+          else if List.length transitions > max_batch_stages then
+            Error
+              (Printf.sprintf
+                 "session bundle has too many transitions: %d > %d"
+                 (List.length transitions)
+                 max_batch_stages)
+          else
+            let rec loop acc = function
+              | [] ->
+                Ok {
+                  session_path;
+                  decode_steps;
+                  transitions = List.rev acc;
+                }
+              | value :: rest ->
+                (match
+                   parse_session_transition
+                     ~bundle_base
+                     ~top_support
+                     value
+                 with
+                 | Error error -> Error error
+                 | Ok transition ->
+                   if
+                     List.exists
+                       (fun existing ->
+                          String.equal
+                            existing.transition_id
+                            transition.transition_id)
+                       acc
+                   then
+                     Error
+                       ("duplicate transition_id: "
+                        ^ transition.transition_id)
+                   else loop (transition :: acc) rest)
+            in
+            loop [] transitions))
+       )
+  | _ -> Error "session bundle must be an object"
+
 let batch_file path =
   try
     match parse_batch_json path (Yojson.Safe.from_file path) with
     | Ok batch -> batch
+    | Error error -> fail (path ^ ": " ^ error)
+  with
+  | Yojson.Json_error error -> fail (path ^ ": " ^ error)
+  | Sys_error error -> fail error
+
+let session_bundle_file path =
+  try
+    match parse_session_bundle_json path (Yojson.Safe.from_file path) with
+    | Ok bundle -> bundle
     | Error error -> fail (path ^ ": " ^ error)
   with
   | Yojson.Json_error error -> fail (path ^ ": " ^ error)
@@ -1459,6 +1655,205 @@ let drop_assoc_fields names = function
          fields)
   | value -> value
 
+let product_lifecycle_json =
+  `List [
+    `String "open_session";
+    `String "prefill";
+    `String "decode";
+    `String "finalize";
+  ]
+
+let stage_lifecycle_json =
+  `List [
+    `String "open_session";
+    `String "advance_session";
+    `String "finalize_session";
+  ]
+
+let missing_resident_runtime_capabilities =
+  `List [
+    `String "resident_session";
+    `String "multi_advance_state_carry";
+    `String "prefill_decode_phase_contract";
+    `String "decode_loop_argmax_session_output";
+  ]
+
+let independent_batch_runtime_semantics =
+  `Assoc [
+    "diagnostic_only", `Bool true;
+    "session_mode", `String "independent_session_per_stage";
+    "product_lifecycle", product_lifecycle_json;
+    "stage_lifecycle", stage_lifecycle_json;
+    "batch_cache_scope",
+    `List [
+      `String "owner_bytes";
+      `String "model_range_pins";
+    ];
+    "continuation_supported", `Bool false;
+    "state_carry", `String "not_supported";
+    "resident_cache_scope", `List [];
+    "runtime_readiness_status", `String "rejected";
+    "next_runtime_blocker",
+    `String "session_continuation_state_carry_not_supported";
+    "missing_runtime_capabilities", missing_resident_runtime_capabilities;
+  ]
+
+let session_runtime_semantics ~transition_count =
+  let single_transition = transition_count = 1 in
+  `Assoc [
+    "diagnostic_only", `Bool true;
+    "session_mode",
+    `String
+      (if single_transition then "single_transition_session"
+       else "multi_transition_session_requested");
+    "product_lifecycle", product_lifecycle_json;
+    "stage_lifecycle", stage_lifecycle_json;
+    "continuation_supported", `Bool false;
+    "state_carry", `String "not_supported";
+    "resident_cache_scope", `List [];
+    "runtime_readiness_status",
+    `String (if single_transition then "partial_single_transition" else "rejected");
+    "next_runtime_blocker",
+    `String "session_continuation_state_carry_not_supported";
+    "missing_runtime_capabilities", missing_resident_runtime_capabilities;
+  ]
+
+let transition_report_json transition stage_json =
+  match stage_json with
+  | `Assoc fields ->
+    `Assoc (
+      [
+        "transition_id", `String transition.transition_id;
+        "phase", `String transition.phase;
+      ]
+      @ fields)
+  | value -> value
+
+let sanitized_transition_json value =
+  drop_assoc_fields ["timing"; "execution_timing"; "opcode_timing"] value
+
+let session_report_payload
+    ~status
+    ~transition_count
+    ~decode_steps
+    ~runtime_semantics
+    ~last_transition_output_root
+    ~unsupported_opcodes
+    ~missing_capabilities
+    ~policy_violations
+    ~transitions =
+  `Assoc [
+    "schema", `String "octra.inference.session.report";
+    "status", `String status;
+    "transition_count", `Int transition_count;
+    "decode_steps", `Int decode_steps;
+    "runtime_semantics", runtime_semantics;
+    "last_transition_output_root",
+    nullable_string_json last_transition_output_root;
+    "unsupported_opcodes", unique_json_strings unsupported_opcodes;
+    "missing_capabilities", unique_json_strings missing_capabilities;
+    "policy_violations", `List policy_violations;
+    "transitions",
+    `List (List.map sanitized_transition_json transitions);
+  ]
+
+let session_report_sha256 payload =
+  sha256
+    ("octra.inference.run_inference_session.report.v1:"
+     ^ Yojson.Safe.to_string payload)
+
+let run_inference_session_file ~timing_mode path =
+  let bundle = session_bundle_file path in
+  let transition_count = List.length bundle.transitions in
+  let runtime_semantics = session_runtime_semantics ~transition_count in
+  if transition_count <> 1 then begin
+    let status = "rejected" in
+    let payload =
+      session_report_payload
+        ~status
+        ~transition_count
+        ~decode_steps:bundle.decode_steps
+        ~runtime_semantics
+        ~last_transition_output_root:None
+        ~unsupported_opcodes:[]
+        ~missing_capabilities:[]
+        ~policy_violations:[]
+        ~transitions:[]
+    in
+    let report =
+      `Assoc [
+        "status", `String status;
+        "schema", `String "octra.inference.session.report";
+        "session_path", `String bundle.session_path;
+        "transition_count", `Int transition_count;
+        "decode_steps", `Int bundle.decode_steps;
+        "session_report_sha256", `String (session_report_sha256 payload);
+        "runtime_semantics", runtime_semantics;
+        "last_transition_output_root", `Null;
+        "next_runtime_blocker",
+        `String "session_continuation_state_carry_not_supported";
+        "unsupported_opcodes", `List [];
+        "missing_capabilities", `List [];
+        "policy_violations", `List [];
+        "transitions", `List [];
+      ]
+    in
+    print_endline (Yojson.Safe.pretty_to_string report);
+    1
+  end
+  else
+    let cache = batch_cache () in
+    let transition =
+      match bundle.transitions with
+      | [transition] -> transition
+      | _ -> assert false
+    in
+    let result =
+      run_batch_stage ~cache ~timing_mode transition.stage
+    in
+    let transition_json =
+      transition_report_json transition result.stage_json
+    in
+    let status =
+      if result.stage_reference_mismatch then "reference_mismatch"
+      else "accepted"
+    in
+    let payload =
+      session_report_payload
+        ~status
+        ~transition_count
+        ~decode_steps:bundle.decode_steps
+        ~runtime_semantics
+        ~last_transition_output_root:(Some result.stage_output_root)
+        ~unsupported_opcodes:result.stage_unsupported_opcodes
+        ~missing_capabilities:result.stage_missing_capabilities
+        ~policy_violations:result.stage_policy_violations
+        ~transitions:[transition_json]
+    in
+    let report =
+      `Assoc [
+        "status", `String status;
+        "schema", `String "octra.inference.session.report";
+        "session_path", `String bundle.session_path;
+        "transition_count", `Int transition_count;
+        "decode_steps", `Int bundle.decode_steps;
+        "session_report_sha256", `String (session_report_sha256 payload);
+        "runtime_semantics", runtime_semantics;
+        "last_transition_output_root", `String result.stage_output_root;
+        "unsupported_opcodes",
+        unique_json_strings result.stage_unsupported_opcodes;
+        "missing_capabilities",
+        unique_json_strings result.stage_missing_capabilities;
+        "policy_violations", `List result.stage_policy_violations;
+        "owner_cache_entries", `Int (Hashtbl.length cache.owner_bytes);
+        "pin_cache_entries",
+        `Int (Hashtbl.length cache.pins_by_ranges_root_and_limit);
+        "transitions", `List [transition_json];
+      ]
+    in
+    print_endline (Yojson.Safe.pretty_to_string report);
+    if result.stage_reference_mismatch then 1 else 0
+
 let run_batch_file ~timing_mode path =
   let batch = batch_file path in
   let cache = batch_cache () in
@@ -1494,43 +1889,7 @@ let run_batch_file ~timing_mode path =
   let status =
     if reference_mismatch then "reference_mismatch" else "accepted"
   in
-  let runtime_semantics =
-    `Assoc [
-      "diagnostic_only", `Bool true;
-      "session_mode", `String "independent_session_per_stage";
-      "product_lifecycle",
-      `List [
-        `String "open_session";
-        `String "prefill";
-        `String "decode";
-        `String "finalize";
-      ];
-      "stage_lifecycle",
-      `List [
-        `String "open_session";
-        `String "advance_session";
-        `String "finalize_session";
-      ];
-      "batch_cache_scope",
-      `List [
-        `String "owner_bytes";
-        `String "model_range_pins";
-      ];
-      "continuation_supported", `Bool false;
-      "state_carry", `String "not_supported";
-      "resident_cache_scope", `List [];
-      "runtime_readiness_status", `String "rejected";
-      "next_runtime_blocker",
-      `String "session_continuation_state_carry_not_supported";
-      "missing_runtime_capabilities",
-      `List [
-        `String "resident_session";
-        `String "multi_advance_state_carry";
-        `String "prefill_decode_phase_contract";
-        `String "decode_loop_argmax_session_output";
-      ];
-    ]
-  in
+  let runtime_semantics = independent_batch_runtime_semantics in
   let batch_payload =
     "octra.inference.run_batch.report.v1:"
     ^ Yojson.Safe.to_string
@@ -1566,6 +1925,7 @@ let usage =
    --support FILE [--model-ranges FILE] [--model-deployment FILE] \
    [--range-source ROOT=FILE] [--request FILE] [--input FILE] \
    [--run-session] [--scan-policy] [--run-batch FILE] \
+   [--run-inference-session FILE] \
    [--timing-mode none|stage|opcode]"
 
 let () =
@@ -1583,6 +1943,7 @@ let () =
       run_session = false;
       scan_policy = false;
       run_batch = None;
+      run_inference_session = None;
       timing_mode = Timing_none;
     }
   in
@@ -1597,6 +1958,9 @@ let () =
     paths.model_deployment <- Some value
   in
   let set_run_batch value = paths.run_batch <- Some value in
+  let set_run_inference_session value =
+    paths.run_inference_session <- Some value
+  in
   let add_range_source value =
     let owner_root, path =
       split_pair value "--range-source requires <owner-root=file>"
@@ -1640,6 +2004,9 @@ let () =
       "--run-batch",
       Arg.String set_run_batch,
       "run independent one-shot inference stages from a batch fixture";
+      "--run-inference-session",
+      Arg.String set_run_inference_session,
+      "run a product-facing single-transition inference session bundle";
       "--timing-mode",
       Arg.String set_timing_mode,
       "optional local diagnostic timing: none, stage, or opcode";
@@ -1648,9 +2015,22 @@ let () =
     usage;
   if paths.scan_policy && paths.run_session then
     fail "--scan-policy cannot be combined with --run-session";
+  (match paths.run_batch, paths.run_inference_session with
+   | Some _, Some _ ->
+     fail "--run-batch cannot be combined with --run-inference-session"
+   | _ -> ());
+  (match paths.run_inference_session with
+   | Some _ when paths.scan_policy || paths.run_session ->
+     fail
+       "--run-inference-session cannot be combined with --scan-policy or --run-session"
+   | _ -> ());
   (match paths.run_batch with
    | Some path ->
      exit (run_batch_file ~timing_mode:paths.timing_mode path)
+   | None -> ());
+  (match paths.run_inference_session with
+   | Some path ->
+     exit (run_inference_session_file ~timing_mode:paths.timing_mode path)
    | None -> ());
   let program_path = require_path "--program" paths.program in
   let requirement_path = require_path "--requirement" paths.requirement in

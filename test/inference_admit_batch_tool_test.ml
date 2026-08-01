@@ -353,6 +353,79 @@ let run_batch batch_path =
   in
   code, Yojson.Safe.from_string raw
 
+let stage_json_from_batch batch_path =
+  match Yojson.Safe.from_file batch_path with
+  | `Assoc fields ->
+    (match list_json "stages" fields with
+     | [stage] -> stage
+     | _ -> failwith "expected one batch stage")
+  | _ -> failwith "batch must be an object"
+
+let write_session_bundle_fixture
+    ?(schema = Some "octra.inference.session.bundle")
+    ?(decode_steps = Some 1)
+    ?(transition_count = 1)
+    dir =
+  let batch_path = write_batch_fixture dir in
+  let stage = stage_json_from_batch batch_path in
+  let transitions =
+    List.init
+      transition_count
+      (fun index ->
+         `Assoc [
+           "transition_id", `String (Printf.sprintf "token-%03d" index);
+           "phase", `String (if index = 0 then "decode" else "prefill");
+           "stage", stage;
+         ])
+  in
+  let bundle_path = Filename.concat dir "session-bundle.cjson" in
+  let schema_fields =
+    match schema with
+    | None -> []
+    | Some value -> ["schema", `String value]
+  in
+  let decode_fields =
+    match decode_steps with
+    | None -> []
+    | Some value -> ["decode_steps", `Int value]
+  in
+  write_json
+    bundle_path
+    (`Assoc
+       (schema_fields
+        @ decode_fields
+        @ [
+          "transitions", `List transitions;
+        ]));
+  bundle_path
+
+let run_session_bundle_raw bundle_path =
+  let command =
+    String.concat
+      " "
+      [
+        Filename.quote (tool_path ());
+        "--run-inference-session";
+        Filename.quote bundle_path;
+        "--timing-mode";
+        "opcode";
+      ]
+  in
+  let input = Unix.open_process_in command in
+  let raw = read_all input in
+  let status = Unix.close_process_in input in
+  let code =
+    match status with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED signal -> 128 + signal
+    | Unix.WSTOPPED signal -> 128 + signal
+  in
+  code, raw
+
+let run_session_bundle bundle_path =
+  let code, raw = run_session_bundle_raw bundle_path in
+  code, Yojson.Safe.from_string raw
+
 let check_runtime_semantics report =
   match report with
   | `Assoc fields ->
@@ -418,6 +491,33 @@ let check_runtime_semantics report =
        ])
   | _ -> failwith "report must be an object"
 
+let check_session_runtime_semantics semantics =
+  check
+    "session runtime diagnostic"
+    (bool_json "diagnostic_only" semantics);
+  check
+    "session product lifecycle"
+    (list_json "product_lifecycle" semantics
+     = [
+       `String "open_session";
+       `String "prefill";
+       `String "decode";
+       `String "finalize";
+     ]);
+  check
+    "session continuation unsupported"
+    (not (bool_json "continuation_supported" semantics));
+  check
+    "session state carry unsupported"
+    (String.equal
+       (string_json "state_carry" semantics)
+       "not_supported");
+  check
+    "session next blocker"
+    (String.equal
+       (string_json "next_runtime_blocker" semantics)
+       "session_continuation_state_carry_not_supported")
+
 let check_batch_hash report =
   match report with
   | `Assoc fields ->
@@ -439,6 +539,41 @@ let check_batch_hash report =
     check
       "runtime semantics outside deterministic hash"
       (List.assoc_opt "runtime_semantics" fields <> None)
+  | _ -> failwith "report must be an object"
+
+let check_session_hash report =
+  match report with
+  | `Assoc fields ->
+    let expected_hash = string_json "session_report_sha256" fields in
+    let transitions = list_json "transitions" fields in
+    let sanitized =
+      `List
+        (List.map
+           (drop_assoc_fields ["timing"; "execution_timing"; "opcode_timing"])
+           transitions)
+    in
+    let sanitized_envelope =
+      `Assoc [
+        "schema", `String (string_json "schema" fields);
+        "status", `String (string_json "status" fields);
+        "transition_count", `Int (int_json "transition_count" fields);
+        "decode_steps", `Int (int_json "decode_steps" fields);
+        "runtime_semantics", assoc_value "runtime_semantics" fields;
+        "last_transition_output_root",
+        assoc_value "last_transition_output_root" fields;
+        "unsupported_opcodes", assoc_value "unsupported_opcodes" fields;
+        "missing_capabilities", assoc_value "missing_capabilities" fields;
+        "policy_violations", assoc_value "policy_violations" fields;
+        "transitions", sanitized;
+      ]
+    in
+    let payload =
+      "octra.inference.run_inference_session.report.v1:"
+      ^ Yojson.Safe.to_string sanitized_envelope
+    in
+    check
+      "session report hash"
+      (String.equal expected_hash (sha256 payload))
   | _ -> failwith "report must be an object"
 
 let check_legacy_report_fields report =
@@ -473,5 +608,136 @@ let check_batch_runtime_semantics () =
   check_batch_hash report;
   check_legacy_report_fields report
 
+let check_session_bundle_single_transition () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path = write_session_bundle_fixture dir in
+  let code, report = run_session_bundle bundle_path in
+  check "session bundle exit code" (code = 0);
+  match report with
+  | `Assoc fields ->
+    check
+      "session report status"
+      (String.equal (string_json "status" fields) "accepted");
+    check
+      "session report schema"
+      (String.equal
+         (string_json "schema" fields)
+         "octra.inference.session.report");
+    check "session transition count" (int_json "transition_count" fields = 1);
+    check "session decode steps" (int_json "decode_steps" fields = 1);
+    check
+      "session last output root"
+      (String.length (string_json "last_transition_output_root" fields) = 64);
+    let semantics = assoc_json "runtime_semantics" fields in
+    check_session_runtime_semantics semantics;
+    check
+      "single transition mode"
+      (String.equal
+         (string_json "session_mode" semantics)
+         "single_transition_session");
+    check
+      "single transition readiness"
+      (String.equal
+         (string_json "runtime_readiness_status" semantics)
+         "partial_single_transition");
+    check_session_hash report;
+    (match list_json "transitions" fields with
+     | [`Assoc transition] ->
+       check
+         "transition id"
+         (String.equal (string_json "transition_id" transition) "token-000");
+       check
+         "transition phase"
+         (String.equal (string_json "phase" transition) "decode");
+       check
+         "transition status"
+         (String.equal (string_json "status" transition) "accepted");
+       check
+         "transition session"
+         (String.equal (string_json "session_status" transition) "accepted")
+     | _ -> failwith "expected one transition")
+  | _ -> failwith "report must be an object"
+
+let check_session_bundle_hash_binds_decode_steps () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let first_dir = Filename.concat dir "first" in
+  let second_dir = Filename.concat dir "second" in
+  Unix.mkdir first_dir 0o700;
+  Unix.mkdir second_dir 0o700;
+  let first = write_session_bundle_fixture ~decode_steps:(Some 0) first_dir in
+  let second = write_session_bundle_fixture ~decode_steps:(Some 1) second_dir in
+  let first_code, first_report = run_session_bundle first in
+  let second_code, second_report = run_session_bundle second in
+  check "first decode-step run accepted" (first_code = 0);
+  check "second decode-step run accepted" (second_code = 0);
+  match first_report, second_report with
+  | `Assoc first_fields, `Assoc second_fields ->
+    check_session_hash first_report;
+    check_session_hash second_report;
+    check
+      "decode step changes session report hash"
+      (not
+         (String.equal
+            (string_json "session_report_sha256" first_fields)
+            (string_json "session_report_sha256" second_fields)))
+  | _ -> failwith "reports must be objects"
+
+let check_session_bundle_rejects_multi_transition () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path = write_session_bundle_fixture ~transition_count:2 dir in
+  let code, report = run_session_bundle bundle_path in
+  check "multi-transition session exits nonzero" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check
+      "multi-transition status"
+      (String.equal (string_json "status" fields) "rejected");
+    check "multi-transition count" (int_json "transition_count" fields = 2);
+    let semantics = assoc_json "runtime_semantics" fields in
+    check_session_runtime_semantics semantics;
+    check
+      "multi-transition mode"
+      (String.equal
+         (string_json "session_mode" semantics)
+         "multi_transition_session_requested");
+    check
+      "multi-transition readiness"
+      (String.equal
+         (string_json "runtime_readiness_status" semantics)
+         "rejected");
+    check
+      "multi-transition blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "session_continuation_state_carry_not_supported");
+    check "no executed transitions" (list_json "transitions" fields = [])
+  | _ -> failwith "report must be an object"
+
+let check_session_bundle_requires_schema_and_decode_steps () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let missing_schema =
+    write_session_bundle_fixture ~schema:None dir
+  in
+  let missing_schema_code, _ = run_session_bundle_raw missing_schema in
+  check "missing schema rejected" (missing_schema_code = 1);
+  remove_tree dir;
+  Unix.mkdir dir 0o700;
+  let wrong_schema =
+    write_session_bundle_fixture ~schema:(Some "octra.inference.bad") dir
+  in
+  let wrong_schema_code, _ = run_session_bundle_raw wrong_schema in
+  check "wrong schema rejected" (wrong_schema_code = 1);
+  remove_tree dir;
+  Unix.mkdir dir 0o700;
+  let missing_decode =
+    write_session_bundle_fixture ~decode_steps:None dir
+  in
+  let missing_decode_code, _ = run_session_bundle_raw missing_decode in
+  check "missing decode steps rejected" (missing_decode_code = 1)
+
 let () =
-  check_batch_runtime_semantics ()
+  check_batch_runtime_semantics ();
+  check_session_bundle_single_transition ();
+  check_session_bundle_hash_binds_decode_steps ();
+  check_session_bundle_rejects_multi_transition ();
+  check_session_bundle_requires_schema_and_decode_steps ()

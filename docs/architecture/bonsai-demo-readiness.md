@@ -201,6 +201,13 @@ admission it opens a session, executes one target-owned `advance`, finalizes,
 and reports session and receipt roots with `consensus_accepted=false`.
 `--run-session` also requires `--input FILE`; the input bytes must hash to the
 request's `input_root` and fit the requirement's `max_view_bytes` limit.
+`--run-inference-session` consumes a product-facing session bundle. The first
+supported shape executes one target-owned stage labeled `prefill` or `decode`
+through the same open/advance/finalize machinery and reports
+`session_report_sha256`, transition roots, receipts, and diagnostic runtime
+semantics. Multi-transition bundles are intentionally rejected with
+`session_continuation_state_carry_not_supported` until resident state carry is
+implemented.
 `--scan-policy` is the faster frontier-discovery mode. It decodes the program
 envelope and reports every visible inference opcode-policy violation as JSON,
 without admitting new opcodes or running a session. It cannot be combined with
