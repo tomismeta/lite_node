@@ -209,6 +209,33 @@ let check_all_catalog_exports_complete_transcendental_inventory () =
            "SOFTMAX_FP";
            "SOFTPLUS_FP";
          ]);
+    let entry opcode =
+      match List.find_map (dependency_entry opcode) entries with
+      | Some fields -> fields
+      | None -> failwith ("missing dependency entry: " ^ opcode)
+    in
+    let softplus_replacements =
+      string_list_value "required_replacements" (entry "SOFTPLUS_FP")
+    in
+    check
+      "softplus exp replacement"
+      (List.mem
+         "protocol_owned_exp_nonpositive_binary64"
+         softplus_replacements);
+    check
+      "softplus log1p replacement"
+      (List.mem
+         "protocol_owned_log1p_nonnegative_binary64"
+         softplus_replacements);
+    let rope_replacements =
+      string_list_value "required_replacements" (entry "ROPE_APPLY_INDEXED_FP")
+    in
+    check
+      "rope rotary angle replacement"
+      (List.mem "protocol_owned_rotary_angle_binary64" rope_replacements);
+    check
+      "rope sin/cos replacement"
+      (List.mem "protocol_owned_sin_cos_binary64" rope_replacements);
     List.iter
       (function
         | `Assoc entry_fields ->

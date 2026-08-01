@@ -101,6 +101,18 @@ let contains_substring needle value =
 let list_contains_substring needle values =
   List.exists (contains_substring needle) values
 
+let check_protocol_owned_transcendental_obligation opcode gate =
+  let obligations = string_list_value "consensus_obligations" gate in
+  check
+    (opcode ^ " requires protocol-owned math")
+    (list_contains_substring "protocol-owned deterministic" obligations);
+  check
+    (opcode ^ " has no native qualification escape hatch")
+    (not (list_contains_substring "replace or qualify" obligations));
+  check
+    (opcode ^ " has no native consensus evaluation")
+    (not (list_contains_substring "before native" obligations))
+
 let string_list_field name fields =
   match assoc_value name fields with
   | `List values ->
@@ -1120,7 +1132,7 @@ let check_inference_profile_surface_coverage () =
        "p0 profile catalog root"
        (String.equal
           (string_value "profile_catalog_root" fields)
-          "94cd8546bbcd8538f37f3ab077c9c119a900c51c0721f21cb2727fcd5bfc82f7");
+          "fc9e224e6a70602b0e672fb2bc5e29f94eb02886dabde344bf2fae48bc00404f");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "p0 readiness worklist count" (List.length rows = 5);
@@ -1180,7 +1192,7 @@ let check_inference_profile_surface_coverage () =
        "runtime profile catalog root"
        (String.equal
           (string_value "profile_catalog_root" fields)
-          "11dc0d8efa2fa7b19889919f06fe6dfdd0c5e17fe65444ebeaf84f88e2065375");
+          "636ef93fc29baaf11bc7ad08d302ab0efdf4d4236f550707e8d376e92363da16");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "runtime readiness worklist count" (List.length rows = 17)
@@ -1258,7 +1270,7 @@ let check_inference_profile_surface_coverage () =
      | `String root ->
        String.equal
          root
-         "11dc0d8efa2fa7b19889919f06fe6dfdd0c5e17fe65444ebeaf84f88e2065375"
+         "636ef93fc29baaf11bc7ad08d302ab0efdf4d4236f550707e8d376e92363da16"
      | _ -> false);
   check
     "empty profile catalog root"
@@ -1477,6 +1489,12 @@ let check_remaining_p0_profile_obligations () =
   check
     "softmax remains local-only"
     (String.equal (string_value "consensus_status" softmax_gate) "local_only");
+  check_protocol_owned_transcendental_obligation "SOFTMAX_FP" softmax_gate;
+  check
+    "softmax requires protocol-owned exp replacement"
+    (list_contains_substring
+       "protocol-owned deterministic software math"
+       (string_list_value "required_actions" softmax_gate));
   let softmax_blockers =
     string_list_value "consensus_blocker_codes" softmax_gate
   in
@@ -1530,6 +1548,7 @@ let check_remaining_p0_profile_obligations () =
   check
     "delta remains local-only"
     (String.equal (string_value "consensus_status" delta_gate) "local_only");
+  check_protocol_owned_transcendental_obligation "GATED_DELTA_RULE_FP" delta_gate;
   let delta_blockers =
     string_list_value "consensus_blocker_codes" delta_gate
   in
@@ -1697,6 +1716,12 @@ let check_rope_indexed_profile_gate () =
   check
     "rope indexed remains local-only"
     (String.equal (string_value "consensus_status" gate) "local_only");
+  check_protocol_owned_transcendental_obligation "ROPE_APPLY_INDEXED_FP" gate;
+  check
+    "rope indexed requires protocol-owned rotary replacement"
+    (list_contains_substring
+       "protocol-owned deterministic rotary math"
+       (string_list_value "required_actions" gate));
   check
     "rope indexed local trig semantics"
     (list_contains_substring
@@ -1793,6 +1818,7 @@ let check_activation_profile_gates () =
         (list_contains_substring
            obligation_needle
            (string_list_value "consensus_obligations" gate));
+      check_protocol_owned_transcendental_obligation opcode gate;
       (match
          Profile.validate_for_opcode
            ~opcode
@@ -1819,7 +1845,7 @@ let check_activation_profile_gates () =
       | Ok _ -> failwith (opcode ^ " should reject profile overclaim"))
     [
       "SIGMOID_FP", "native exp only sees finite nonpositive inputs", "nonpositive exp-domain gate";
-      "SOFTPLUS_FP", "log1p receives finite nonnegative inputs", "native binary64 exp and log1p";
+      "SOFTPLUS_FP", "log1p receives finite nonnegative inputs", "protocol-owned deterministic exp/log1p behavior";
       "SILU_FP", "SiLU reuses the SIGMOID_FP sign branch", "deterministic sigmoid reuse";
     ];
   let sigmoid_gate = profile_gate "SIGMOID_FP" in

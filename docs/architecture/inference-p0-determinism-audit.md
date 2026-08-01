@@ -662,9 +662,10 @@ GATED_DELTA_RULE_FP    host-fp-exp-local-candidate
 
 `host-fp-local-candidate` is accepted only as local candidate execution and is
 reported as `local_only`, with required actions to bind exact arithmetic,
-replace or qualify host math, and pass cross-platform conformance before
-validator admission. `host-fp-exp-local-candidate` is the narrower local-only
-profile for kernels whose remaining native host dependency is `exp`/`log1p`.
+replace host math with protocol-owned deterministic software arithmetic, and
+pass cross-platform conformance before validator admission.
+`host-fp-exp-local-candidate` is the narrower local-only profile for kernels
+whose remaining native host dependency is `exp`/`log1p`.
 `host-fp-trig-local-candidate` is the narrower local-only profile for indexed
 rotary math whose remaining native host dependency is exponentiation plus
 `cos`/`sin`. `deterministic-q1-g128-fp64-linear` and
@@ -978,9 +979,9 @@ LiteNode now also pins `SOFTMAX_FP` locally for extreme finite scores:
 equal `max_float` scores produce uniform probabilities after max subtraction,
 and a score dominated by `max_float` underflows to a zero probability without
 rejecting the finite input. Shifted scores are checked with LiteNode's
-deterministic binary64 comparison and must compare `<= +0.0` before native
-`exp` is called. This remains exp-local candidate behavior until `exp` and
-output encoding are protocol-owned; max selection, score-shift,
+deterministic binary64 comparison and must compare `<= +0.0` before the current
+local-only native `exp` call. This remains exp-local candidate behavior until
+`exp` and output encoding are protocol-owned; max selection, score-shift,
 exponential-sum, and probability-division steps now use LiteNode's finite
 binary64 core.
 

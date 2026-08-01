@@ -804,7 +804,7 @@ let of_name = function
       summary =
         "native exponential math accepted only for local inference proof execution";
       required_actions = [
-        "replace or qualify native exp/log-style math before validator admission";
+        "replace native exp/log-style math with protocol-owned deterministic software math before validator admission";
         "bind deterministic exponential oracle vectors and profile roots";
         "preserve finite-domain gates, rejection policy, effort, and atomic writeback";
       ];
@@ -816,7 +816,7 @@ let of_name = function
       summary =
         "native trigonometric and exponentiation math accepted only for local inference proof execution";
       required_actions = [
-        "replace or qualify native pow/cos/sin math before validator admission";
+        "replace native pow/cos/sin math with protocol-owned deterministic rotary math before validator admission";
         "bind deterministic rotary oracle vectors and profile roots";
         "preserve position/base interpretation, finite rejection, effort, and atomic writeback";
       ];
@@ -1149,8 +1149,8 @@ let consensus_obligations ~opcode =
     ]
   | "SOFTMAX_FP" ->
     [
-      "replace or qualify native binary64 exp behavior";
-      "pin deterministic nonpositive exp-domain gate before native exp";
+      "replace native binary64 exp with protocol-owned deterministic exp behavior";
+      "pin deterministic nonpositive exp-domain gate before protocol-owned deterministic exp evaluation";
       "qualify deterministic binary64 score shifting, exponential summation, and probability division";
       "qualify deterministic binary64 comparison for maximum-score selection";
       "pin max-subtract semantics, ties, underflow, overflow, and non-finite rejection";
@@ -1159,7 +1159,7 @@ let consensus_obligations ~opcode =
     ]
   | "SIGMOID_FP" ->
     [
-      "replace or qualify native binary64 exp";
+      "replace native binary64 exp with protocol-owned deterministic exp behavior";
       "pin deterministic sign branch and nonpositive exp-domain gate";
       "qualify deterministic binary64 addition and division";
       "pin saturation, signed-zero, subnormal, overflow, and non-finite behavior";
@@ -1168,7 +1168,7 @@ let consensus_obligations ~opcode =
     ]
   | "SOFTPLUS_FP" ->
     [
-      "replace or qualify native binary64 exp and log1p";
+      "replace native binary64 exp and log1p with protocol-owned deterministic exp/log1p behavior";
       "pin deterministic positive/nonpositive branch boundary and nonpositive exp-domain gate";
       "qualify deterministic binary64 positive-branch addition";
       "pin signed-zero, subnormal, overflow, and non-finite behavior";
@@ -1177,7 +1177,7 @@ let consensus_obligations ~opcode =
     ]
   | "SILU_FP" ->
     [
-      "replace or qualify native binary64 exp";
+      "replace native binary64 exp with protocol-owned deterministic exp behavior";
       "pin deterministic sigmoid reuse and nonpositive exp-domain gate";
       "qualify deterministic binary64 addition, division, and multiplication";
       "pin signed-zero, subnormal, overflow, and non-finite behavior";
@@ -1202,8 +1202,8 @@ let consensus_obligations ~opcode =
     ]
   | "GATED_DELTA_RULE_FP" ->
     [
-      "replace or qualify native binary64 exp for state decay";
-      "pin deterministic finite nonpositive log_decay gate before native exp";
+      "replace native binary64 exp for state decay with protocol-owned deterministic exp behavior";
+      "pin deterministic finite nonpositive log_decay gate before protocol-owned deterministic exp evaluation";
       "qualify deterministic binary64 recurrence add/mul, dot-product, and reciprocal division behavior";
       "qualify deterministic binary64 query-scale sqrt behavior";
       "pin head mapping, decay order, beta application, state update order, and scaling";
@@ -1227,7 +1227,7 @@ let consensus_obligations ~opcode =
     ]
   | "ROPE_APPLY_INDEXED_FP" ->
     [
-      "replace or qualify native binary64 exponentiation, cos, sin, multiply, and add/subtract";
+      "replace native binary64 exponentiation, cos, and sin with protocol-owned deterministic rotary behavior";
       "pin exact position-cell interpretation, base handling, rotary dimension validation, and zero-position behavior";
       "define in-place writeback atomicity, tail preservation, finite rejection, and effort";
       "pass independent cross-platform conformance for indexed rotary edge vectors";
