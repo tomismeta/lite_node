@@ -12,11 +12,28 @@ Include at startup:
 - gRPC (version 9738fdy44-2025)
 *)
 
+module Abi = Octra_vm.Inference_session_abi
+module Profile = Octra_vm.Inference_numerical_profile
+module Template = Octra_vm.Inference_conformance_template
+
 let check label condition =
   if not condition then failwith label
 
 let hex_root char =
   String.make 64 char
+
+let current_profile_root opcode =
+  match Profile.current_runtime_profile ~opcode with
+  | Some profile_name ->
+    (match Profile.of_name profile_name with
+     | Ok profile -> Profile.root_for_opcode ~opcode profile
+     | Error error -> failwith (Profile.error_message error))
+  | None -> hex_root '3'
+
+let current_vm_semantics_root opcode =
+  match Template.vm_semantics_root_for_opcode ~opcode with
+  | Some root -> root
+  | None -> hex_root '5'
 
 let assoc_value name fields =
   match List.assoc_opt name fields with
@@ -357,6 +374,8 @@ let result
     ?required_failure_contract_payload
     ?failure
     () =
+  let numerical_profile_root = current_profile_root opcode in
+  let vm_semantics_root = current_vm_semantics_root opcode in
   let failure_cases =
     match failure, String.equal opcode "LINEAR_Q1_G128_FP" with
     | Some failure, true ->
@@ -411,11 +430,11 @@ let result
            "none"
          else
            "profile_root_mismatch");
-      "numerical_profile_root", `String (hex_root '3');
+      "numerical_profile_root", `String numerical_profile_root;
       "profile_root",
       `String
         (if String.equal profile_root_status "matched" then
-           hex_root '3'
+           numerical_profile_root
          else
            hex_root '8');
     ];
@@ -428,11 +447,11 @@ let result
            "none"
          else
            "vm_semantics_root_mismatch");
-      "vm_semantics_root", `String (hex_root '5');
+      "vm_semantics_root", `String vm_semantics_root;
       "litenode_vm_semantics_root",
       `String
         (if String.equal vm_semantics_status "matched" then
-           hex_root '5'
+           vm_semantics_root
          else
            hex_root '7');
     ];
@@ -445,8 +464,8 @@ let result
            "none"
          else
            "abi_declaration_mismatch");
-      "session_abi_root", `String (hex_root '6');
-      "litenode_session_abi_root", `String (hex_root '6');
+      "session_abi_root", `String Abi.v1_root;
+      "litenode_session_abi_root", `String Abi.v1_root;
       "evidence_scope", `String "template_declaration";
       "entrypoint", `String "advance";
       "label", `Int 100;
@@ -2132,6 +2151,10 @@ let check_matrix_rejects_profile_binding_forged_matched_roots () =
       report ~runner_sha system machine
       |> replace_result_binding_field
            "profile_root_binding"
+           "numerical_profile_root"
+           (`String (hex_root '8'))
+      |> replace_result_binding_field
+           "profile_root_binding"
            "profile_root"
            (`String (hex_root '8'))
     in
@@ -2872,6 +2895,10 @@ let check_matrix_rejects_vm_semantics_binding_forged_matched_roots () =
       report ~runner_sha system machine
       |> replace_result_binding_field
            "vm_semantics_binding"
+           "vm_semantics_root"
+           (`String (hex_root '8'))
+      |> replace_result_binding_field
+           "vm_semantics_binding"
            "litenode_vm_semantics_root"
            (`String (hex_root '8'))
     in
@@ -2899,6 +2926,10 @@ let check_matrix_rejects_abi_declaration_binding_forged_matched_roots () =
   with_temp_dir (fun dir ->
     let forged runner_sha system machine =
       report ~runner_sha system machine
+      |> replace_result_binding_field
+           "abi_declaration_binding"
+           "session_abi_root"
+           (`String (hex_root '8'))
       |> replace_result_binding_field
            "abi_declaration_binding"
            "litenode_session_abi_root"

@@ -15,6 +15,8 @@ Include at startup:
 module Template = Octra_vm.Inference_conformance_template
 module Signature = Octra_vm.Inference_conformance_signature
 module Fp64 = Octra_vm.Inference_fp64
+module Profile = Octra_vm.Inference_numerical_profile
+module Abi = Octra_vm.Inference_session_abi
 
 let runner_reports = ref []
 let min_platforms = ref 2
@@ -284,27 +286,52 @@ let matched_root_pair fields ~left ~right =
     String.equal left_root right_root && hex_string left_root
   | _ -> false
 
-let profile_root_binding_matched fields =
-  opt_string_field "status" fields = Some "matched"
-  && opt_string_field "classification" fields = Some "none"
-  && matched_root_pair fields ~left:"numerical_profile_root" ~right:"profile_root"
+let authoritative_profile_root ~opcode =
+  match Profile.current_runtime_profile ~opcode with
+  | None -> None
+  | Some profile_name ->
+    (match Profile.of_name profile_name with
+     | Ok profile -> Some (Profile.root_for_opcode ~opcode profile)
+     | Error _ -> None)
 
-let vm_semantics_binding_matched fields =
+let matched_authoritative_root_pair fields ~left ~right expected =
+  match expected with
+  | None -> matched_root_pair fields ~left ~right
+  | Some expected_root ->
+    (match binding_string left fields, binding_string right fields with
+     | Some left_root, Some right_root ->
+       hex_string left_root
+       && String.equal left_root expected_root
+       && String.equal right_root expected_root
+     | _ -> false)
+
+let profile_root_binding_matched ~opcode fields =
   opt_string_field "status" fields = Some "matched"
   && opt_string_field "classification" fields = Some "none"
-  && matched_root_pair
+  && matched_authoritative_root_pair
+       fields
+       ~left:"numerical_profile_root"
+       ~right:"profile_root"
+       (authoritative_profile_root ~opcode)
+
+let vm_semantics_binding_matched ~opcode fields =
+  opt_string_field "status" fields = Some "matched"
+  && opt_string_field "classification" fields = Some "none"
+  && matched_authoritative_root_pair
        fields
        ~left:"vm_semantics_root"
        ~right:"litenode_vm_semantics_root"
+       (Template.vm_semantics_root_for_opcode ~opcode)
 
 let abi_declaration_binding_matched fields =
   opt_string_field "status" fields = Some "matched"
   && opt_string_field "classification" fields = Some "none"
   && opt_string_field "evidence_scope" fields = Some "template_declaration"
-  && matched_root_pair
+  && matched_authoritative_root_pair
        fields
        ~left:"session_abi_root"
        ~right:"litenode_session_abi_root"
+       (Some Abi.v1_root)
   && opt_string_field "entrypoint" fields = Some "advance"
   && binding_int "label" fields = Some 100
   && opt_string_field "output_base_register" fields = Some "r0"
@@ -1001,8 +1028,9 @@ let report_summary path =
     let profile_root_bindings_matched =
       List.for_all
         (fun fields ->
+           let opcode = string_field "opcode" fields in
            match opt_assoc_field "profile_root_binding" fields with
-           | Some binding_fields -> profile_root_binding_matched binding_fields
+           | Some binding_fields -> profile_root_binding_matched ~opcode binding_fields
            | None -> false)
         result_fields
     in
@@ -1014,8 +1042,9 @@ let report_summary path =
     let vm_semantics_bindings_matched =
       List.for_all
         (fun fields ->
+           let opcode = string_field "opcode" fields in
            match opt_assoc_field "vm_semantics_binding" fields with
-           | Some binding_fields -> vm_semantics_binding_matched binding_fields
+           | Some binding_fields -> vm_semantics_binding_matched ~opcode binding_fields
            | None -> false)
         result_fields
     in

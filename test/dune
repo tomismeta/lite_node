@@ -134,7 +134,7 @@
 (test
  (name inference_conformance_matrix_tool_test)
  (modules inference_conformance_matrix_tool_test)
- (libraries yojson unix)
+ (libraries octra_vm yojson unix)
  (deps ../tools/inference_conformance_matrix.exe))
 
 (test
