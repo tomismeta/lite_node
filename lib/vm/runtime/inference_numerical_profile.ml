@@ -1445,6 +1445,181 @@ let consensus_blocker_codes ~opcode =
       ]
     | _ -> []
 
+let native_dependency_details ~opcode =
+  match opcode with
+  | "SOFTMAX_FP" ->
+    Some
+      ( ["native_exp_nonpositive"],
+        ["exp(score[index] - max_score)"],
+        ["protocol_owned_exp_nonpositive_binary64"],
+        [
+          "wide_uniform_tail_1024";
+          "near_underflow_shift";
+          "subnormal_probability_tail";
+          "positive_shifted_exp_reject";
+        ] )
+  | "GATED_DELTA_RULE_FP" ->
+    Some
+      ( ["native_exp_nonpositive"],
+        ["exp(log_decay[timestep, value_head])"],
+        ["protocol_owned_exp_nonpositive_binary64"],
+        [
+          "state_decay_tail";
+          "negative_subnormal_decay";
+          "positive_log_decay_reject";
+          "state_writeback_atomicity";
+        ] )
+  | "SIGMOID_FP" ->
+    Some
+      ( ["native_exp_nonpositive"],
+        [
+          "exp(-x) for nonnegative x";
+          "exp(x) for negative x";
+        ],
+        ["protocol_owned_exp_nonpositive_binary64"],
+        [
+          "signed_zero_branch";
+          "large_positive_saturation";
+          "large_negative_tail";
+          "subnormal_input";
+        ] )
+  | "SILU_FP" ->
+    Some
+      ( ["native_exp_nonpositive"],
+        ["SIGMOID_FP branch reused before x * sigmoid(x)"],
+        ["protocol_owned_exp_nonpositive_binary64"],
+        [
+          "signed_zero_branch";
+          "large_positive_identity_tail";
+          "large_negative_zero_tail";
+          "subnormal_input";
+        ] )
+  | "SOFTPLUS_FP" ->
+    Some
+      ( ["native_exp_nonpositive"; "native_log1p_nonnegative"],
+        [
+          "exp(-x) for positive x";
+          "exp(x) for nonpositive x";
+          "log1p(exp(...))";
+        ],
+        [
+          "protocol_owned_exp_nonpositive_binary64";
+          "protocol_owned_log1p_nonnegative_binary64";
+        ],
+        [
+          "positive_branch_boundary";
+          "large_positive_linear_tail";
+          "large_negative_zero_tail";
+          "subnormal_exp_tail";
+        ] )
+  | "ROPE_APPLY_INDEXED_FP" ->
+    Some
+      ( ["native_pow"; "native_cos"; "native_sin"],
+        [
+          "base ** positive_position_scale";
+          "theta = position / power";
+          "cos(theta)";
+          "sin(theta)";
+        ],
+        [
+          "protocol_owned_rotary_angle_binary64";
+          "protocol_owned_sin_cos_binary64";
+        ],
+        [
+          "zero_position_identity";
+          "large_position_periodicity";
+          "section_boundary_pair_positions";
+          "tail_preservation";
+        ] )
+  | _ -> None
+
+let host_native_blockers ~opcode =
+  consensus_blocker_codes ~opcode
+  |> List.filter (function
+    | "host_fp_exp"
+    | "host_fp_exponentiation"
+    | "host_fp_log1p"
+    | "host_fp_trig" -> true
+    | _ -> false)
+  |> List.sort_uniq String.compare
+
+let transcendental_dependency_entry ~opcode =
+  let host_native_blockers = host_native_blockers ~opcode in
+  match native_dependency_details ~opcode, host_native_blockers with
+  | None, [] -> None
+  | None, blockers ->
+    Some
+      (`Assoc [
+        "schema", `String "octra.inference.transcendental-dependency.v1";
+        "opcode", `String opcode;
+        "status", `String "metadata_missing";
+        "classification",
+        `String "host_native_math_dependency_metadata_missing";
+        "dependencies", `List [];
+        "affected_steps", `List [];
+        "consensus_blocker_codes",
+        `List (List.map (fun value -> `String value) blockers);
+        "required_replacements", `List [];
+        "required_punitive_vectors", `List [];
+        "consensus_action",
+        `String "write_dependency_metadata_before_validator_admission";
+      ])
+  | Some (dependencies, affected_steps, replacements, punitive_vectors), _ ->
+    Some
+      (`Assoc [
+        "schema", `String "octra.inference.transcendental-dependency.v1";
+        "opcode", `String opcode;
+        "status", `String "local_only";
+        "classification", `String "host_native_math_dependency";
+        "dependencies",
+        `List (List.map (fun value -> `String value) dependencies);
+        "affected_steps",
+        `List (List.map (fun value -> `String value) affected_steps);
+        "consensus_blocker_codes",
+        `List (List.map (fun value -> `String value) host_native_blockers);
+        "required_replacements",
+        `List (List.map (fun value -> `String value) replacements);
+        "required_punitive_vectors",
+        `List (List.map (fun value -> `String value) punitive_vectors);
+        "consensus_action",
+        `String
+          "qualified_protocol_owned_replacement_required_before_validator_admission";
+      ])
+
+let dependency_count entries =
+  List.fold_left
+    (fun count -> function
+       | `Assoc fields ->
+         (match List.assoc_opt "dependencies" fields with
+          | Some (`List dependencies) -> count + List.length dependencies
+          | _ -> count)
+       | _ -> count)
+    0
+    entries
+
+let transcendental_dependency_catalog_json ~opcodes =
+  let entries =
+    opcodes
+    |> List.sort_uniq String.compare
+    |> List.filter_map (fun opcode -> transcendental_dependency_entry ~opcode)
+  in
+  `Assoc [
+    "schema", `String "octra.inference.transcendental-dependency-catalog.v1";
+    "diagnostic_only", `Bool true;
+    "authority", `String "none";
+    "source", `String "litenode_runtime_profile";
+    "entry_count", `Int (List.length entries);
+    "dependency_count", `Int (dependency_count entries);
+    "entries", `List entries;
+  ]
+
+let transcendental_dependency_catalog_root catalog =
+  Digestif.SHA256.(
+    digest_string
+      ("octra:inference:transcendental-dependency-catalog\000"
+       ^ Yojson.Safe.to_string catalog)
+    |> to_hex)
+
 let arithmetic_domain ~profile ~opcode =
   match profile.name, opcode with
   | "byte-ingress-exact", _ -> "ieee754-little-endian-byte-ingress"

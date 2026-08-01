@@ -107,3 +107,7 @@ val profile_catalog_root_json : Yojson.Safe.t list -> Yojson.Safe.t
 val profile_root_binding_catalog_json : Yojson.Safe.t list -> Yojson.Safe.t
 val consensus_blocker_catalog_json : Yojson.Safe.t list -> Yojson.Safe.t
 val consensus_blocker_class_counts_json : Yojson.Safe.t list -> Yojson.Safe.t
+val transcendental_dependency_catalog_json :
+  opcodes:string list -> Yojson.Safe.t
+val transcendental_dependency_catalog_root :
+  Yojson.Safe.t -> string

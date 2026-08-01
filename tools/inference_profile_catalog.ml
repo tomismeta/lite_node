@@ -131,6 +131,9 @@ let session_abi_catalog_root =
 let attach_authority_catalogs opcodes = function
   | `Assoc fields ->
     let vm_semantics_catalog = vm_semantics_catalog_json opcodes in
+    let transcendental_dependency_catalog =
+      Profile.transcendental_dependency_catalog_json ~opcodes
+    in
     `Assoc
       (fields
        @ [
@@ -139,6 +142,12 @@ let attach_authority_catalogs opcodes = function
          `String (vm_semantics_catalog_root vm_semantics_catalog);
          "session_abi_root_catalog", session_abi_catalog_json;
          "session_abi_catalog_root", `String session_abi_catalog_root;
+         "transcendental_dependency_catalog",
+         transcendental_dependency_catalog;
+         "transcendental_dependency_catalog_root",
+         `String
+           (Profile.transcendental_dependency_catalog_root
+              transcendental_dependency_catalog);
        ])
   | value -> value
 
