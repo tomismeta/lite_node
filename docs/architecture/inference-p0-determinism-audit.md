@@ -1,6 +1,6 @@
 # Inference P0 Determinism Audit
 
-Status: implementation audit, 2026-07-30.
+Status: implementation audit, updated 2026-08-01.
 
 This audit is scoped to the five P0 primitives in the determinism ingestion
 corpus:
@@ -135,8 +135,9 @@ validator_readiness_gate: rejected
 The runner now reports effort in two units. `expected_effort` and
 `observed_effort` remain total one-opcode program effort. For Q1, the report
 also emits `expected_opcode_effort`, `observed_opcode_effort`, and
-`opcode_profile`; the current canonical split is `LINEAR_Q1_G128_FP = 200`
-opcode effort plus `STOP = 1`, for total program effort `201`.
+`opcode_profile`; the canonical split is
+`LINEAR_Q1_G128_FP = 200 + floor(m * n * k / 512)` opcode effort plus `STOP =
+1`.
 The static checker also validates the Q1 positive-template formula:
 `expected_effort = 200 + ((m * n * k) / 512) + 1`.
 
@@ -160,9 +161,35 @@ consensus-candidate to validator-ready still requires a producer artifact bound
 to the current LiteNode profile root, independent cross-platform oracle
 qualification, and explicit consensus promotion of the profile.
 
-Current focused Q1 checkpoint on 2026-07-31, using the immutable
-effort-authority P0 index against the current LiteNode runner after executable
-ABI gating:
+Current LiteNode-only Q1 checkpoint on 2026-08-01:
+
+```text
+LiteNode branch: codex/inference-runtime-foundation
+latest local commits:
+  9f6b67d conformance: accept named q1 output spans
+  6c1cc94 conformance: validate q1 matrix shape metadata
+result_signature_schema: octra.inference.conformance.result-signature.v5
+local focused tests: accepted
+static Q1 template checks: cover m/k/n bounds, byte_offset, q1_owner span,
+  output manifest size, ABI output-count register isolation, expected effort,
+  required punitive rows, and exact executable mutation shape
+runner Q1 result rows: sign byte_offset, lhs_cells, output_cells,
+  q1_owner_source_bytes, q1_required_owner_bytes, and expected_effort
+matrix Q1 result validation: recomputes byte_offset + required_bytes,
+  output_cells = m * n, ABI r1/output subspan count, opcode effort, total
+  program effort, observed effort, and dimension bounds instead of trusting
+  status booleans
+matrix forged-evidence tests: reject coordinated forged shape, byte-offset
+  span, output count, observed effort, opcode effort, missing mutation payload,
+  and oversized JSON integer evidence
+next validator-readiness blocker: producer must re-emit v5 Q1/P0 evidence
+  against this LiteNode commit, then run at least two distinct platform/runner
+  observations through inference_conformance_matrix.exe
+```
+
+Earlier focused Q1 checkpoint on 2026-07-31, using the immutable
+effort-authority P0 index before the current v5 Q1 shape contract and
+executable ABI gating:
 
 ```text
 selected_opcodes: [LINEAR_Q1_G128_FP]
