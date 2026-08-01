@@ -414,6 +414,325 @@ let abi_declaration_binding_gate_json counts =
          (abi_declaration_binding_blockers counts));
   ]
 
+let reg_name index = "r" ^ string_of_int index
+
+let repair_field ~field ?case ?expected_prefix ?observed ?expected
+    ?(blockers = []) action =
+  let optional_string name = function
+    | None -> []
+    | Some value -> [name, `String value]
+  in
+  `Assoc
+    ([
+       "field", `String field;
+       "action", `String action;
+       "observed", string_or_null observed;
+       "expected", string_or_null expected;
+       "blockers",
+       `List (List.map (fun blocker -> `String blocker) blockers);
+     ]
+     @ optional_string "case" case
+     @ optional_string "expected_prefix" expected_prefix)
+
+let binding_repair ~field ~observed_name ~expected_name binding =
+  match binding with
+  | `Assoc fields ->
+    (match opt_string_field "status" fields with
+     | Some "matched" -> []
+     | _ ->
+       [
+         repair_field
+           ~field
+           ?observed:(opt_string_field observed_name fields)
+           ?expected:(opt_string_field expected_name fields)
+           ~blockers:(optional_string_list_field "blockers" fields)
+           "replace_with_litenode_authority";
+       ])
+  | _ ->
+    [
+      repair_field
+        ~field
+        "emit_litenode_authority_binding";
+    ]
+
+let abi_repair binding =
+  match binding with
+  | `Assoc fields ->
+    (match opt_string_field "status" fields with
+     | Some "matched" -> []
+     | _ ->
+       let blockers = optional_string_list_field "blockers" fields in
+       let has blocker = List.exists (String.equal blocker) blockers in
+       let int_string name =
+         Option.map string_of_int (opt_int_field name fields)
+       in
+       let known =
+         [
+           ( "entrypoint_mismatch",
+             "abi.entrypoint",
+             "set_entrypoint",
+             opt_string_field "entrypoint" fields,
+             Some Abi.advance_entrypoint );
+           ( "entry_label_mismatch",
+             "abi.label",
+             "set_entrypoint_label",
+             int_string "label",
+             Some (string_of_int Abi.advance_label) );
+           ( "output_base_register_mismatch",
+             "abi.output_base_register",
+             "set_output_base_register",
+             opt_string_field "output_base_register" fields,
+             Some (reg_name Abi.output_base_register) );
+           ( "output_count_register_mismatch",
+             "abi.output_count_register",
+             "set_output_count_register",
+             opt_string_field "output_count_register" fields,
+             Some (reg_name Abi.output_count_register) );
+           ( "output_count_unit_mismatch",
+             "abi.output_count_unit",
+             "set_output_count_unit",
+             opt_string_field "output_count_unit" fields,
+             Some "cells" );
+           ( "session_abi_root_mismatch",
+             "abi.session_abi_root",
+             "set_session_abi_root",
+             opt_string_field "session_abi_root" fields,
+             opt_string_field "litenode_session_abi_root" fields );
+           ( "request_input_root_cell_mismatch",
+             "abi.request_input_root_cell",
+             "set_request_input_root_cell",
+             int_string "request_input_root_cell",
+             Some (string_of_int Abi.input_root_cell) );
+           ( "r0_output_base_mismatch",
+             "output.abi_registers.r0",
+             "match_output_base_address",
+             int_string "r0",
+             int_string "output_base_address" );
+           ( "r1_output_count_mismatch",
+             "output.abi_registers.r1",
+             "match_output_count",
+             int_string "r1",
+             int_string "output_count" );
+         ]
+       in
+       let repairs =
+         List.filter_map
+           (fun (blocker, field, action, observed, expected) ->
+              if has blocker then
+                Some
+                  (repair_field
+                     ~field
+                     ?observed
+                     ?expected
+                     ~blockers:[blocker]
+                     action)
+              else None)
+           known
+       in
+       let known_blockers =
+         List.map (fun (blocker, _, _, _, _) -> blocker) known
+       in
+       let manual_repairs =
+         blockers
+         |> List.filter (fun blocker -> not (List.mem blocker known_blockers))
+         |> List.map
+              (fun blocker ->
+                 repair_field
+                   ~field:"abi"
+                   ~blockers:[blocker]
+                   "manual_abi_diagnosis")
+       in
+       repairs @ manual_repairs)
+  | _ ->
+    [
+      repair_field
+        ~field:"abi"
+        ~expected:"session ABI declaration"
+        "emit_session_abi_declaration";
+    ]
+
+let has_prefix prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len
+  && String.equal (String.sub value 0 prefix_len) prefix
+
+let strip_prefix prefix value =
+  if has_prefix prefix value then
+    Some
+      (String.sub
+         value
+         (String.length prefix)
+         (String.length value - String.length prefix))
+  else
+    None
+
+let q1_expected_prefix case =
+  List.assoc_opt case Template.q1_required_failure_expectations
+
+let q1_case_field ?suffix case =
+  "expected_failure_atomicity_behavior[" ^ case ^ "]"
+  ^
+  match suffix with
+  | None -> ""
+  | Some suffix -> "." ^ suffix
+
+let q1_failure_repair blocker =
+  let case_repair prefix action ?suffix blocker =
+    match strip_prefix prefix blocker with
+    | None -> None
+    | Some case ->
+      Some
+        (repair_field
+           ~field:(q1_case_field ?suffix case)
+           ~case
+           ?expected_prefix:(q1_expected_prefix case)
+           ~blockers:[blocker]
+           action)
+  in
+  match
+    case_repair
+      "q1_failure_case_missing_"
+      "add_required_failure_case"
+      blocker
+  with
+  | Some repair -> Some repair
+  | None ->
+    (match
+       case_repair
+         "q1_failure_case_expected_mismatch_"
+         ~suffix:"expected"
+         "set_expected_prefix"
+         blocker
+     with
+     | Some repair -> Some repair
+     | None ->
+       (match
+          case_repair
+            "q1_failure_case_uncounted_"
+            "make_failure_case_counted"
+            blocker
+        with
+        | Some repair -> Some repair
+        | None ->
+          (match
+             case_repair
+               "q1_failure_case_rejected_"
+               "fix_failure_case_execution"
+               blocker
+           with
+           | Some repair -> Some repair
+           | None ->
+             (match
+                case_repair
+                  "q1_failure_case_mutation_mismatch_"
+                  ~suffix:"executable_mutations"
+                  "set_required_mutation_shape"
+                  blocker
+              with
+              | Some repair -> Some repair
+              | None ->
+                if String.equal blocker "q1_failure_case_output_span_not_covered"
+                then
+                  Some
+                    (repair_field
+                       ~field:"expected_failure_atomicity_behavior[].unchanged_spans"
+                       ~blockers:[blocker]
+                       "cover_output_span")
+                else
+                  None))))
+
+let failure_contract_repair result =
+  match result with
+  | `Assoc fields ->
+    (match field "required_failure_case_contract" fields with
+     | Some (`Assoc contract_fields) ->
+       let blockers = optional_string_list_field "blockers" contract_fields in
+       let q1_repairs = List.filter_map q1_failure_repair blockers in
+       let repaired_blockers =
+         List.filter_map
+           (fun repair ->
+              match repair with
+              | `Assoc repair_fields ->
+                (match field "blockers" repair_fields with
+                 | Some (`List [`String blocker]) -> Some blocker
+                 | _ -> None)
+              | _ -> None)
+           q1_repairs
+       in
+       let manual_repairs =
+         blockers
+         |> List.filter (fun blocker -> not (List.mem blocker repaired_blockers))
+         |> List.map
+              (fun blocker ->
+                 repair_field
+                   ~field:"expected_failure_atomicity_behavior"
+                   ~blockers:[blocker]
+                   "manual_failure_case_diagnosis")
+       in
+       q1_repairs @ manual_repairs
+     | _ -> [])
+  | _ -> []
+
+let producer_repair_hint = function
+  | `Assoc fields as result ->
+    let opcode =
+      match opt_string_field "opcode" fields with
+      | Some opcode -> opcode
+      | None -> "unknown"
+    in
+    let template_path =
+      match
+        opt_string_field "template_path" fields,
+        opt_string_field "fixture_path" fields
+      with
+      | Some path, _
+      | None, Some path -> path
+      | None, None -> "unknown"
+    in
+    let profile_repairs =
+      match field "profile_root_binding" fields with
+      | Some binding ->
+        binding_repair
+          ~field:"numerical_profile_root"
+          ~observed_name:"numerical_profile_root"
+          ~expected_name:"profile_root"
+          binding
+      | None -> []
+    in
+    let vm_semantics_repairs =
+      match field "vm_semantics_binding" fields with
+      | Some binding ->
+        binding_repair
+          ~field:"vm_semantics_root"
+          ~observed_name:"vm_semantics_root"
+          ~expected_name:"litenode_vm_semantics_root"
+          binding
+      | None -> []
+    in
+    let abi_repairs =
+      match field "abi_declaration_binding" fields with
+      | Some binding -> abi_repair binding
+      | None -> []
+    in
+    let repairs =
+      profile_repairs
+      @ vm_semantics_repairs
+      @ abi_repairs
+      @ failure_contract_repair result
+    in
+    if repairs = [] then None
+    else
+      Some
+        (`Assoc [
+          "opcode", `String opcode;
+          "template_path", `String template_path;
+          "repairs", `List repairs;
+        ])
+  | _ -> None
+
+let producer_repair_hints results =
+  results |> List.filter_map producer_repair_hint
+
 type executable_abi_counts = {
   executable_abi_matched : int;
   executable_abi_mismatch : int;
@@ -3431,6 +3750,8 @@ let run_p0_plus_pack path =
     Profile.profile_catalog_root_json profile_gates;
     "profile_root_binding_catalog",
     Profile.profile_root_binding_catalog_json (List.map snd results);
+    "producer_repair_hints",
+    `List (producer_repair_hints (List.map snd results));
     "consensus_blocker_catalog",
     Profile.consensus_blocker_catalog_json profile_gates;
     "consensus_blocker_class_counts",
@@ -3728,6 +4049,8 @@ let run_index path =
     Profile.profile_catalog_root_json profile_gates;
     "profile_root_binding_catalog",
     Profile.profile_root_binding_catalog_json (List.map snd results);
+    "producer_repair_hints",
+    `List (producer_repair_hints (List.map snd results));
     "consensus_blocker_catalog",
     Profile.consensus_blocker_catalog_json profile_gates;
     "consensus_blocker_class_counts",

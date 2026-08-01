@@ -755,6 +755,8 @@ let abi_declaration_binding_json = function
          "output_count_register", json_string_opt output_count_register;
          "output_count_unit", json_string_opt output_count_unit;
          "request_input_root_cell", json_int_opt request_input_root_cell;
+         "output_base_address", json_int_opt output_base;
+         "output_count", json_int_opt output_count;
          "r0", json_int_opt r0;
          "r1", json_int_opt r1;
          "blockers",

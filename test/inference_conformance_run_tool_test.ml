@@ -319,8 +319,13 @@ let q1_failure_cases ?(output_cells = 1) ?(lower_effort = 199) () =
   ]
 
 let q1_template ?(session_abi_root = Abi.v1_root)
+    ?(entrypoint = Abi.advance_entrypoint)
+    ?(label = Abi.advance_label)
+    ?(output_base_register = "r0")
+    ?(output_count_register = "r1")
+    ?(request_input_root_cell = Abi.input_root_cell)
     ?(m = 1) ?(k = 128) ?(n = 1) ?expected_effort
-    ?failure_cases ?(output_count_unit = "cells") ?(r1 = 1)
+    ?failure_cases ?(output_count_unit = "cells") ?(r0 = 10000) ?(r1 = 1)
     ?(input_name = "lhs") () =
   let input = input_for ~m ~k in
   let q1_owner = q1_owner_for ~k ~n in
@@ -403,18 +408,18 @@ let q1_template ?(session_abi_root = Abi.v1_root)
     "abi",
     `Assoc [
       "session_abi_root", `String session_abi_root;
-      "entrypoint", `String Abi.advance_entrypoint;
-      "label", `Int Abi.advance_label;
-      "output_base_register", `String "r0";
-      "output_count_register", `String "r1";
+      "entrypoint", `String entrypoint;
+      "label", `Int label;
+      "output_base_register", `String output_base_register;
+      "output_count_register", `String output_count_register;
       "output_count_unit", `String output_count_unit;
-      "request_input_root_cell", `Int Abi.input_root_cell;
+      "request_input_root_cell", `Int request_input_root_cell;
     ];
     "output",
     `Assoc [
       "base_address", `Int 10000;
       "length_f64_cells", `Int (m * n);
-      "abi_registers", `Assoc ["r0", `Int 10000; "r1", `Int r1];
+      "abi_registers", `Assoc ["r0", `Int r0; "r1", `Int r1];
       "subspans",
       `List [
         `Assoc [
@@ -625,6 +630,31 @@ let string_list name fields =
   |> List.map (function
     | `String value -> value
     | _ -> failwith ("json field must be a string list: " ^ name))
+
+let producer_repair_hints report =
+  match report with
+  | `Assoc fields -> list_value "producer_repair_hints" fields
+  | _ -> failwith "report must be object"
+
+let first_repair_hint report =
+  match producer_repair_hints report with
+  | [`Assoc fields] -> fields
+  | _ -> failwith "expected one producer repair hint"
+
+let repair_fields hint =
+  list_value "repairs" hint
+  |> List.map (function
+    | `Assoc fields -> fields
+    | _ -> failwith "repair must be object")
+
+let repair_for_field field repairs =
+  match
+    List.find_opt
+      (fun repair -> String.equal (string_value "field" repair) field)
+      repairs
+  with
+  | Some repair -> repair
+  | None -> failwith ("missing repair field: " ^ field)
 
 let check_q1_contract_visible gate =
   match list_value "required_failure_case_contracts" gate with
@@ -924,7 +954,10 @@ let check_good_template_reports_bound_abi () =
       (String.equal (gate_status "executable_abi_binding_gate" report) "accepted");
     check
       "good ABI gate accepted"
-      (String.equal (gate_status "abi_declaration_binding_gate" report) "accepted"))
+      (String.equal (gate_status "abi_declaration_binding_gate" report) "accepted");
+    check
+      "good report has no producer repair hints"
+      (producer_repair_hints report = []))
 
 let check_dynamic_q1_effort_vector () =
   with_temp_dir (fun dir ->
@@ -1143,7 +1176,28 @@ let check_require_failure_cases_rejects_missing_q1_case () =
          "missing Q1 failure next blocker"
          (String.equal
             (string_value "next_blocker" readiness)
-            "q1_failure_case_missing_nonfinite_fp16_scale")
+            "q1_failure_case_missing_nonfinite_fp16_scale");
+       let repairs = first_repair_hint report |> repair_fields in
+       let missing_case =
+         repair_for_field
+           "expected_failure_atomicity_behavior[nonfinite_fp16_scale]"
+           repairs
+       in
+       check
+         "missing Q1 repair is case-specific"
+         (String.equal
+            (string_value "action" missing_case)
+            "add_required_failure_case");
+       check
+         "missing Q1 repair case"
+         (String.equal
+            (string_value "case" missing_case)
+            "nonfinite_fp16_scale");
+       check
+         "missing Q1 repair expected prefix"
+         (String.equal
+            (string_value "expected_prefix" missing_case)
+            "reject_before_write")
      | _ -> failwith "report must be object"))
 
 let check_require_failure_cases_rejects_wrong_q1_expectation () =
@@ -1177,7 +1231,28 @@ let check_require_failure_cases_rejects_wrong_q1_expectation () =
          "wrong Q1 expectation blocker"
          (List.mem
          "q1_failure_case_expected_mismatch_nonfinite_fp16_scale"
-            (string_list "blockers" gate))
+            (string_list "blockers" gate));
+       let repairs = first_repair_hint report |> repair_fields in
+       let expectation =
+         repair_for_field
+           "expected_failure_atomicity_behavior[nonfinite_fp16_scale].expected"
+           repairs
+       in
+       check
+         "wrong Q1 expectation repair action"
+         (String.equal
+            (string_value "action" expectation)
+            "set_expected_prefix");
+       check
+         "wrong Q1 expectation repair case"
+         (String.equal
+            (string_value "case" expectation)
+            "nonfinite_fp16_scale");
+       check
+         "wrong Q1 expectation repair prefix"
+         (String.equal
+            (string_value "expected_prefix" expectation)
+            "reject_before_write")
      | _ -> failwith "report must be object"))
 
 let check_require_failure_cases_rejects_wrong_q1_mutation_shape () =
@@ -1228,7 +1303,23 @@ let check_require_failure_cases_rejects_wrong_q1_mutation_shape () =
          "wrong Q1 mutation shape gate blocker"
          (List.mem
             "q1_failure_case_mutation_mismatch_negative_byte_offset"
-            (string_list "blockers" gate))
+            (string_list "blockers" gate));
+       let repairs = first_repair_hint report |> repair_fields in
+       let mutation =
+         repair_for_field
+           "expected_failure_atomicity_behavior[negative_byte_offset].executable_mutations"
+           repairs
+       in
+       check
+         "wrong Q1 mutation repair action"
+         (String.equal
+            (string_value "action" mutation)
+            "set_required_mutation_shape");
+       check
+         "wrong Q1 mutation repair case"
+         (String.equal
+            (string_value "case" mutation)
+            "negative_byte_offset")
      | _ -> failwith "report must be object"))
 
 let check_q1_failure_shape_accepts_input_lhs_alias () =
@@ -1422,9 +1513,56 @@ let check_stale_abi_is_visible_in_executable_report () =
     check
       "stale ABI declaration reason"
       (List.mem "session_abi_root_mismatch" blockers);
+    let repairs = first_repair_hint report |> repair_fields in
+    let session_abi_repair =
+      repair_for_field "abi.session_abi_root" repairs
+    in
+    check
+      "stale ABI repair action"
+      (String.equal
+         (string_value "action" session_abi_repair)
+         "set_session_abi_root");
+    check
+      "stale ABI repair expected root"
+      (String.equal
+         (string_value "expected" session_abi_repair)
+         Abi.v1_root);
     check
       "stale ABI gate rejected"
       (String.equal (gate_status "abi_declaration_binding_gate" report) "rejected"))
+
+let check_stale_entry_label_repair_hint_is_precise () =
+  with_temp_dir (fun dir ->
+    let code, report =
+      run_conformance
+        dir
+        (q1_template ~label:(Abi.advance_label + 1) ())
+        ["--strict-effort"; "--require-profile-roots-bound"]
+    in
+    check "stale label runner still exits zero without readiness gate" (code = 0);
+    let result = first_result report in
+    let abi = assoc_json "abi_declaration_binding" result in
+    check "stale label declaration unbound" (String.equal (string_value "status" abi) "unbound");
+    check
+      "stale label blocker"
+      (List.mem "entry_label_mismatch" (string_list "blockers" abi));
+    let repairs = first_repair_hint report |> repair_fields in
+    let label_repair = repair_for_field "abi.label" repairs in
+    check
+      "stale label repair action"
+      (String.equal
+         (string_value "action" label_repair)
+         "set_entrypoint_label");
+    check
+      "stale label repair observed"
+      (String.equal
+         (string_value "observed" label_repair)
+         (string_of_int (Abi.advance_label + 1)));
+    check
+      "stale label repair expected"
+      (String.equal
+         (string_value "expected" label_repair)
+         (string_of_int Abi.advance_label)))
 
 let check_readiness_gate_rejects_stale_abi () =
   with_temp_dir (fun dir ->
@@ -1453,7 +1591,16 @@ let check_readiness_gate_rejects_stale_abi () =
       in
       check
         "stale ABI readiness blocker"
-        (List.mem "unbound_abi_declaration_binding" blockers)
+        (List.mem "unbound_abi_declaration_binding" blockers);
+      let repairs = first_repair_hint report |> repair_fields in
+      let unit_repair =
+        repair_for_field "abi.output_count_unit" repairs
+      in
+      check
+        "stale ABI unit repair"
+        (String.equal
+           (string_value "expected" unit_repair)
+           "cells")
     | _ -> failwith "report must be object")
 
 let check_readiness_gate_reports_executable_abi_mismatch () =
@@ -1486,7 +1633,22 @@ let check_readiness_gate_reports_executable_abi_mismatch () =
        let gate = assoc_json "executable_abi_binding_gate" fields in
        check
          "bad executable ABI top-level gate"
-         (String.equal (string_value "status" gate) "rejected")
+         (String.equal (string_value "status" gate) "rejected");
+       let repairs = first_repair_hint report |> repair_fields in
+       let output_count_repair =
+         repair_for_field "output.abi_registers.r1" repairs
+       in
+       check
+         "bad executable ABI repair action"
+         (String.equal
+            (string_value "action" output_count_repair)
+            "match_output_count");
+       check
+         "bad executable ABI repair observed"
+         (String.equal (string_value "observed" output_count_repair) "2");
+       check
+         "bad executable ABI repair expected"
+         (String.equal (string_value "expected" output_count_repair) "1")
      | _ -> failwith "report must be object"))
 
 let check_missing_output_subspan_reports_rejected () =
@@ -2205,7 +2367,10 @@ let check_p0_plus_rejected_results_empty_when_accepted () =
         (int_value "rejected_count" fields = 0);
       check
         "P0-plus rejected summary empty"
-        (list_value "rejected_results" fields = [])
+        (list_value "rejected_results" fields = []);
+      check
+        "P0-plus accepted repair hints empty"
+        (list_value "producer_repair_hints" fields = [])
     | _ -> failwith "report must be object")
 
 let check_p0_plus_rejected_results_report_outputs () =
@@ -2232,6 +2397,9 @@ let check_p0_plus_rejected_results_report_outputs () =
       check
         "P0-plus mixed rejected count"
         (int_value "rejected_count" fields = 1);
+      check
+        "P0-plus mixed repair hints empty"
+        (list_value "producer_repair_hints" fields = []);
       (match list_value "rejected_results" fields with
        | [`Assoc rejected_fields] ->
          check
@@ -2286,6 +2454,7 @@ let () =
   check_require_failure_cases_rejects_exact_partial_alias_shape ();
   check_accept_snapshot_requires_exact_output ();
   check_stale_abi_is_visible_in_executable_report ();
+  check_stale_entry_label_repair_hint_is_precise ();
   check_readiness_gate_rejects_stale_abi ();
   check_readiness_gate_reports_executable_abi_mismatch ();
   check_missing_output_subspan_reports_rejected ();
