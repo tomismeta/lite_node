@@ -221,18 +221,18 @@ let next_readiness_blocker blockers =
       "executable_abi_binding_not_proven";
       "executable_abi_binding_mismatch";
       "executable_abi_binding_not_run";
-      "consensus_candidate_profile_gates";
       "unbound_profile_roots";
       "profile_root_binding_mismatch";
       "profile_root_binding_rejected";
-      "cross_platform_conformance_missing";
-      "missing_cross_platform_matrix";
       "missing_required_opcode_scope";
       "required_opcode_missing";
       "insufficient_distinct_platforms";
       "insufficient_distinct_runner_executables";
       "insufficient_distinct_platform_runner_observations";
       "result_mismatch_across_platforms";
+      "cross_platform_conformance_missing";
+      "missing_cross_platform_matrix";
+      "consensus_candidate_profile_gates";
     ]
   in
   match

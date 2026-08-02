@@ -1064,17 +1064,31 @@ let check_matrix_rejects_validator_readiness_without_opcode_scope () =
 
 let check_matrix_rejects_one_platform_validator_readiness () =
   with_temp_dir (fun dir ->
+    let validator_readiness_blockers =
+      [
+        "cross_platform_conformance_missing";
+        "consensus_candidate_profile_gates";
+      ]
+    in
     let a =
       write_report
         dir
         "a.cjson"
-        (report ~runner_sha:(hex_root '1') "Darwin" "arm64")
+        (report
+           ~runner_sha:(hex_root '1')
+           ~validator_readiness_blockers
+           "Darwin"
+           "arm64")
     in
     let b =
       write_report
         dir
         "b.cjson"
-        (report ~runner_sha:(hex_root '2') "Darwin" "arm64")
+        (report
+           ~runner_sha:(hex_root '2')
+           ~validator_readiness_blockers
+           "Darwin"
+           "arm64")
     in
     let code, json =
       run_matrix
@@ -1105,7 +1119,17 @@ let check_matrix_rejects_one_platform_validator_readiness () =
         "one-platform readiness observation blocker"
         (List.mem
            "insufficient_distinct_platform_runner_observations"
-           (blockers fields))
+           (blockers fields));
+      check
+        "one-platform readiness retains candidate blocker"
+        (List.mem
+           "consensus_candidate_profile_gates"
+           (string_list_value "validator_readiness_blockers" fields));
+      check
+        "one-platform readiness next action is platform evidence"
+        (String.equal
+           (string_value "next_validator_readiness_blocker" fields)
+           "insufficient_distinct_platforms")
     | _ -> failwith "matrix output must be object")
 
 let check_matrix_rejects_reused_runner_hash () =
