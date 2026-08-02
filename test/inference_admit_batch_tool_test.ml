@@ -982,6 +982,26 @@ let check_transition_root_chain_summary
     (list_json "incomplete_transition_ids" summary
      = List.map (fun value -> `String value) incomplete_transition_ids)
 
+let check_no_first_transition_issue semantics =
+  check
+    "first transition issue absent"
+    (assoc_value "first_transition_issue" semantics = `Null)
+
+let check_first_transition_issue semantics ~transition_id ~phase ~status ~reason =
+  let issue = assoc_json "first_transition_issue" semantics in
+  check
+    "first transition issue id"
+    (String.equal (string_json "transition_id" issue) transition_id);
+  check
+    "first transition issue phase"
+    (String.equal (string_json "phase" issue) phase);
+  check
+    "first transition issue status"
+    (String.equal (string_json "status" issue) status);
+  check
+    "first transition issue reason"
+    (String.equal (string_json "reason" issue) reason)
+
 let check_batch_hash report =
   match report with
   | `Assoc fields ->
@@ -1907,6 +1927,7 @@ let check_session_bundle_accepts_graph_real_feedback_loop () =
       ~advance_receipt_roots:3
       ~output_prefix_roots:3
       ~incomplete_transition_ids:[];
+    check_no_first_transition_issue semantics;
     check
       "graph feedback missing capabilities clear"
       (list_json "missing_runtime_capabilities" semantics = []);
@@ -2343,6 +2364,12 @@ let check_session_bundle_rejects_decode_prior_state_contract_mismatch () =
       ~advance_receipt_roots:2
       ~output_prefix_roots:2
       ~incomplete_transition_ids:["token-002"];
+    check_first_transition_issue
+      semantics
+      ~transition_id:"token-002"
+      ~phase:"decode"
+      ~status:"prior_state_contract_mismatch"
+      ~reason:"decode_loop_prior_state_contract_mismatch";
     check_session_hash report;
     (match list_json "transitions" fields with
      | [_; _; `Assoc second_decode] ->
@@ -2496,6 +2523,12 @@ let check_session_bundle_rejects_decode_token_contract_mismatch () =
       ~required:0
       ~bound:0
       ~mismatched:0;
+    check_first_transition_issue
+      semantics
+      ~transition_id:"token-001"
+      ~phase:"decode"
+      ~status:"output_contract_mismatch"
+      ~reason:"decode_loop_token_contract_mismatch";
     check_session_hash report;
     (match list_json "transitions" fields with
      | [_; `Assoc second] ->

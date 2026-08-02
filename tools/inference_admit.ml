@@ -158,6 +158,7 @@ type session_stage_result = {
   session_stage_json : Yojson.Safe.t;
   session_stage_transition_id : string;
   session_stage_phase : string;
+  session_stage_status : string;
   session_stage_advanced_session_root : string option;
   session_stage_advance_receipt_root : string option;
   session_stage_output_prefix_root : string option;
@@ -2482,12 +2483,12 @@ let run_prepared_session_transition
     let violation_values =
       List.map violation_json prepared.prepared_violations
     in
+    let status =
+      if preflight_execution_contract.execution_contract_mismatch then
+        "execution_contract_mismatch"
+      else "prior_state_contract_mismatch"
+    in
     let transition_json =
-      let status =
-        if preflight_execution_contract.execution_contract_mismatch then
-          "execution_contract_mismatch"
-        else "prior_state_contract_mismatch"
-      in
       `Assoc [
         "transition_id", `String transition.transition_id;
         "phase", `String transition.phase;
@@ -2545,6 +2546,7 @@ let run_prepared_session_transition
       session_stage_json = transition_json;
       session_stage_transition_id = transition.transition_id;
       session_stage_phase = transition.phase;
+      session_stage_status = status;
       session_stage_advanced_session_root = None;
       session_stage_advance_receipt_root = None;
       session_stage_output_prefix_root = None;
@@ -2709,6 +2711,7 @@ let run_prepared_session_transition
     session_stage_json = transition_json;
     session_stage_transition_id = transition.transition_id;
     session_stage_phase = transition.phase;
+    session_stage_status = stage_status;
     session_stage_advanced_session_root = Some (Session.root advanced);
     session_stage_advance_receipt_root = Some (Receipt.root advance_receipt);
     session_stage_output_prefix_root =
@@ -3306,6 +3309,7 @@ let session_runtime_semantics
     ~graph_execution_contract_status
     ~graph_execution_contract_summary
     ~transition_root_chain_summary
+    ~first_transition_issue
     ~missing_runtime_capabilities
     ~committed_state_supported
     ~committed_state_transport_bound
@@ -3362,6 +3366,7 @@ let session_runtime_semantics
     "graph_execution_contract_summary",
     graph_execution_contract_summary;
     "transition_root_chain_summary", transition_root_chain_summary;
+    "first_transition_issue", first_transition_issue;
     "missing_runtime_capabilities",
     missing_runtime_capabilities;
   ]
@@ -3449,6 +3454,69 @@ let last_string values =
 let list_tail = function
   | [] -> []
   | _ :: rest -> rest
+
+let first_transition_issue_json ~status ~next_runtime_blocker results =
+  let issue result reason =
+    `Assoc [
+      "transition_id", `String result.session_stage_transition_id;
+      "phase", `String result.session_stage_phase;
+      "status", `String result.session_stage_status;
+      "reason", `String reason;
+    ]
+  in
+  let issue_from ?(values = results) predicate reason =
+    match List.find_opt predicate values with
+    | Some result -> issue result reason
+    | None ->
+      `Assoc [
+        "status", `String status;
+        "reason", `String reason;
+      ]
+  in
+  let decode_results =
+    List.filter
+      (fun result -> String.equal result.session_stage_phase "decode")
+      results
+  in
+  match next_runtime_blocker with
+  | "graph_execution_contract_mismatch" ->
+    issue_from
+      (fun result -> result.session_stage_execution_contract_mismatch)
+      next_runtime_blocker
+  | "decode_loop_token_contract_mismatch" ->
+    issue_from
+      (fun result -> result.session_stage_output_contract_mismatch)
+      next_runtime_blocker
+  | "decode_loop_prior_state_contract_mismatch" ->
+    issue_from
+      (fun result -> result.session_stage_prior_state_contract_mismatch)
+      next_runtime_blocker
+  | "committed_target_state_payload_transport_not_bound" ->
+    issue_from
+      ~values:decode_results
+      (fun result ->
+         not result.session_stage_committed_state_transport_bound)
+      next_runtime_blocker
+  | "decode_loop_token_contract_not_bound" ->
+    issue_from
+      ~values:decode_results
+      (fun result -> not result.session_stage_decode_token_contract_bound)
+      next_runtime_blocker
+  | "decode_loop_prior_state_contract_not_bound" ->
+    issue_from
+      ~values:(list_tail decode_results)
+      (fun result -> not result.session_stage_prior_state_contract_bound)
+      next_runtime_blocker
+  | "none" when String.equal status "reference_mismatch" ->
+    issue_from
+      (fun result -> result.session_stage_reference_mismatch)
+      "reference_mismatch"
+  | "none" -> `Null
+  | reason ->
+    `Assoc [
+      "status", `String status;
+      "reason", `String reason;
+    ]
 
 let run_resident_inference_session ~cache ~prepared_transitions bundle =
   let first_plan =
@@ -3707,6 +3775,9 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
   let transition_root_chain_summary =
     transition_root_chain_summary_json results
   in
+  let first_transition_issue =
+    first_transition_issue_json ~status ~next_runtime_blocker results
+  in
   let runtime_semantics =
     session_runtime_semantics
       ~transition_count:(List.length bundle.transitions)
@@ -3719,6 +3790,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
         ~graph_execution_contract_status
         ~graph_execution_contract_summary
         ~transition_root_chain_summary
+        ~first_transition_issue
         ~missing_runtime_capabilities
       ~committed_state_supported
       ~committed_state_transport_bound
@@ -3854,6 +3926,7 @@ let run_inference_session_file ~timing_mode path =
                  preflight.continuation_graph_execution_contract_mismatch_count)
           ~transition_root_chain_summary:
             (empty_transition_root_chain_summary_json ~transition_count)
+          ~first_transition_issue:`Null
           ~missing_runtime_capabilities:missing_resident_runtime_capabilities
           ~committed_state_supported:false
         ~committed_state_transport_bound:false
@@ -3960,6 +4033,13 @@ let run_inference_session_file ~timing_mode path =
                ~mismatch_count:1)
           ~transition_root_chain_summary:
             (empty_transition_root_chain_summary_json ~transition_count)
+          ~first_transition_issue:
+            (`Assoc [
+               "transition_id", `String transition.transition_id;
+               "phase", `String transition.phase;
+               "status", `String "rejected";
+               "reason", `String next_runtime_blocker;
+             ])
           ~missing_runtime_capabilities
           ~committed_state_supported:false
           ~committed_state_transport_bound:false
@@ -4065,6 +4145,7 @@ let run_inference_session_file ~timing_mode path =
                ~mismatch_count:0)
           ~transition_root_chain_summary:
             (empty_transition_root_chain_summary_json ~transition_count)
+          ~first_transition_issue:`Null
           ~missing_runtime_capabilities:missing_resident_runtime_capabilities
         ~committed_state_supported:false
         ~committed_state_transport_bound:false

@@ -288,7 +288,9 @@ under `decode_token_contract_summary` and `decode_prior_state_contract_summary`;
 the per-transition contract objects remain the detailed authority. A
 `transition_root_chain_summary` reports how many transitions produced advanced
 session roots, advance receipt roots, and output-prefix roots, plus any
-incomplete transition ids.
+incomplete transition ids. `first_transition_issue` points to the first
+transition explaining the session-level blocker when one exists; callers still
+use the transition object for exact contract and root evidence.
 
 ## Canonical Session
 
