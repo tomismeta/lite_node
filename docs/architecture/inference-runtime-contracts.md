@@ -295,6 +295,9 @@ graph-real rejections expose the same pointer under `continuation_preflight`.
 For multi-decode sessions, an omitted prior-token contract is reported as
 `decode_loop_prior_state_contract_not_bound`; a declared-but-invalid contract is
 reported as `decode_loop_prior_state_contract_mismatch` and fails closed.
+Likewise, an omitted decode selected-index contract is reported as
+`decode_loop_token_contract_not_bound`; a declared-but-invalid selected-index
+contract is reported as `decode_loop_token_contract_mismatch`.
 
 ## Canonical Session
 

@@ -2074,6 +2074,74 @@ let check_session_bundle_binds_decode_token_contract () =
      | _ -> failwith "expected two resident transitions")
   | _ -> failwith "report must be an object"
 
+let check_session_bundle_requires_decode_token_contract () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~session_abi_root:Abi.committed_state_root
+      ~code:committed_state_token_code
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "missing token-contract bundle exits incomplete" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check
+      "missing token-contract bundle incomplete"
+      (String.equal (string_json "status" fields) "runtime_incomplete");
+    check
+      "missing token-contract blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "decode_loop_token_contract_not_bound");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "missing token contract not bound"
+      (String.equal
+         (string_json "decode_token_contract_status" semantics)
+         "not_bound");
+    check_decode_token_summary
+      semantics
+      ~required:1
+      ~bound:0
+      ~mismatched:0;
+    check_decode_prior_state_summary
+      semantics
+      ~required:0
+      ~bound:0
+      ~mismatched:0;
+    check_transition_root_chain_summary
+      semantics
+      ~transition_count:2
+      ~complete_transitions:2
+      ~advanced_session_roots:2
+      ~advance_receipt_roots:2
+      ~output_prefix_roots:2
+      ~incomplete_transition_ids:[];
+    check_first_transition_issue
+      semantics
+      ~transition_id:"token-001"
+      ~phase:"decode"
+      ~status:"accepted"
+      ~reason:"decode_loop_token_contract_not_bound";
+    check
+      "missing token capability"
+      (list_json "missing_runtime_capabilities" semantics
+       = [`String "decode_loop_token_contract"]);
+    check_session_hash report;
+    (match list_json "transitions" fields with
+     | [_; `Assoc second] ->
+       check
+         "second decode output contract not declared"
+         (String.equal
+            (string_json
+               "status"
+               (assoc_json "output_contract" second))
+            "not_declared")
+     | _ -> failwith "expected two missing-token transitions")
+  | _ -> failwith "report must be an object"
+
 let check_session_bundle_binds_committed_state_transport () =
   with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
   let bundle_path =
@@ -2863,6 +2931,7 @@ let () =
   check_graph_execution_contract_rejects_dead_branch_opcode ();
   check_session_bundle_accepts_graph_real_feedback_loop ();
   check_session_bundle_binds_decode_token_contract ();
+  check_session_bundle_requires_decode_token_contract ();
   check_session_bundle_binds_committed_state_transport ();
   check_session_bundle_binds_decode_prior_state_contract ();
   check_session_bundle_requires_decode_prior_state_contract ();
