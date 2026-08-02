@@ -1542,6 +1542,92 @@ let check_require_failure_cases_rejects_missing_q1_case () =
        | _ -> failwith "checker report must be object")
      | _ -> failwith "report must be object"))
 
+let check_synthesizes_required_q1_failure_cases () =
+  with_temp_dir (fun dir ->
+    let legacy_case_names =
+      [
+        "nonfinite_input_nan";
+        "nonfinite_input_infinity";
+        "output_input_aliasing";
+        "k_not_multiple_of_128";
+        "bad_q1_owner_length";
+        "nonfinite_fp16_scale";
+      ]
+    in
+    let legacy_failure_cases =
+      q1_failure_cases ()
+      |> List.filter
+           (function
+             | `Assoc fields ->
+               List.exists
+                 (String.equal (string_value "case" fields))
+                 legacy_case_names
+             | _ -> true)
+      |> List.map
+           (replace_failure_expected
+              "output_input_aliasing"
+              "reject_or_documented_safe_copy")
+    in
+    let code, report =
+      run_conformance
+        dir
+        (q1_template ~failure_cases:legacy_failure_cases ())
+        [
+          "--strict-effort";
+          "--include-failures";
+          "--synthesize-required-failure-cases";
+          "--require-failure-cases";
+          "--require-profile-roots-bound";
+        ]
+    in
+    check "synthesized Q1 failure runner exits zero" (code = 0);
+    let result = first_result report in
+    let synthesis = assoc_json "failure_case_synthesis" result in
+    check
+      "synthesized Q1 failure mode enabled"
+      (bool_value "enabled" synthesis);
+    check
+      "synthesized Q1 failure additions"
+      (int_value "synthesized_count" synthesis = 6);
+    check
+      "synthesized Q1 failure replacements"
+      (int_value "replaced_producer_case_count" synthesis = 1);
+    check
+      "synthesized Q1 failure count"
+      (int_value "failure_case_count" result = 11);
+    check
+      "synthesized Q1 counted failure count"
+      (int_value "counted_failure_case_count" result = 11);
+    check
+      "synthesized Q1 accepted counted failure count"
+      (int_value "accepted_counted_failure_case_count" result = 11);
+    let alias = failure_case_fields result "output_input_aliasing" in
+    let negative_offset =
+      failure_case_fields result "negative_byte_offset"
+    in
+    check
+      "synthesized Q1 alias source"
+      (String.equal
+         (string_value "failure_case_source" alias)
+         "litenode_synthesized");
+    check
+      "synthesized Q1 alias expected"
+      (String.equal
+         (string_value "expected" alias)
+         "accept_from_snapshot_exact");
+    check
+      "synthesized Q1 missing source"
+      (String.equal
+         (string_value "failure_case_source" negative_offset)
+         "litenode_synthesized");
+    (match report with
+     | `Assoc fields ->
+       let gate = assoc_json "failure_case_gate" fields in
+       check
+         "synthesized Q1 failure gate accepted"
+         (String.equal (string_value "status" gate) "accepted")
+     | _ -> failwith "report must be object"))
+
 let check_require_failure_cases_rejects_wrong_q1_expectation () =
   with_temp_dir (fun dir ->
     let failure_cases =
@@ -3393,6 +3479,7 @@ let () =
   check_truncated_decoded_input_manifest_reports_ingress_rejected ();
   check_zero_decoded_input_truncation_is_not_ingress_rejected ();
   check_require_failure_cases_rejects_missing_q1_case ();
+  check_synthesizes_required_q1_failure_cases ();
   check_require_failure_cases_rejects_wrong_q1_expectation ();
   check_q1_repair_payloads_are_checker_valid ();
   check_require_failure_cases_rejects_wrong_q1_mutation_shape ();

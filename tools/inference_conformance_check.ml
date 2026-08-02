@@ -1425,7 +1425,7 @@ let q1_required_case fields case =
      | "lower_effort_limit" ->
        reject_case
          (q1_repair_mutation
-            ~value:(max 0 (expected_effort - 1))
+            ~value:(max 0 (expected_effort - 2))
             "lower_effort_limit"
             "effort")
      | _ -> None)

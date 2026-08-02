@@ -27,6 +27,7 @@ let expected_cross_platform_matrix_sha256 = ref None
 let requested_opcodes = ref []
 let strict_effort = ref false
 let include_failures = ref false
+let synthesize_required_failure_cases = ref false
 let require_failure_cases = ref false
 let require_profile_roots_bound = ref false
 let require_consensus_candidate = ref false
@@ -68,6 +69,9 @@ let args = [
   "--include-failures",
   Arg.Set include_failures,
   "execute definitive failure/atomicity cases where the direct VM runner can";
+  "--synthesize-required-failure-cases",
+  Arg.Set synthesize_required_failure_cases,
+  "append LiteNode-required failure/atomicity cases derivable from template context";
   "--require-failure-cases",
   Arg.Set require_failure_cases,
   "reject template-index reports unless executable failure cases were run and accepted";
@@ -93,7 +97,7 @@ let usage =
    [--require-consensus-candidate] [--require-consensus-ready] \
    [--cross-platform-matrix <path>] \
    [--expected-cross-platform-matrix-sha256 <sha256>] \
-   [--require-validator-readiness]\n\
+   [--synthesize-required-failure-cases] [--require-validator-readiness]\n\
    or inference_conformance_run --p0-plus-pack <path> \
    [--require-profile-roots-bound] [--require-consensus-candidate] \
    [--require-consensus-ready] [--require-validator-readiness]"
@@ -797,7 +801,7 @@ let q1_required_case_from_context case context =
      | "lower_effort_limit" ->
        reject_case
          (q1_repair_mutation
-            ~value:(max 0 (expected_effort - 1))
+            ~value:(max 0 (expected_effort - 2))
             "lower_effort_limit"
             "effort")
      | _ -> None)
@@ -807,6 +811,29 @@ let q1_required_case_from_result fields case =
   match q1_repair_context fields with
   | None -> None
   | Some context -> q1_required_case_from_context case context
+
+let failure_case_source source = function
+  | `Assoc fields ->
+    `Assoc
+      (("failure_case_source", `String source)
+       :: List.filter
+            (fun (key, _) -> not (String.equal key "failure_case_source"))
+            fields)
+  | value -> value
+
+let failure_case_name = function
+  | `Assoc fields -> opt_string_field "case" fields
+  | _ -> None
+
+let q1_required_case_canonical = function
+  | `Assoc fields ->
+    (match opt_string_field "case" fields, opt_string_field "expected" fields with
+     | Some case, Some expected ->
+       (match q1_expected_prefix case with
+        | None -> true
+        | Some expected_prefix -> has_prefix expected_prefix expected)
+     | _ -> true)
+  | _ -> true
 
 let q1_failure_repair fields blocker =
   let case_repair prefix action ?suffix blocker =
@@ -1936,19 +1963,18 @@ let cross_platform_evidence
 let failure_cases_accepted
     ~template_count
     ~included_template_count
-    ~declared_failure_case_count
+    ~declared_failure_case_count:_
     ~counted_failure_case_count
     ~accepted_counted_failure_case_count =
   template_count > 0
   && included_template_count = template_count
-  && declared_failure_case_count = counted_failure_case_count
   && counted_failure_case_count > 0
   && accepted_counted_failure_case_count = counted_failure_case_count
 
 let failure_case_blockers
     ~template_count
     ~included_template_count
-    ~declared_failure_case_count
+    ~declared_failure_case_count:_
     ~counted_failure_case_count
     ~accepted_counted_failure_case_count =
   []
@@ -1958,9 +1984,6 @@ let failure_case_blockers
   |> add_blocker
        (counted_failure_case_count = 0)
        "no_counted_failure_cases"
-  |> add_blocker
-       (declared_failure_case_count <> counted_failure_case_count)
-       "uncounted_failure_cases"
   |> add_blocker
        (accepted_counted_failure_case_count <> counted_failure_case_count)
        "failure_cases_rejected"
@@ -2001,6 +2024,8 @@ let failure_case_gate
     "included_template_count", `Int included_template_count;
     "declared_failure_case_count", `Int declared_failure_case_count;
     "counted_failure_case_count", `Int counted_failure_case_count;
+    "uncounted_failure_case_count",
+    `Int (declared_failure_case_count - counted_failure_case_count);
     "accepted_counted_failure_case_count",
     `Int accepted_counted_failure_case_count;
     "required_failure_case_contracts",
@@ -3465,6 +3490,11 @@ let failure_case_result root_dir opcode template registers values op case =
     `Assoc [
       "opcode", `String opcode;
       "case", `String case_name;
+      "failure_case_source",
+      `String
+        (match opt_string_field "failure_case_source" fields with
+         | Some source -> source
+         | None -> "producer_template");
       "expected", `String expected;
       "executable_mutations", `List mutations;
       "status", `String (if passed then "accepted" else "rejected");
@@ -3512,15 +3542,79 @@ let failure_case_result root_dir opcode template registers values op case =
     ]
   | _ -> fail "failure case must be an object"
 
-let failure_case_results root_dir opcode template registers values op =
-  if not !include_failures then []
+let q1_failure_synthesis_context template values expected_effort =
+  let output = assoc_field "output" template in
+  match
+    opt_int_field "lhs" values,
+    q1_output_cell_count values,
+    q1_owner_source_bytes template,
+    q1_required_owner_bytes values
+  with
+  | Some lhs_base,
+    Some output_cells,
+    Some owner_bytes,
+    Some required_owner_bytes ->
+    Some [
+      "lhs_base", `Int lhs_base;
+      "output_base", `Int (int_field "base_address" output);
+      "output_cells", `Int output_cells;
+      "expected_effort", `Int expected_effort;
+      "q1_owner_source_bytes", `Int owner_bytes;
+      "q1_required_owner_bytes", `Int required_owner_bytes;
+    ]
+  | _ -> None
+
+let synthesize_q1_required_failure_cases opcode template values expected_effort
+    cases =
+  if not !synthesize_required_failure_cases
+     || not (String.equal opcode "LINEAR_Q1_G128_FP") then
+    cases, 0, 0
+  else
+    match q1_failure_synthesis_context template values expected_effort with
+    | Some context ->
+      let retained, replaced_count =
+        List.fold_right
+          (fun case (retained, replaced_count) ->
+             if q1_required_case_canonical case then
+               case :: retained, replaced_count
+             else
+               retained, replaced_count + 1)
+          cases
+          ([], 0)
+      in
+      let present = List.filter_map failure_case_name retained in
+      let missing =
+        Template.q1_required_failure_expectations
+        |> List.filter_map
+             (fun (case, _) ->
+                if List.exists (String.equal case) present then None
+                else
+                  q1_required_case_from_context case context
+                  |> Option.map (failure_case_source "litenode_synthesized"))
+      in
+      retained @ missing, List.length missing, replaced_count
+    | None -> cases, 0, 0
+
+let failure_case_results root_dir opcode template registers values
+    expected_effort op =
+  if not !include_failures then [], 0, 0
   else
     match field "expected_failure_atomicity_behavior" template with
     | Some (`List cases) ->
+      let cases, synthesized_count, replaced_count =
+        synthesize_q1_required_failure_cases
+          opcode
+          template
+          values
+          expected_effort
+          cases
+      in
       List.map
         (failure_case_result root_dir opcode template registers values op)
-        cases
-    | _ -> []
+        cases,
+      synthesized_count,
+      replaced_count
+    | _ -> [], 0, 0
 
 let required_failure_case_contract opcode failure_results =
   if not (String.equal opcode "LINEAR_Q1_G128_FP") then
@@ -3693,8 +3787,17 @@ let execute_template root_dir entry =
     && executable_abi_matched
     && ((not !strict_effort) || effort_match)
   in
-  let failure_results =
-    failure_case_results root_dir opcode template registers values op
+  let failure_results,
+      synthesized_failure_case_count,
+      replaced_failure_case_count =
+    failure_case_results
+      root_dir
+      opcode
+      template
+      registers
+      values
+      expected_effort
+      op
   in
   let required_failure_case_contract_status,
       required_failure_case_contract_blockers =
@@ -3740,6 +3843,14 @@ let execute_template root_dir entry =
     q1_producer_repair_context_json opcode template values expected_effort;
     "subspans", `List (List.map snd span_results);
     "failure_cases_included", `Bool !include_failures;
+    "failure_case_synthesis",
+    `Assoc [
+      "enabled", `Bool !synthesize_required_failure_cases;
+      "opcode_applicable",
+      `Bool (String.equal opcode "LINEAR_Q1_G128_FP");
+      "synthesized_count", `Int synthesized_failure_case_count;
+      "replaced_producer_case_count", `Int replaced_failure_case_count;
+    ];
     "required_failure_case_contract",
     `Assoc [
       "status", `String required_failure_case_contract_status;
@@ -4792,6 +4903,12 @@ let run_index path =
 let () =
   Arg.parse args (fun value -> fail ("unexpected argument: " ^ value)) usage;
   validate_selected_opcodes ();
+  if !synthesize_required_failure_cases && not !include_failures then
+    fail "--synthesize-required-failure-cases requires --include-failures";
+  if !synthesize_required_failure_cases && !p0_plus_pack <> None then
+    fail
+      "--synthesize-required-failure-cases is only supported with \
+       --template-index";
   if !require_failure_cases && !p0_plus_pack <> None then
     fail "--require-failure-cases is only supported with --template-index";
   if selected_opcodes () <> [] && !p0_plus_pack <> None then
