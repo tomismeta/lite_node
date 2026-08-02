@@ -219,6 +219,7 @@ type continuation_preflight = {
   continuation_graph_execution_contract_required_count : int;
   continuation_graph_execution_contract_bound_count : int;
   continuation_graph_execution_contract_mismatch_count : int;
+  continuation_first_transition_issue : Yojson.Safe.t;
   continuation_unsupported_opcodes : string list;
   continuation_missing_capabilities : string list;
   continuation_policy_violations : Yojson.Safe.t list;
@@ -3000,6 +3001,22 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
       0
       preflight
   in
+  let first_transition_issue =
+    match
+      List.find_opt
+        (fun (_, _, execution_contract, _) ->
+           execution_contract.execution_contract_mismatch)
+        preflight
+    with
+    | None -> `Null
+    | Some (transition, _, _, _) ->
+      `Assoc [
+        "transition_id", `String transition.transition_id;
+        "phase", `String transition.phase;
+        "status", `String "execution_contract_mismatch";
+        "reason", `String "graph_execution_contract_mismatch";
+      ]
+  in
   let transition_plan =
     List.map (fun (_, _, _, json) -> json) preflight
   in
@@ -3106,6 +3123,7 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
         "bound", `Int graph_execution_contract_bound_count;
         "mismatched", `Int graph_execution_contract_mismatch_count;
       ];
+      "first_transition_issue", first_transition_issue;
       "blockers",
       `List
         (List.map
@@ -3135,6 +3153,7 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
       graph_execution_contract_bound_count;
     continuation_graph_execution_contract_mismatch_count =
       graph_execution_contract_mismatch_count;
+    continuation_first_transition_issue = first_transition_issue;
     continuation_unsupported_opcodes = unsupported;
     continuation_missing_capabilities = missing;
     continuation_policy_violations = policy_violations;
@@ -3926,7 +3945,8 @@ let run_inference_session_file ~timing_mode path =
                  preflight.continuation_graph_execution_contract_mismatch_count)
           ~transition_root_chain_summary:
             (empty_transition_root_chain_summary_json ~transition_count)
-          ~first_transition_issue:`Null
+          ~first_transition_issue:
+            preflight.continuation_first_transition_issue
           ~missing_runtime_capabilities:missing_resident_runtime_capabilities
           ~committed_state_supported:false
         ~committed_state_transport_bound:false

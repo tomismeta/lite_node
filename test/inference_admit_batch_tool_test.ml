@@ -1669,6 +1669,12 @@ let check_session_bundle_rejects_graph_execution_overclaim () =
       ~required:2
       ~bound:0
       ~mismatched:2;
+    check_first_transition_issue
+      semantics
+      ~transition_id:"token-000"
+      ~phase:"prefill"
+      ~status:"execution_contract_mismatch"
+      ~reason:"graph_execution_contract_mismatch";
     check "graph overclaim no executed transitions" (list_json "transitions" fields = []);
     check_session_hash report;
     let preflight = assoc_json "continuation_preflight" fields in
@@ -1682,6 +1688,12 @@ let check_session_bundle_rejects_graph_execution_overclaim () =
       (String.equal
          (string_json "next_runtime_blocker" preflight)
          "graph_execution_contract_mismatch");
+    check_first_transition_issue
+      preflight
+      ~transition_id:"token-000"
+      ~phase:"prefill"
+      ~status:"execution_contract_mismatch"
+      ~reason:"graph_execution_contract_mismatch";
     (match list_json "transition_plan" preflight with
      | `Assoc first :: _ ->
        let contract = assoc_json "execution_contract" first in

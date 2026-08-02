@@ -290,7 +290,8 @@ the per-transition contract objects remain the detailed authority. A
 session roots, advance receipt roots, and output-prefix roots, plus any
 incomplete transition ids. `first_transition_issue` points to the first
 transition explaining the session-level blocker when one exists; callers still
-use the transition object for exact contract and root evidence.
+use the transition object for exact contract and root evidence. Preflight
+graph-real rejections expose the same pointer under `continuation_preflight`.
 
 ## Canonical Session
 
