@@ -3612,6 +3612,34 @@ let decode_prior_state_contracts_json results =
           ])
   |> fun values -> `List values
 
+let transition_root_chain_json results =
+  let field name = function
+    | `Assoc fields ->
+      (match List.assoc_opt name fields with
+       | Some value -> value
+       | None -> `Null)
+    | _ -> `Null
+  in
+  results
+  |> List.map
+       (fun result ->
+          let json = result.session_stage_json in
+          `Assoc [
+            "transition_id", `String result.session_stage_transition_id;
+            "phase", `String result.session_stage_phase;
+            "status", `String result.session_stage_status;
+            "prior_session_root", field "prior_session_root" json;
+            "advanced_session_root", field "advanced_session_root" json;
+            "advance_receipt_root", field "advance_receipt_root" json;
+            "output_root", field "output_root" json;
+            "output_prefix_root", field "output_prefix_root" json;
+            "prior_committed_target_state_root",
+            field "prior_committed_target_state_root" json;
+            "committed_target_state_root",
+            field "committed_target_state_root" json;
+          ])
+  |> fun values -> `List values
+
 let graph_executed_opcodes_json results =
   results
   |> List.filter (fun result -> result.session_stage_graph_execution_bound)
@@ -3758,6 +3786,7 @@ let session_report_payload
     ~decode_steps
     ~decode_selected_indices
     ~decode_prior_state_contracts
+    ~transition_root_chain
     ~runtime_semantics
     ~next_runtime_blocker
     ~opened_session_root
@@ -3782,6 +3811,7 @@ let session_report_payload
     "decode_steps", `Int decode_steps;
     "decode_selected_indices", decode_selected_indices;
     "decode_prior_state_contracts", decode_prior_state_contracts;
+    "transition_root_chain", transition_root_chain;
     "runtime_semantics", runtime_semantics;
     "next_runtime_blocker", `String next_runtime_blocker;
     "opened_session_root", nullable_string_json opened_session_root;
@@ -3898,6 +3928,7 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
       ~decode_steps:bundle.decode_steps
       ~decode_selected_indices:(`List [])
       ~decode_prior_state_contracts:(`List [])
+      ~transition_root_chain:(`List [])
       ~runtime_semantics
       ~next_runtime_blocker:"open_session_error"
       ~opened_session_root:None
@@ -3925,6 +3956,7 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
       "decode_steps", `Int bundle.decode_steps;
       "decode_selected_indices", `List [];
       "decode_prior_state_contracts", `List [];
+      "transition_root_chain", `List [];
       "session_report_sha256", `String (session_report_sha256 payload);
       "runtime_semantics", runtime_semantics;
       "next_runtime_blocker", `String "open_session_error";
@@ -4328,6 +4360,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
   let decode_prior_state_contracts =
     decode_prior_state_contracts_json results
   in
+  let transition_root_chain = transition_root_chain_json results in
   let graph_executed_opcodes = graph_executed_opcodes_json results in
   let runtime_semantics =
     session_runtime_semantics
@@ -4357,6 +4390,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       ~decode_steps:bundle.decode_steps
       ~decode_selected_indices
       ~decode_prior_state_contracts
+      ~transition_root_chain
       ~runtime_semantics
       ~next_runtime_blocker
       ~opened_session_root:(Some (Session.root opened))
@@ -4384,6 +4418,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       "decode_steps", `Int bundle.decode_steps;
       "decode_selected_indices", decode_selected_indices;
       "decode_prior_state_contracts", decode_prior_state_contracts;
+      "transition_root_chain", transition_root_chain;
       "session_report_sha256", `String (session_report_sha256 payload);
       "runtime_semantics", runtime_semantics;
       "next_runtime_blocker", `String next_runtime_blocker;
@@ -4488,6 +4523,7 @@ let run_inference_session_file ~timing_mode path =
         ~decode_steps:bundle.decode_steps
         ~decode_selected_indices:(`List [])
         ~decode_prior_state_contracts:(`List [])
+        ~transition_root_chain:(`List [])
         ~runtime_semantics
         ~next_runtime_blocker:"program_admission_rejected"
         ~opened_session_root:None
@@ -4515,6 +4551,7 @@ let run_inference_session_file ~timing_mode path =
         "decode_steps", `Int bundle.decode_steps;
         "decode_selected_indices", `List [];
         "decode_prior_state_contracts", `List [];
+        "transition_root_chain", `List [];
         "session_report_sha256", `String (session_report_sha256 payload);
         "runtime_semantics", runtime_semantics;
         "next_runtime_blocker", `String "program_admission_rejected";
@@ -4627,6 +4664,7 @@ let run_inference_session_file ~timing_mode path =
         ~decode_steps:bundle.decode_steps
         ~decode_selected_indices:(`List [])
         ~decode_prior_state_contracts:(`List [])
+        ~transition_root_chain:(`List [])
         ~runtime_semantics
         ~next_runtime_blocker:preflight.continuation_next_runtime_blocker
         ~opened_session_root:None
@@ -4654,6 +4692,7 @@ let run_inference_session_file ~timing_mode path =
         "decode_steps", `Int bundle.decode_steps;
         "decode_selected_indices", `List [];
         "decode_prior_state_contracts", `List [];
+        "transition_root_chain", `List [];
         "session_report_sha256", `String (session_report_sha256 payload);
         "runtime_semantics", runtime_semantics;
         "opened_session_root", `Null;
@@ -4753,6 +4792,7 @@ let run_inference_session_file ~timing_mode path =
           ~decode_steps:bundle.decode_steps
           ~decode_selected_indices:(`List [])
           ~decode_prior_state_contracts:(`List [])
+          ~transition_root_chain:(`List [])
           ~runtime_semantics
           ~next_runtime_blocker
           ~opened_session_root:None
@@ -4780,6 +4820,7 @@ let run_inference_session_file ~timing_mode path =
           "decode_steps", `Int bundle.decode_steps;
           "decode_selected_indices", `List [];
           "decode_prior_state_contracts", `List [];
+          "transition_root_chain", `List [];
           "session_report_sha256", `String (session_report_sha256 payload);
           "runtime_semantics", runtime_semantics;
           "next_runtime_blocker", `String next_runtime_blocker;
@@ -4887,6 +4928,7 @@ let run_inference_session_file ~timing_mode path =
         ~decode_steps:bundle.decode_steps
         ~decode_selected_indices
         ~decode_prior_state_contracts:(`List [])
+        ~transition_root_chain:(`List [])
         ~runtime_semantics
         ~next_runtime_blocker:
           "session_continuation_state_carry_not_supported"
@@ -4915,6 +4957,7 @@ let run_inference_session_file ~timing_mode path =
         "decode_steps", `Int bundle.decode_steps;
         "decode_selected_indices", decode_selected_indices;
         "decode_prior_state_contracts", `List [];
+        "transition_root_chain", `List [];
         "session_report_sha256", `String (session_report_sha256 payload);
         "runtime_semantics", runtime_semantics;
         "next_runtime_blocker",

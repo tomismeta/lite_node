@@ -1007,6 +1007,33 @@ let check_decode_prior_state_summary =
     "decode_prior_state_contract_summary"
     "decode prior-state"
 
+let transition_root_chain_entry_json fields =
+  `Assoc [
+    "transition_id", assoc_value "transition_id" fields;
+    "phase", assoc_value "phase" fields;
+    "status", assoc_value "status" fields;
+    "prior_session_root", assoc_value "prior_session_root" fields;
+    "advanced_session_root", assoc_value "advanced_session_root" fields;
+    "advance_receipt_root", assoc_value "advance_receipt_root" fields;
+    "output_root", assoc_value "output_root" fields;
+    "output_prefix_root", assoc_value "output_prefix_root" fields;
+    "prior_committed_target_state_root",
+    assoc_value "prior_committed_target_state_root" fields;
+    "committed_target_state_root",
+    assoc_value "committed_target_state_root" fields;
+  ]
+
+let check_transition_root_chain fields transitions =
+  let expected =
+    transitions
+    |> List.map (function
+      | `Assoc transition -> transition_root_chain_entry_json transition
+      | _ -> failwith "transition must be an object")
+  in
+  check
+    "top-level transition root chain"
+    (list_json "transition_root_chain" fields = expected)
+
 let check_graph_execution_summary =
   check_contract_summary
     "graph_execution_contract_summary"
@@ -1108,6 +1135,8 @@ let check_session_hash report =
         assoc_value "decode_selected_indices" fields;
         "decode_prior_state_contracts",
         assoc_value "decode_prior_state_contracts" fields;
+        "transition_root_chain",
+        assoc_value "transition_root_chain" fields;
         "runtime_semantics", assoc_value "runtime_semantics" fields;
         "next_runtime_blocker", assoc_value "next_runtime_blocker" fields;
         "opened_session_root", assoc_value "opened_session_root" fields;
@@ -1210,6 +1239,9 @@ let check_session_bundle_single_transition () =
     check
       "single top-level prior-state contracts empty"
       (list_json "decode_prior_state_contracts" fields = []);
+    check
+      "single transition root chain empty"
+      (list_json "transition_root_chain" fields = []);
     check
       "session last output root"
       (String.length (string_json "last_transition_output_root" fields) = 64);
@@ -2108,6 +2140,9 @@ let check_session_bundle_accepts_graph_real_feedback_loop () =
        `Assoc first_decode;
        `Assoc second_decode;
      ] ->
+       check_transition_root_chain
+         fields
+         [`Assoc prefill; `Assoc first_decode; `Assoc second_decode];
        List.iter
          (fun transition ->
             ignore (string_json "advanced_session_root" transition);
