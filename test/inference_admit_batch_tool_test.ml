@@ -1075,6 +1075,13 @@ let check_no_first_transition_issue semantics =
     "first transition issue absent"
     (assoc_value "first_transition_issue" semantics = `Null)
 
+let check_top_level_first_transition_issue fields =
+  let semantics = assoc_json "runtime_semantics" fields in
+  check
+    "top-level first transition issue"
+    (assoc_value "first_transition_issue" fields
+     = assoc_value "first_transition_issue" semantics)
+
 let check_first_transition_issue semantics ~transition_id ~phase ~status ~reason =
   let issue = assoc_json "first_transition_issue" semantics in
   check
@@ -1139,6 +1146,7 @@ let check_session_hash report =
         assoc_value "transition_root_chain" fields;
         "runtime_semantics", assoc_value "runtime_semantics" fields;
         "next_runtime_blocker", assoc_value "next_runtime_blocker" fields;
+        "first_transition_issue", assoc_value "first_transition_issue" fields;
         "opened_session_root", assoc_value "opened_session_root" fields;
         "opened_output_prefix_root",
         assoc_value "opened_output_prefix_root" fields;
@@ -1275,6 +1283,7 @@ let check_session_bundle_single_transition () =
       (assoc_value "output_prefix_root" fields = `Null);
     let semantics = assoc_json "runtime_semantics" fields in
     check_session_runtime_semantics semantics;
+    check_top_level_first_transition_issue fields;
     check
       "single transition mode"
       (String.equal
@@ -2130,6 +2139,7 @@ let check_session_bundle_accepts_graph_real_feedback_loop () =
       ~output_prefix_roots:3
       ~incomplete_transition_ids:[];
     check_no_first_transition_issue semantics;
+    check_top_level_first_transition_issue fields;
     check
       "graph feedback missing capabilities clear"
       (list_json "missing_runtime_capabilities" semantics = []);
@@ -3109,6 +3119,7 @@ let check_session_bundle_reports_open_session_error () =
       "open-error policy violations empty"
       (list_json "policy_violations" fields = []);
     let semantics = assoc_json "runtime_semantics" fields in
+    check_top_level_first_transition_issue fields;
     check
       "open-error readiness"
       (String.equal
@@ -3187,6 +3198,7 @@ let check_session_bundle_reports_advance_session_error () =
       "advance-error policy violations empty"
       (list_json "policy_violations" fields = []);
     let semantics = assoc_json "runtime_semantics" fields in
+    check_top_level_first_transition_issue fields;
     check
       "advance-error readiness"
       (String.equal
@@ -3287,6 +3299,7 @@ let check_session_bundle_reports_finalize_session_error () =
       "finalize-error policy violations empty"
       (list_json "policy_violations" fields = []);
     let semantics = assoc_json "runtime_semantics" fields in
+    check_top_level_first_transition_issue fields;
     check
       "finalize-error readiness"
       (String.equal
