@@ -366,6 +366,17 @@ let argmax_without_capability_code =
     VM.STOP;
   |]
 
+let missing_range_load_code =
+  [|
+    VM.JDEST Abi.advance_label;
+    VM.LDI (5, VM.VString (hex_root 'f'));
+    VM.FLOAD (6, 5);
+    VM.MSTORE (10, 6);
+    VM.LDI (0, VM.VInt (Z.of_int 10));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+  |]
+
 let dead_branch_graph_real_code =
   [|
     VM.JDEST Abi.advance_label;
@@ -2908,6 +2919,101 @@ let check_session_bundle_reports_admission_policy_rejection () =
      | _ -> failwith "expected two admission preflight transitions")
   | _ -> failwith "report must be an object"
 
+let check_session_bundle_reports_advance_session_error () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~session_abi_root:Abi.v2_root
+      ~code:missing_range_load_code
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "advance-error bundle exits nonzero" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check_session_hash report;
+    check
+      "advance-error status"
+      (String.equal
+         (string_json "status" fields)
+         "advance_session_error");
+    check
+      "advance-error blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "advance_session_error");
+    ignore (string_json "opened_session_root" fields);
+    check
+      "advance-error final root null"
+      (assoc_value "final_session_root" fields = `Null);
+    check
+      "advance-error final receipt null"
+      (assoc_value "final_receipt_root" fields = `Null);
+    check
+      "advance-error output prefix null"
+      (assoc_value "output_prefix_root" fields = `Null);
+    check
+      "advance-error unsupported empty"
+      (list_json "unsupported_opcodes" fields = []);
+    check
+      "advance-error missing capabilities empty"
+      (list_json "missing_capabilities" fields = []);
+    check
+      "advance-error policy violations empty"
+      (list_json "policy_violations" fields = []);
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "advance-error readiness"
+      (String.equal
+         (string_json "runtime_readiness_status" semantics)
+         "resident_session_candidate");
+    check
+      "advance-error semantic blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" semantics)
+         "advance_session_error");
+    check_decode_selected_indices semantics [];
+    check_transition_root_chain_summary
+      semantics
+      ~transition_count:1
+      ~complete_transitions:0
+      ~advanced_session_roots:0
+      ~advance_receipt_roots:0
+      ~output_prefix_roots:0
+      ~incomplete_transition_ids:["token-000"];
+    check_first_transition_issue
+      semantics
+      ~transition_id:"token-000"
+      ~phase:"prefill"
+      ~status:"advance_session_error"
+      ~reason:"advance_session_error";
+    (match list_json "transitions" fields with
+     | [`Assoc first] ->
+       check
+         "advance-error transition status"
+         (String.equal
+            (string_json "status" first)
+            "advance_session_error");
+       check
+         "advance-error transition session status"
+         (String.equal (string_json "session_status" first) "error");
+       check
+         "advance-error transition reference unchecked"
+         (String.equal (string_json "reference_status" first) "unchecked");
+       ignore (string_json "advance_session_error" first);
+       check
+         "advance-error transition advanced root null"
+         (assoc_value "advanced_session_root" first = `Null);
+       check
+         "advance-error transition receipt root null"
+         (assoc_value "advance_receipt_root" first = `Null);
+       check
+         "advance-error transition output null"
+         (assoc_value "output_root" first = `Null)
+     | _ -> failwith "expected one failed resident transition")
+  | _ -> failwith "report must be an object"
+
 let check_session_bundle_reports_top_level_claim_mismatch () =
   with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
   let bundle_path =
@@ -3099,6 +3205,7 @@ let () =
   check_session_bundle_rejects_decode_token_contract_mismatch ();
   check_session_bundle_rejects_invalid_phase_order ();
   check_session_bundle_reports_admission_policy_rejection ();
+  check_session_bundle_reports_advance_session_error ();
   check_session_bundle_reports_top_level_claim_mismatch ();
   check_session_bundle_reports_identity_mismatch ();
   check_session_bundle_reports_declaration_mismatch ();

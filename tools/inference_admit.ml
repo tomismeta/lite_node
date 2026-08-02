@@ -2585,30 +2585,129 @@ let run_prepared_session_transition
       session_stage_missing_capabilities = missing;
       session_stage_policy_violations = violation_values;
     }
-  else
-  let advanced, advance_receipt, execution_profile, opcode_profile =
-    match timer.mode with
-    | Timing_opcode ->
-      (match
-         Session.advance_profiled
-           ~profile:diagnostic_profile
-           ~plan:prepared.prepared_plan
-           ~expected_sequence:(Session.sequence session)
-           session
-       with
-       | Error error -> fail (Session.error_message error)
-       | Ok result -> result)
-    | Timing_none
-    | Timing_stage ->
-      (match
-         Session.advance
-           ~plan:prepared.prepared_plan
-           ~expected_sequence:(Session.sequence session)
-           session
-       with
-       | Error error -> fail (Session.error_message error)
-       | Ok (advanced, receipt) -> advanced, receipt, [], [])
-  in
+    else
+    let advance_result =
+      match timer.mode with
+      | Timing_opcode ->
+        (match
+           Session.advance_profiled
+             ~profile:diagnostic_profile
+             ~plan:prepared.prepared_plan
+             ~expected_sequence:(Session.sequence session)
+             session
+         with
+         | Error error -> Error (Session.error_message error)
+         | Ok result -> Ok result)
+      | Timing_none
+      | Timing_stage ->
+        (match
+           Session.advance
+             ~plan:prepared.prepared_plan
+             ~expected_sequence:(Session.sequence session)
+             session
+         with
+         | Error error -> Error (Session.error_message error)
+         | Ok (advanced, receipt) -> Ok (advanced, receipt, [], []))
+    in
+    match advance_result with
+    | Error error ->
+      timing_mark timer "advance_session";
+      let unsupported =
+        unsupported_opcode_names prepared.prepared_violations
+      in
+      let missing =
+        missing_capability_names prepared.prepared_violations
+      in
+      let violation_values =
+        List.map violation_json prepared.prepared_violations
+      in
+      let transition_json =
+        `Assoc
+          ([
+            "transition_id", `String transition.transition_id;
+            "phase", `String transition.phase;
+            "stage_id", `String transition.stage.stage_id;
+            "status", `String "advance_session_error";
+            "session_status", `String "error";
+            "reference_status", `String "unchecked";
+            "program_root", `String prepared.prepared_program_root;
+            "target_root", `String prepared.prepared_target_root;
+            "request_root", `String prepared.prepared_request_root;
+            "model_ranges_root", `String prepared.prepared_model_ranges_root;
+            "program_instructions",
+            `Int (Array.length (Admission.code prepared.prepared_admitted));
+            "unsupported_opcodes", list_json unsupported;
+            "missing_capabilities", list_json missing;
+            "policy_violations", `List violation_values;
+            "prior_session_root", `String prior_session_root;
+            "prior_committed_target_state_root",
+            nullable_string_json prior_committed_target_state_root;
+            "prior_committed_target_state_payload_sha256",
+            nullable_string_json
+              (Option.map sha256 prior_committed_target_state_payload);
+            "prior_committed_target_state_payload_bytes",
+            (match prior_committed_target_state_payload with
+             | None -> `Null
+             | Some payload -> `Int (String.length payload));
+            "committed_state_transport_bound",
+            `Bool committed_state_transport_bound;
+            "advanced_session_root", `Null;
+            "advance_receipt_root", `Null;
+            "execution_contract",
+            preflight_execution_contract.execution_contract_json;
+            "output_contract",
+            `Assoc [
+              "status", `String "not_run";
+              "declared",
+              output_contract_declared_json transition.output_contract;
+            ];
+            "prior_state_contract",
+            prior_state_contract.prior_state_contract_json;
+            "advance_session_error", `String error;
+            "output_payload", `Null;
+            "output_payload_sha256", `Null;
+            "output_root", `Null;
+            "output_prefix_root", `Null;
+            "committed_target_state_root", `Null;
+            "committed_target_state_payload_sha256", `Null;
+            "committed_target_state_payload_bytes", `Null;
+            "candidate_root", `Null;
+            "effort_delta", `Int 0;
+            "consensus_accepted", `Bool false;
+          ]
+          @ timing_fields timer)
+      in
+      session,
+      {
+        session_stage_json = transition_json;
+        session_stage_transition_id = transition.transition_id;
+        session_stage_phase = transition.phase;
+        session_stage_status = "advance_session_error";
+        session_stage_advanced_session_root = None;
+        session_stage_advance_receipt_root = None;
+        session_stage_output_prefix_root = None;
+        session_stage_output_payload = None;
+        session_stage_output_root = None;
+        session_stage_selected_index = None;
+        session_stage_graph_execution_bound =
+          preflight_execution_contract.graph_execution_bound;
+        session_stage_executed_graph_opcodes =
+          preflight_execution_contract.executed_graph_opcodes;
+        session_stage_execution_contract_mismatch = false;
+        session_stage_prior_state_contract_bound =
+          prior_state_contract.prior_state_contract_bound;
+        session_stage_prior_state_contract_mismatch =
+          prior_state_contract.prior_state_contract_mismatch;
+        session_stage_committed_state_transport_bound =
+          committed_state_transport_bound;
+        session_stage_output_contract_mismatch = false;
+        session_stage_decode_token_contract_bound = false;
+        session_stage_reference_mismatch = false;
+        session_stage_unsupported_opcodes = unsupported;
+        session_stage_missing_capabilities = missing;
+        session_stage_policy_violations = violation_values;
+      }
+    | Ok (advanced, advance_receipt, execution_profile, opcode_profile) ->
   let opcode_profile_for_contract =
     match timer.mode with
     | Timing_opcode -> Some opcode_profile
@@ -3729,6 +3828,11 @@ let first_transition_issue_json ~status ~next_runtime_blocker results =
     issue_from
       (fun result -> result.session_stage_prior_state_contract_mismatch)
       next_runtime_blocker
+  | "advance_session_error" ->
+    issue_from
+      (fun result ->
+         String.equal result.session_stage_status "advance_session_error")
+      next_runtime_blocker
   | "committed_target_state_payload_transport_not_bound" ->
     issue_from
       ~values:decode_results
@@ -3788,6 +3892,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       if
         result.session_stage_prior_state_contract_mismatch
         || result.session_stage_execution_contract_mismatch
+        || String.equal result.session_stage_status "advance_session_error"
       then
         advanced, results, previous_decode_selected_index
       else
@@ -3797,14 +3902,22 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     run_loop opened [] None prepared_transitions
   in
   let results = List.rev results in
+  let advance_session_error =
+    List.exists
+      (fun result ->
+         String.equal result.session_stage_status "advance_session_error")
+      results
+  in
   let finalized, final_receipt =
-    match
-      Session.finalize
-        ~expected_sequence:(Session.sequence final_advanced)
-        final_advanced
-    with
-    | Error error -> fail (Session.error_message error)
-    | Ok result -> result
+    if advance_session_error then None, None
+    else
+      match
+        Session.finalize
+          ~expected_sequence:(Session.sequence final_advanced)
+          final_advanced
+      with
+      | Error error -> fail (Session.error_message error)
+      | Ok (finalized, receipt) -> Some finalized, Some receipt
   in
   let transitions =
     List.map (fun result -> result.session_stage_json) results
@@ -3968,11 +4081,12 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
          (fun result -> result.session_stage_committed_state_transport_bound)
          decode_results
   in
-    let next_runtime_blocker =
-      if execution_contract_mismatch then "graph_execution_contract_mismatch"
-      else if output_contract_mismatch then "decode_loop_token_contract_mismatch"
-      else if prior_state_contract_mismatch then
-        "decode_loop_prior_state_contract_mismatch"
+  let next_runtime_blocker =
+    if execution_contract_mismatch then "graph_execution_contract_mismatch"
+    else if output_contract_mismatch then "decode_loop_token_contract_mismatch"
+    else if prior_state_contract_mismatch then
+      "decode_loop_prior_state_contract_mismatch"
+    else if advance_session_error then "advance_session_error"
     else if not committed_state_transport_bound then
       "committed_target_state_payload_transport_not_bound"
     else if not decode_token_contract_bound then
@@ -3995,7 +4109,8 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       else if output_contract_mismatch then "output_contract_mismatch"
       else if prior_state_contract_mismatch then
         "prior_state_contract_mismatch"
-    else if reference_mismatch then "reference_mismatch"
+      else if advance_session_error then "advance_session_error"
+      else if reference_mismatch then "reference_mismatch"
     else if not (String.equal next_runtime_blocker "none") then
       "runtime_incomplete"
     else "accepted"
@@ -4047,9 +4162,9 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       ~runtime_semantics
       ~next_runtime_blocker
       ~opened_session_root:(Some (Session.root opened))
-      ~final_session_root:(Some (Session.root finalized))
-      ~final_receipt_root:(Some (Receipt.root final_receipt))
-      ~output_prefix_root:(Some (Session.output_prefix_root finalized))
+      ~final_session_root:(Option.map Session.root finalized)
+      ~final_receipt_root:(Option.map Receipt.root final_receipt)
+      ~output_prefix_root:(Option.map Session.output_prefix_root finalized)
       ~last_transition_output_payload
       ~last_transition_output_root
       ~unsupported_opcodes:unsupported
@@ -4070,9 +4185,13 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       "runtime_semantics", runtime_semantics;
       "next_runtime_blocker", `String next_runtime_blocker;
       "opened_session_root", `String (Session.root opened);
-      "final_session_root", `String (Session.root finalized);
-      "final_receipt_root", `String (Receipt.root final_receipt);
-      "output_prefix_root", `String (Session.output_prefix_root finalized);
+      "final_session_root",
+      nullable_string_json (Option.map Session.root finalized);
+      "final_receipt_root",
+      nullable_string_json (Option.map Receipt.root final_receipt);
+      "output_prefix_root",
+      nullable_string_json
+        (Option.map Session.output_prefix_root finalized);
       "last_transition_output_payload",
       nullable_string_json last_transition_output_payload;
       "last_transition_output_payload_sha256",
