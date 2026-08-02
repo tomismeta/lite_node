@@ -1062,6 +1062,28 @@ let check_graph_execution_summary =
     "graph_execution_contract_summary"
     "graph execution"
 
+let check_top_level_graph_execution_contract
+    fields
+    ~status
+    ~required
+    ~bound
+    ~mismatched =
+  let semantics = assoc_json "runtime_semantics" fields in
+  check
+    "top-level graph execution status"
+    (String.equal
+       (string_json "graph_execution_contract_status" fields)
+       status);
+  check
+    "top-level graph execution status mirrors semantics"
+    (assoc_value "graph_execution_contract_status" fields
+     = assoc_value "graph_execution_contract_status" semantics);
+  check
+    "top-level graph execution summary mirrors semantics"
+    (assoc_value "graph_execution_contract_summary" fields
+     = assoc_value "graph_execution_contract_summary" semantics);
+  check_graph_execution_summary fields ~required ~bound ~mismatched
+
 let check_transition_root_chain_summary
     semantics
     ~transition_count
@@ -1169,6 +1191,10 @@ let check_session_hash report =
         assoc_value "transition_root_chain" fields;
         "graph_executed_opcodes",
         assoc_value "graph_executed_opcodes" fields;
+        "graph_execution_contract_status",
+        assoc_value "graph_execution_contract_status" fields;
+        "graph_execution_contract_summary",
+        assoc_value "graph_execution_contract_summary" fields;
         "runtime_semantics", assoc_value "runtime_semantics" fields;
         "next_runtime_blocker", assoc_value "next_runtime_blocker" fields;
         "first_transition_issue", assoc_value "first_transition_issue" fields;
@@ -1777,6 +1803,12 @@ let check_session_bundle_binds_graph_execution_contract () =
          "bound");
     check_graph_execution_summary
       semantics
+      ~required:1
+      ~bound:1
+      ~mismatched:0;
+    check_top_level_graph_execution_contract
+      fields
+      ~status:"bound"
       ~required:1
       ~bound:1
       ~mismatched:0;
@@ -3318,6 +3350,12 @@ let check_graph_real_advance_error_reports_unbound_contract () =
          "not_bound");
     check_graph_execution_summary
       semantics
+      ~required:1
+      ~bound:0
+      ~mismatched:0;
+    check_top_level_graph_execution_contract
+      fields
+      ~status:"not_bound"
       ~required:1
       ~bound:0
       ~mismatched:0;

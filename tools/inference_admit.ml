@@ -3797,6 +3797,8 @@ let session_report_payload
     ~decode_prior_state_contracts
     ~transition_root_chain
     ~graph_executed_opcodes
+    ~graph_execution_contract_status
+    ~graph_execution_contract_summary
     ~runtime_semantics
     ~next_runtime_blocker
     ~first_transition_issue
@@ -3824,6 +3826,9 @@ let session_report_payload
     "decode_prior_state_contracts", decode_prior_state_contracts;
     "transition_root_chain", transition_root_chain;
     "graph_executed_opcodes", graph_executed_opcodes;
+    "graph_execution_contract_status",
+    `String graph_execution_contract_status;
+    "graph_execution_contract_summary", graph_execution_contract_summary;
     "runtime_semantics", runtime_semantics;
     "next_runtime_blocker", `String next_runtime_blocker;
     "first_transition_issue", first_transition_issue;
@@ -3896,6 +3901,16 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
       "open_session_error", `String error;
     ]
   in
+  let graph_execution_contract_status =
+    if graph_execution_contract_required_count = 0 then "not_required"
+    else "not_bound"
+  in
+  let graph_execution_contract_summary =
+    graph_execution_contract_summary_json
+      ~required_count:graph_execution_contract_required_count
+      ~bound_count:0
+      ~mismatch_count:0
+  in
   let runtime_semantics =
     session_runtime_semantics
       ~transition_count
@@ -3915,14 +3930,8 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
            ~required_count:decode_prior_required
            ~bound_count:0
            ~mismatch_count:0)
-      ~graph_execution_contract_status:
-        (if graph_execution_contract_required_count = 0 then "not_required"
-         else "not_bound")
-      ~graph_execution_contract_summary:
-        (graph_execution_contract_summary_json
-           ~required_count:graph_execution_contract_required_count
-           ~bound_count:0
-           ~mismatch_count:0)
+      ~graph_execution_contract_status
+      ~graph_execution_contract_summary
       ~graph_executed_opcodes:(`List [])
       ~transition_root_chain_summary:
         (empty_transition_root_chain_summary_json ~transition_count)
@@ -3943,6 +3952,8 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
       ~decode_prior_state_contracts:(`List [])
       ~transition_root_chain:(`List [])
       ~graph_executed_opcodes:(`List [])
+      ~graph_execution_contract_status
+      ~graph_execution_contract_summary
       ~runtime_semantics
       ~next_runtime_blocker:"open_session_error"
       ~first_transition_issue
@@ -3973,6 +3984,9 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
       "decode_prior_state_contracts", `List [];
       "transition_root_chain", `List [];
       "graph_executed_opcodes", `List [];
+      "graph_execution_contract_status",
+      `String graph_execution_contract_status;
+      "graph_execution_contract_summary", graph_execution_contract_summary;
       "session_report_sha256", `String (session_report_sha256 payload);
       "runtime_semantics", runtime_semantics;
       "next_runtime_blocker", `String "open_session_error";
@@ -4419,6 +4433,8 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       ~decode_prior_state_contracts
       ~transition_root_chain
       ~graph_executed_opcodes
+      ~graph_execution_contract_status
+      ~graph_execution_contract_summary
       ~runtime_semantics
       ~next_runtime_blocker
       ~first_transition_issue
@@ -4449,6 +4465,9 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       "decode_prior_state_contracts", decode_prior_state_contracts;
       "transition_root_chain", transition_root_chain;
       "graph_executed_opcodes", graph_executed_opcodes;
+      "graph_execution_contract_status",
+      `String graph_execution_contract_status;
+      "graph_execution_contract_summary", graph_execution_contract_summary;
       "session_report_sha256", `String (session_report_sha256 payload);
       "runtime_semantics", runtime_semantics;
       "next_runtime_blocker", `String next_runtime_blocker;
@@ -4509,6 +4528,16 @@ let run_inference_session_file ~timing_mode path =
     let graph_execution_contract_required_count =
       count_by transition_requires_graph_execution bundle.transitions
     in
+    let graph_execution_contract_status =
+      if graph_execution_contract_required_count = 0 then "not_required"
+      else "not_bound"
+    in
+    let graph_execution_contract_summary =
+      graph_execution_contract_summary_json
+        ~required_count:graph_execution_contract_required_count
+        ~bound_count:0
+        ~mismatch_count:0
+    in
     let runtime_semantics =
       session_runtime_semantics
         ~transition_count
@@ -4528,14 +4557,8 @@ let run_inference_session_file ~timing_mode path =
              ~required_count:(max 0 (decode_transition_count - 1))
              ~bound_count:0
              ~mismatch_count:0)
-        ~graph_execution_contract_status:
-          (if graph_execution_contract_required_count = 0 then "not_required"
-           else "not_bound")
-        ~graph_execution_contract_summary:
-          (graph_execution_contract_summary_json
-             ~required_count:graph_execution_contract_required_count
-             ~bound_count:0
-             ~mismatch_count:0)
+        ~graph_execution_contract_status
+        ~graph_execution_contract_summary
         ~graph_executed_opcodes:(`List [])
         ~transition_root_chain_summary:
           (empty_transition_root_chain_summary_json ~transition_count)
@@ -4556,6 +4579,8 @@ let run_inference_session_file ~timing_mode path =
         ~decode_prior_state_contracts:(`List [])
         ~transition_root_chain:(`List [])
         ~graph_executed_opcodes:(`List [])
+        ~graph_execution_contract_status
+        ~graph_execution_contract_summary
         ~runtime_semantics
         ~next_runtime_blocker:"program_admission_rejected"
         ~first_transition_issue:preflight.admission_first_transition_issue
@@ -4586,6 +4611,9 @@ let run_inference_session_file ~timing_mode path =
         "decode_prior_state_contracts", `List [];
         "transition_root_chain", `List [];
         "graph_executed_opcodes", `List [];
+        "graph_execution_contract_status",
+        `String graph_execution_contract_status;
+        "graph_execution_contract_summary", graph_execution_contract_summary;
         "session_report_sha256", `String (session_report_sha256 payload);
         "runtime_semantics", runtime_semantics;
         "next_runtime_blocker", `String "program_admission_rejected";
@@ -4640,7 +4668,18 @@ let run_inference_session_file ~timing_mode path =
           "graph_execution_contract_mismatch"
           preflight.continuation_declaration_blockers
       then "mismatch"
+      else if preflight.continuation_graph_execution_contract_required_count > 0
+      then "not_bound"
       else "not_required"
+    in
+    let graph_execution_contract_summary =
+      graph_execution_contract_summary_json
+        ~required_count:
+          preflight.continuation_graph_execution_contract_required_count
+        ~bound_count:
+          preflight.continuation_graph_execution_contract_bound_count
+        ~mismatch_count:
+          preflight.continuation_graph_execution_contract_mismatch_count
     in
     let decode_transition_count =
       count_by
@@ -4672,14 +4711,7 @@ let run_inference_session_file ~timing_mode path =
           (if bundle.decode_steps <= 1 then "not_required" else "not_bound")
         ~decode_prior_state_contract_summary
         ~graph_execution_contract_status
-        ~graph_execution_contract_summary:
-          (graph_execution_contract_summary_json
-             ~required_count:
-               preflight.continuation_graph_execution_contract_required_count
-             ~bound_count:
-               preflight.continuation_graph_execution_contract_bound_count
-             ~mismatch_count:
-               preflight.continuation_graph_execution_contract_mismatch_count)
+        ~graph_execution_contract_summary
         ~graph_executed_opcodes:(`List [])
         ~transition_root_chain_summary:
           (empty_transition_root_chain_summary_json ~transition_count)
@@ -4701,6 +4733,8 @@ let run_inference_session_file ~timing_mode path =
         ~decode_prior_state_contracts:(`List [])
         ~transition_root_chain:(`List [])
         ~graph_executed_opcodes:(`List [])
+        ~graph_execution_contract_status
+        ~graph_execution_contract_summary
         ~runtime_semantics
         ~next_runtime_blocker:preflight.continuation_next_runtime_blocker
         ~first_transition_issue:preflight.continuation_first_transition_issue
@@ -4731,6 +4765,9 @@ let run_inference_session_file ~timing_mode path =
         "decode_prior_state_contracts", `List [];
         "transition_root_chain", `List [];
         "graph_executed_opcodes", `List [];
+        "graph_execution_contract_status",
+        `String graph_execution_contract_status;
+        "graph_execution_contract_summary", graph_execution_contract_summary;
         "session_report_sha256", `String (session_report_sha256 payload);
         "runtime_semantics", runtime_semantics;
         "opened_session_root", `Null;
@@ -4791,6 +4828,13 @@ let run_inference_session_file ~timing_mode path =
           "reason", `String next_runtime_blocker;
         ]
       in
+      let graph_execution_contract_status = "mismatch" in
+      let graph_execution_contract_summary =
+        graph_execution_contract_summary_json
+          ~required_count:1
+          ~bound_count:0
+          ~mismatch_count:1
+      in
       let runtime_semantics =
         session_runtime_semantics
           ~transition_count
@@ -4809,12 +4853,8 @@ let run_inference_session_file ~timing_mode path =
                ~required_count:0
                ~bound_count:0
                ~mismatch_count:0)
-          ~graph_execution_contract_status:"mismatch"
-          ~graph_execution_contract_summary:
-            (graph_execution_contract_summary_json
-               ~required_count:1
-               ~bound_count:0
-               ~mismatch_count:1)
+          ~graph_execution_contract_status
+          ~graph_execution_contract_summary
           ~graph_executed_opcodes:(`List [])
           ~transition_root_chain_summary:
             (empty_transition_root_chain_summary_json ~transition_count)
@@ -4835,6 +4875,8 @@ let run_inference_session_file ~timing_mode path =
           ~decode_prior_state_contracts:(`List [])
           ~transition_root_chain:(`List [])
           ~graph_executed_opcodes:(`List [])
+          ~graph_execution_contract_status
+          ~graph_execution_contract_summary
           ~runtime_semantics
           ~next_runtime_blocker
           ~first_transition_issue
@@ -4865,6 +4907,9 @@ let run_inference_session_file ~timing_mode path =
           "decode_prior_state_contracts", `List [];
           "transition_root_chain", `List [];
           "graph_executed_opcodes", `List [];
+          "graph_execution_contract_status",
+          `String graph_execution_contract_status;
+          "graph_execution_contract_summary", graph_execution_contract_summary;
           "session_report_sha256", `String (session_report_sha256 payload);
           "runtime_semantics", runtime_semantics;
           "next_runtime_blocker", `String next_runtime_blocker;
@@ -4930,6 +4975,13 @@ let run_inference_session_file ~timing_mode path =
         ]
       | _ -> `List []
     in
+    let graph_execution_contract_status = "not_required" in
+    let graph_execution_contract_summary =
+      graph_execution_contract_summary_json
+        ~required_count:0
+        ~bound_count:0
+        ~mismatch_count:0
+    in
     let runtime_semantics =
       session_runtime_semantics
         ~transition_count
@@ -4945,12 +4997,8 @@ let run_inference_session_file ~timing_mode path =
              ~required_count:0
              ~bound_count:0
              ~mismatch_count:0)
-        ~graph_execution_contract_status:"not_required"
-        ~graph_execution_contract_summary:
-          (graph_execution_contract_summary_json
-             ~required_count:0
-               ~bound_count:0
-               ~mismatch_count:0)
+        ~graph_execution_contract_status
+        ~graph_execution_contract_summary
           ~graph_executed_opcodes:(`List [])
           ~transition_root_chain_summary:
             (empty_transition_root_chain_summary_json ~transition_count)
@@ -4975,6 +5023,8 @@ let run_inference_session_file ~timing_mode path =
         ~decode_prior_state_contracts:(`List [])
         ~transition_root_chain:(`List [])
         ~graph_executed_opcodes:(`List [])
+        ~graph_execution_contract_status
+        ~graph_execution_contract_summary
         ~runtime_semantics
         ~next_runtime_blocker:
           "session_continuation_state_carry_not_supported"
@@ -5006,6 +5056,9 @@ let run_inference_session_file ~timing_mode path =
         "decode_prior_state_contracts", `List [];
         "transition_root_chain", `List [];
         "graph_executed_opcodes", `List [];
+        "graph_execution_contract_status",
+        `String graph_execution_contract_status;
+        "graph_execution_contract_summary", graph_execution_contract_summary;
         "session_report_sha256", `String (session_report_sha256 payload);
         "runtime_semantics", runtime_semantics;
         "next_runtime_blocker",
