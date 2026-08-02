@@ -1400,9 +1400,15 @@ let report_summary path =
     }
   | _ -> fail (path ^ ": runner report must be an object")
 
-let without_cross_platform_blocker blockers =
+let without_matrix_resolved_validator_blockers ~matrix_accepted blockers =
   List.filter
-    (fun blocker -> not (String.equal blocker "cross_platform_conformance_missing"))
+    (fun blocker ->
+       not
+         (String.equal blocker "cross_platform_conformance_missing"
+          || String.equal blocker "missing_cross_platform_matrix"
+          ||
+          (matrix_accepted
+           && String.equal blocker "consensus_candidate_profile_gates")))
     blockers
 
 let matrix_report paths =
@@ -1477,13 +1483,6 @@ let matrix_report paths =
     summaries
     |> List.map (fun summary -> summary.blockers)
     |> List.concat
-    |> unique
-  in
-  let per_report_validator_blockers =
-    summaries
-    |> List.map (fun summary -> summary.validator_readiness_blockers)
-    |> List.concat
-    |> without_cross_platform_blocker
     |> unique
   in
   let result_opcodes =
@@ -1589,6 +1588,13 @@ let matrix_report paths =
     |> add_if
          (opcode_coverage_ready && not per_report_opcode_coverage_ready)
          "required_opcode_missing_per_report"
+  in
+  let per_report_validator_blockers =
+    summaries
+    |> List.map (fun summary -> summary.validator_readiness_blockers)
+    |> List.concat
+    |> without_matrix_resolved_validator_blockers ~matrix_accepted
+    |> unique
   in
   let validator_readiness_blockers =
     unique (blockers @ per_report_matrix_blockers @ per_report_validator_blockers)

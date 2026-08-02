@@ -1169,6 +1169,61 @@ let check_matrix_accepts_required_opcode_reports () =
         (string_list_value "required_opcodes" fields = ["LINEAR_Q1_G128_FP"])
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_readiness_promotes_candidate_profiles () =
+  with_temp_dir (fun dir ->
+    let validator_readiness_blockers =
+      [
+        "cross_platform_conformance_missing";
+        "missing_cross_platform_matrix";
+        "consensus_candidate_profile_gates";
+      ]
+    in
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report
+           ~runner_sha:(hex_root '1')
+           ~validator_readiness_blockers
+           "Darwin"
+           "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~validator_readiness_blockers
+           "Linux"
+           "x86_64")
+    in
+    let code, json =
+      run_matrix
+        ~args:["--require-validator-readiness"; "--opcode"; "LINEAR_Q1_G128_FP"]
+        [a; b]
+    in
+    check "candidate readiness matrix exits zero" (code = 0);
+    match json with
+    | `Assoc fields ->
+      check
+        "candidate readiness matrix accepted"
+        (String.equal (string_value "status" fields) "accepted");
+      (match assoc_value "validator_readiness_gate" fields with
+       | `Assoc gate_fields ->
+         check
+           "candidate readiness accepted"
+           (String.equal (string_value "status" gate_fields) "accepted");
+         let blockers = string_list_value "blockers" gate_fields in
+         check
+           "candidate blocker consumed by matrix"
+           (not (List.mem "consensus_candidate_profile_gates" blockers));
+         check
+           "runner missing-matrix blocker consumed by matrix"
+           (not (List.mem "missing_cross_platform_matrix" blockers))
+       | _ -> failwith "validator readiness gate missing")
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_missing_required_opcode () =
   with_temp_dir (fun dir ->
     let a =
@@ -3304,6 +3359,7 @@ let () =
   check_matrix_rejects_one_platform_validator_readiness ();
   check_matrix_rejects_reused_runner_hash ();
   check_matrix_accepts_required_opcode_reports ();
+  check_matrix_readiness_promotes_candidate_profiles ();
   check_matrix_rejects_missing_required_opcode ();
   check_matrix_rejects_old_runner_result_signature_schema ();
   check_matrix_rejects_missing_runner_result_signature_schema ();

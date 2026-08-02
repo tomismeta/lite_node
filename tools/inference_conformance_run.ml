@@ -2082,11 +2082,22 @@ let validator_readiness_gate
       ~accepted_counted_failure_case_count
     && required_failure_case_contract_blockers = []
   in
-  let profile_ready =
+  let cross_platform_ready = gate_status_accepted cross_platform_evidence in
+  let profile_consensus_ready =
     Profile.consensus_ready
       ~profile_gate_count
       ~unprofiled_count
       status_counts
+  in
+  let profile_consensus_candidate_ready =
+    Profile.consensus_candidate
+      ~profile_gate_count
+      ~unprofiled_count
+      status_counts
+  in
+  let profile_ready =
+    profile_consensus_ready
+    || (cross_platform_ready && profile_consensus_candidate_ready)
   in
   let roots_ready =
     Profile.root_bindings_are_consensus_ready root_binding_counts
@@ -2101,7 +2112,6 @@ let validator_readiness_gate
   let transcendental_dependency_ready =
     transcendental_dependency_blockers transcendental_dependency_catalog = []
   in
-  let cross_platform_ready = gate_status_accepted cross_platform_evidence in
   let ready =
     Profile.validator_readiness_accepted
       ~execution_ready:execution_accepted
@@ -2140,6 +2150,15 @@ let validator_readiness_gate
          (not cross_platform_ready)
          "cross_platform_conformance_missing"
   in
+  let profile_blockers =
+    if profile_ready then
+      []
+    else
+      Profile.consensus_ready_blockers
+        ~profile_gate_count
+        ~unprofiled_count
+        status_counts
+  in
   let blockers =
     blockers
     @ failure_case_blockers
@@ -2154,10 +2173,7 @@ let validator_readiness_gate
     @ abi_declaration_binding_blockers abi_declaration_binding_counts
     @ executable_abi_blockers executable_abi_counts
     @ transcendental_dependency_blockers transcendental_dependency_catalog
-    @ Profile.consensus_ready_blockers
-        ~profile_gate_count
-        ~unprofiled_count
-        status_counts
+    @ profile_blockers
     @ Profile.root_binding_blockers root_binding_counts
   in
   `Assoc [
@@ -2173,6 +2189,20 @@ let validator_readiness_gate
     "effort_status", `String effort_status;
     "profile_status",
     `String (if profile_ready then "accepted" else "rejected");
+    "profile_static_status",
+    `String
+      (if profile_consensus_ready then "consensus_ready"
+       else if profile_consensus_candidate_ready then "consensus_candidate"
+       else "rejected");
+    "profile_admission_status",
+    `String
+      (if profile_consensus_ready then "consensus_ready"
+       else if cross_platform_ready && profile_consensus_candidate_ready then
+         "consensus_candidate_admitted_by_cross_platform_matrix"
+       else if profile_consensus_candidate_ready then
+         "consensus_candidate_awaiting_cross_platform_matrix"
+       else
+         "rejected");
     "profile_root_status",
     `String (if roots_ready then "accepted" else "rejected");
     "vm_semantics_root_status",
