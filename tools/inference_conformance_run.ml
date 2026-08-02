@@ -297,10 +297,26 @@ let transcendental_dependency_dependency_count = function
      | None -> 0)
   | _ -> 0
 
+let host_native_math_gate = function
+  | `Assoc fields ->
+    (match field "host_native_math_gate" fields with
+     | Some (`Assoc _ as gate) -> gate
+     | _ -> `Null)
+  | _ -> `Null
+
+let host_native_math_blockers catalog =
+  match host_native_math_gate catalog with
+  | `Assoc fields ->
+    string_list_field "validator_admission_blockers" fields
+  | _ -> []
+
 let transcendental_dependency_blockers catalog =
   let entry_count = transcendental_dependency_entry_count catalog in
-  if entry_count = 0 then []
-  else ["unresolved_transcendental_dependencies"]
+  let generic =
+    if entry_count = 0 then [] else ["unresolved_transcendental_dependencies"]
+  in
+  (generic @ host_native_math_blockers catalog)
+  |> List.sort_uniq String.compare
 
 let transcendental_dependency_gate_json catalog =
   let blockers = transcendental_dependency_blockers catalog in
@@ -311,6 +327,7 @@ let transcendental_dependency_gate_json catalog =
     "dependency_count", `Int (transcendental_dependency_dependency_count catalog);
     "transcendental_dependency_catalog_root",
     `String (Profile.transcendental_dependency_catalog_root catalog);
+    "host_native_math_gate", host_native_math_gate catalog;
     "blockers",
     `List (List.map (fun blocker -> `String blocker) blockers);
   ]
@@ -1194,6 +1211,8 @@ let next_readiness_blocker blockers =
       "unbound_profile_roots";
       "profile_root_binding_mismatch";
       "profile_root_binding_rejected";
+      "host_transcendental_exp";
+      "unresolved_transcendental_dependencies";
       "cross_platform_conformance_missing";
       "missing_cross_platform_matrix";
     ]

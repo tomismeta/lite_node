@@ -809,7 +809,8 @@ let check_readiness_transcendental_dependency_gate
     ~status
     ~entry_count
     ~dependency_count
-    ~blocker =
+    ~blocker
+    ~host_blocker =
   match report with
   | `Assoc fields ->
     let readiness = assoc_json "validator_readiness_gate" fields in
@@ -828,6 +829,19 @@ let check_readiness_transcendental_dependency_gate
     check
       "readiness transcendental dependency gate dependency count"
       (int_value "dependency_count" gate = dependency_count);
+    (match host_blocker with
+     | None -> ()
+     | Some expected ->
+       let host_gate = assoc_json "host_native_math_gate" gate in
+       check
+         "readiness host native math gate rejected"
+         (String.equal (string_value "status" host_gate) "rejected");
+       check
+         "readiness host native math gate blocker"
+         (List.mem expected (string_list "validator_admission_blockers" host_gate));
+       check
+         "readiness top-level host blocker"
+         (List.mem expected (string_list "blockers" readiness)));
     (match blocker with
      | None -> check "readiness dependency blockers empty" (list_value "blockers" gate = [])
      | Some expected ->
@@ -1233,7 +1247,8 @@ let check_good_template_reports_bound_abi () =
       ~status:"accepted"
       ~entry_count:0
       ~dependency_count:0
-      ~blocker:None)
+      ~blocker:None
+      ~host_blocker:None)
 
 let check_dynamic_q1_effort_vector () =
   with_temp_dir (fun dir ->
@@ -3110,6 +3125,7 @@ let check_p0_plus_rejected_results_empty_when_accepted () =
         ~entry_count:1
         ~dependency_count:1
         ~blocker:(Some "unresolved_transcendental_dependencies")
+        ~host_blocker:(Some "host_transcendental_exp")
     | _ -> failwith "report must be object")
 
 let check_p0_plus_rejected_results_report_outputs () =
