@@ -29,6 +29,24 @@ let hex_root char =
 let sha256 raw =
   Digestif.SHA256.(digest_string raw |> to_hex)
 
+let put_u64le buffer offset value =
+  for byte = 0 to 7 do
+    let shifted =
+      Int64.shift_right_logical value (byte * 8)
+      |> Int64.logand 0xffL
+      |> Int64.to_int
+    in
+    Bytes.set buffer (offset + byte) (Char.chr shifted)
+  done
+
+let f64le_values values =
+  let buffer = Bytes.create (8 * List.length values) in
+  List.iteri
+    (fun index value ->
+       put_u64le buffer (index * 8) (Int64.bits_of_float value))
+    values;
+  Bytes.to_string buffer
+
 let write_file path raw =
   let output = open_out_bin path in
   Fun.protect
@@ -281,6 +299,18 @@ let feedback_selected_index_payload =
   "ix" ^ selected_index_u64le_payload feedback_selected_index
 let feedback_selected_index_payload_root = sha256 feedback_selected_index_payload
 
+let producer_selected_index = 310
+let producer_selected_index_offset = 2
+let producer_logits_payload =
+  f64le_values
+    (List.init
+       (producer_selected_index + 1)
+       (fun index ->
+          if index = producer_selected_index then 1.0
+          else 0.0))
+let producer_selected_index_payload =
+  "ix" ^ selected_index_u64le_payload producer_selected_index
+
 let committed_state_token_code =
   [|
     VM.JDEST Abi.advance_label;
@@ -458,6 +488,47 @@ let graph_real_feedback_code =
     VM.STOP;
   |]
 
+let graph_real_argmax_feedback_code =
+  [|
+    VM.JDEST Abi.advance_label;
+    VM.LDI (0, VM.VInt (Z.of_int 40));
+    VM.LDI (1, VM.VString producer_logits_payload);
+    VM.LDI (2, VM.VInt Z.zero);
+    VM.LDI (3, VM.VInt (Z.of_int (producer_selected_index + 1)));
+    VM.LOAD_F64_LE_FP (0, 1, 2, 3);
+    VM.LDI (4, VM.VInt (Z.of_int 40));
+    VM.LDI (5, VM.VInt (Z.of_int (producer_selected_index + 1)));
+    VM.ARGMAX_FP (2, 4, 5);
+    VM.MSTORE (10, 2);
+    VM.MLOAD (20, Abi.sequence_cell);
+    VM.LDI (21, VM.VInt Z.zero);
+    VM.EQ (22, 20, 21);
+    VM.JIF (22, 101);
+    VM.LDI (21, VM.VInt Z.one);
+    VM.EQ (22, 20, 21);
+    VM.JIF (22, 102);
+    VM.MLOAD (5, Abi.committed_target_state_root_cell);
+    VM.FLOAD (6, 5);
+    VM.MSTORE (30, 6);
+    VM.LDI (0, VM.VInt (Z.of_int 10));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+    VM.JDEST 101;
+    VM.LDI (5, VM.VString feedback_prefill_payload);
+    VM.FSTORE (6, 5);
+    VM.MSTORE (Abi.committed_target_state_root_cell, 6);
+    VM.LDI (0, VM.VInt (Z.of_int 10));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+    VM.JDEST 102;
+    VM.LDI (5, VM.VString producer_selected_index_payload);
+    VM.FSTORE (6, 5);
+    VM.MSTORE (Abi.committed_target_state_root_cell, 6);
+    VM.LDI (0, VM.VInt (Z.of_int 10));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+  |]
+
 let selected_index_contract ?(output_base = 10) () =
   `Assoc [
     "kind", `String "selected_index";
@@ -485,7 +556,12 @@ let lifecycle_only_contract =
 
 let write_batch_fixture
     ?(session_abi_root = Abi.v1_root)
+    ?max_model_bytes
+    ?max_view_bytes
     ?max_session_bytes
+    ?max_scratch_bytes
+    ?max_output_bytes
+    ?(extra_capabilities = [])
     ?code
     dir =
   let stage_dir = Filename.concat dir "stage" in
@@ -505,8 +581,6 @@ let write_batch_fixture
   in
   let continuation = Abi.continuation_supported session_abi_root in
   let committed_state = Abi.committed_state_supported session_abi_root in
-  let max_output_bytes = if continuation then 512 else 64 in
-  let max_scratch_bytes = if continuation then 2048 else 128 in
   let max_session_bytes =
     match max_session_bytes with
     | None -> 1024
@@ -518,15 +592,28 @@ let write_batch_fixture
   in
   let capabilities =
     [capability; strict_fp_capability]
+    @ extra_capabilities
     @
     if committed_state then
       [Req.{ name = "session.committed-state"; root = hex_root '6' }]
     else []
   in
+  let max_model_bytes = Option.value ~default:64 max_model_bytes in
+  let max_view_bytes = Option.value ~default:64 max_view_bytes in
+  let max_scratch_bytes =
+    match max_scratch_bytes with
+    | Some value -> value
+    | None -> if continuation then 2048 else 128
+  in
+  let max_output_bytes =
+    match max_output_bytes with
+    | Some value -> value
+    | None -> if continuation then 512 else 64
+  in
   let limits =
     Req.{
-      max_model_bytes = 64;
-      max_view_bytes = 64;
+      max_model_bytes;
+      max_view_bytes;
       max_session_bytes;
       max_scratch_bytes;
       max_output_bytes;
@@ -667,8 +754,14 @@ let write_session_bundle_fixture
     ?(schema = Some "octra.inference.session.bundle")
     ?(decode_steps = Some 1)
     ?session_abi_root
+    ?max_model_bytes
+    ?max_view_bytes
     ?max_session_bytes
+    ?max_scratch_bytes
+    ?max_output_bytes
+    ?extra_capabilities
     ?code
+    ?transition_id_for_index
     ?phase_for_index
     ?execution_contract_for_index
     ?output_contract_for_index
@@ -679,7 +772,16 @@ let write_session_bundle_fixture
     ?(transition_count = 1)
     dir =
   let batch_path =
-    write_batch_fixture ?session_abi_root ?max_session_bytes ?code dir
+    write_batch_fixture
+      ?session_abi_root
+      ?max_model_bytes
+      ?max_view_bytes
+      ?max_session_bytes
+      ?max_scratch_bytes
+      ?max_output_bytes
+      ?extra_capabilities
+      ?code
+      dir
   in
   let stage = stage_json_from_batch batch_path in
   let second_stage =
@@ -731,7 +833,11 @@ let write_session_bundle_fixture
          in
          `Assoc
            ([
-             "transition_id", `String (Printf.sprintf "token-%03d" index);
+             "transition_id",
+             `String
+               (match transition_id_for_index with
+                | Some transition_id -> transition_id index
+                | None -> Printf.sprintf "token-%03d" index);
              "phase",
              `String
                (match phase_for_index with
@@ -2329,6 +2435,179 @@ let check_session_bundle_accepts_graph_real_feedback_loop () =
      | _ -> failwith "expected three graph feedback transitions")
   | _ -> failwith "report must be an object"
 
+let check_session_bundle_accepts_producer_argmax_graph_real_loop () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~decode_steps:(Some 2)
+      ~session_abi_root:Abi.committed_state_root
+      ~code:graph_real_argmax_feedback_code
+      ~max_view_bytes:4096
+      ~max_scratch_bytes:8192
+      ~extra_capabilities:
+        [Req.{ name = "tensor.argmax"; root = hex_root '8' }]
+      ~transition_id_for_index:(function
+        | 0 -> "prefill-000"
+        | 1 -> "decode-000"
+        | index -> Printf.sprintf "decode-%03d" (index - 1))
+      ~execution_contract_for_index:(fun _ ->
+        Some (graph_real_contract ~min_program_instructions:8 ()))
+      ~output_contract_for_index:(fun index ->
+        if index > 0 then Some (selected_index_contract ())
+        else None)
+      ~prior_state_contract_for_index:(fun index ->
+        if index = 2 then
+          Some
+            (selected_index_feedback_contract
+               ~offset:producer_selected_index_offset
+               "decode-000")
+        else None)
+      ~transition_count:3
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "producer argmax bundle exits cleanly" (code = 0);
+  match report with
+  | `Assoc fields ->
+    check
+      "producer argmax bundle accepted"
+      (String.equal (string_json "status" fields) "accepted");
+    check
+      "producer argmax blocker cleared"
+      (String.equal (string_json "next_runtime_blocker" fields) "none");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check_top_level_graph_execution_contract
+      fields
+      ~status:"bound"
+      ~required:3
+      ~bound:3
+      ~mismatched:0;
+    check_graph_executed_opcodes
+      semantics
+      [
+        "prefill-000", ["ARGMAX_FP"];
+        "decode-000", ["ARGMAX_FP"];
+        "decode-001", ["ARGMAX_FP"];
+      ];
+    check_top_level_graph_executed_opcodes
+      fields
+      [
+        "prefill-000", ["ARGMAX_FP"];
+        "decode-000", ["ARGMAX_FP"];
+        "decode-001", ["ARGMAX_FP"];
+      ];
+    check_top_level_decode_token_contract
+      fields
+      ~status:"bound"
+      ~required:2
+      ~bound:2
+      ~mismatched:0;
+    check_decode_selected_indices
+      semantics
+      [
+        "decode-000", string_of_int producer_selected_index;
+        "decode-001", string_of_int producer_selected_index;
+      ];
+    check
+      "producer argmax top-level selected indices"
+      (list_json "decode_selected_indices" fields
+       = decode_selected_indices_json
+           [
+             "decode-000", string_of_int producer_selected_index;
+             "decode-001", string_of_int producer_selected_index;
+           ]);
+    check_top_level_decode_prior_state_contract
+      fields
+      ~status:"bound"
+      ~required:1
+      ~bound:1
+      ~mismatched:0;
+    check_no_first_transition_issue semantics;
+    check_top_level_first_transition_issue fields;
+    check
+      "producer argmax missing runtime capabilities clear"
+      (list_json "missing_runtime_capabilities" semantics = []);
+    check_session_hash report;
+    (match list_json "decode_prior_state_contracts" fields with
+     | [`Assoc first; `Assoc second] ->
+       check
+         "producer first decode prior feedback absent"
+         (String.equal
+            (string_json
+               "status"
+               (assoc_json "prior_state_contract" first))
+            "not_declared");
+       let feedback = assoc_json "prior_state_contract" second in
+       check
+         "producer second decode feedback matched"
+         (String.equal (string_json "status" feedback) "matched");
+       check
+         "producer second decode feedback source"
+         (String.equal
+            (string_json "source_transition_id" feedback)
+            "decode-000");
+       check
+         "producer second decode feedback index"
+         (String.equal
+            (string_json "selected_index" feedback)
+            (string_of_int producer_selected_index))
+     | _ -> failwith "expected two producer prior-state contracts");
+    (match list_json "transitions" fields with
+     | [
+       `Assoc prefill;
+       `Assoc first_decode;
+       `Assoc second_decode;
+     ] ->
+       check_transition_root_chain
+         fields
+         [`Assoc prefill; `Assoc first_decode; `Assoc second_decode];
+       List.iter
+         (fun transition ->
+            let contract = assoc_json "execution_contract" transition in
+            check
+              "producer argmax contract matched"
+              (String.equal
+                 (string_json "status" contract)
+                 "matched");
+            check
+              "producer argmax contract graph-real"
+              (bool_json "graph_real" contract);
+            check
+              "producer argmax executed argmax"
+              (List.exists
+                 (( = ) (`String "ARGMAX_FP"))
+                 (list_json "executed_inference_opcodes" contract)))
+         [prefill; first_decode; second_decode];
+       check
+         "producer argmax first decode output contract"
+         (String.equal
+            (string_json
+               "status"
+               (assoc_json "output_contract" first_decode))
+            "matched");
+       check
+         "producer argmax second decode output contract"
+         (String.equal
+            (string_json
+               "status"
+               (assoc_json "output_contract" second_decode))
+            "matched");
+       check
+         "producer argmax second decode prior contract"
+         (String.equal
+            (string_json
+               "status"
+               (assoc_json "prior_state_contract" second_decode))
+            "matched");
+       check
+         "producer argmax last payload"
+         (String.equal
+            (string_json "last_transition_output_payload" fields)
+            ("base=10|length=1|values=int:"
+             ^ string_of_int producer_selected_index))
+     | _ -> failwith "expected three producer graph-real transitions")
+  | _ -> failwith "report must be an object"
+
 let check_session_bundle_binds_decode_token_contract () =
   with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
   let bundle_path =
@@ -3735,6 +4014,7 @@ let () =
   check_graph_execution_contract_requires_opcode_timing ();
   check_graph_execution_contract_rejects_dead_branch_opcode ();
   check_session_bundle_accepts_graph_real_feedback_loop ();
+  check_session_bundle_accepts_producer_argmax_graph_real_loop ();
   check_session_bundle_binds_decode_token_contract ();
   check_session_bundle_requires_decode_token_contract ();
   check_session_bundle_binds_committed_state_transport ();
