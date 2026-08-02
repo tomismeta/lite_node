@@ -300,6 +300,11 @@ reported as `decode_loop_prior_state_contract_mismatch` and fails closed.
 Likewise, an omitted decode selected-index contract is reported as
 `decode_loop_token_contract_not_bound`; a declared-but-invalid selected-index
 contract is reported as `decode_loop_token_contract_mismatch`.
+If any transition program is inadmissible before resident execution, the
+session report stays structured with `program_admission_rejected`,
+`execution_attempted = false`, an empty transition execution list, and a
+preflight transition plan carrying unsupported opcode, missing capability, and
+policy details.
 
 ## Canonical Session
 

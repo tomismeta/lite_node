@@ -3232,6 +3232,177 @@ let count_by predicate values =
     0
     values
 
+type session_admission_preflight = {
+  admission_preflight_json : Yojson.Safe.t;
+  admission_first_transition_issue : Yojson.Safe.t;
+  admission_unsupported_opcodes : string list;
+  admission_missing_capabilities : string list;
+  admission_policy_violations : Yojson.Safe.t list;
+}
+
+let session_transition_admission_preflight transition =
+  let raw_program =
+    try read_file transition.stage.program_path with Sys_error error -> fail error
+  in
+  let requirement_packet =
+    json_file transition.stage.requirement_path parse_requirement_json
+  in
+  let support =
+    json_file transition.stage.support_path parse_support_json
+  in
+  match decode_program_code raw_program with
+  | Error error ->
+    let json =
+      `Assoc [
+        "transition_id", `String transition.transition_id;
+        "phase", `String transition.phase;
+        "stage_id", `String transition.stage.stage_id;
+        "preflight_status", `String "program_decode_error";
+        "admission_status", `String "not_run";
+        "execution_status", `String "not_run";
+        "program_instructions", `Null;
+        "program_decode_error", `String error;
+        "unsupported_opcodes", `List [];
+        "missing_capabilities", `List [];
+        "policy_violations", `List [];
+      ]
+    in
+    Some (json, [], [], [], "program_decode_error")
+  | Ok code ->
+    let violations =
+      Inference_opcode_policy.violations
+        ~requirement:requirement_packet.requirement
+        code
+    in
+    let unsupported = unsupported_opcode_names violations in
+    let missing = missing_capability_names violations in
+    let violation_values = List.map violation_json violations in
+    let admission_status, admission_error =
+      match
+        admit_program
+          ~support
+          ~requirement:requirement_packet.requirement
+          raw_program
+      with
+      | Ok _ -> "accepted", None
+      | Error error ->
+        "rejected", Some (Admission.error_message error)
+    in
+    let json =
+      `Assoc (
+        [
+          "transition_id", `String transition.transition_id;
+          "phase", `String transition.phase;
+          "stage_id", `String transition.stage.stage_id;
+          "preflight_status",
+          `String
+            (if String.equal admission_status "accepted" then
+               "admission_checked"
+             else "admission_error");
+          "admission_status", `String admission_status;
+          "execution_status", `String "not_run";
+          "program_instructions", `Int (Array.length code);
+          "unsupported_opcodes", list_json unsupported;
+          "missing_capabilities", list_json missing;
+          "policy_violations", `List violation_values;
+        ]
+        @
+        match admission_error with
+        | None -> []
+        | Some error -> ["admission_error", `String error])
+    in
+    if String.equal admission_status "accepted" && violations = [] then
+      None
+    else
+      Some
+        (json,
+         unsupported,
+         missing,
+         violation_values,
+         "program_admission_rejected")
+
+let session_admission_preflight bundle =
+  let checked =
+    List.map
+      (fun transition ->
+         transition,
+         session_transition_admission_preflight transition)
+      bundle.transitions
+  in
+  match List.find_opt (function _, Some _ -> true | _ -> false) checked with
+  | None -> None
+  | Some (first_transition, Some (_, _, _, _, reason)) ->
+    let transition_plan =
+      checked
+      |> List.map
+           (function
+             | _, Some (json, _, _, _, _) -> json
+             | transition, None ->
+               `Assoc [
+                 "transition_id", `String transition.transition_id;
+                 "phase", `String transition.phase;
+                 "stage_id", `String transition.stage.stage_id;
+                 "preflight_status", `String "admission_checked";
+                 "admission_status", `String "accepted";
+                 "execution_status", `String "not_run";
+                 "unsupported_opcodes", `List [];
+                 "missing_capabilities", `List [];
+                 "policy_violations", `List [];
+               ])
+    in
+    let unsupported =
+      checked
+      |> List.concat_map
+           (function
+             | _, Some (_, unsupported, _, _, _) -> unsupported
+             | _ -> [])
+      |> unique_strings
+    in
+    let missing =
+      checked
+      |> List.concat_map
+           (function
+             | _, Some (_, _, missing, _, _) -> missing
+             | _ -> [])
+      |> unique_strings
+    in
+    let policy_violations =
+      checked
+      |> List.concat_map
+           (function
+             | _, Some (_, _, _, violations, _) -> violations
+             | _ -> [])
+    in
+    let first_transition_issue =
+      `Assoc [
+        "transition_id", `String first_transition.transition_id;
+        "phase", `String first_transition.phase;
+        "status", `String "rejected";
+        "reason", `String reason;
+      ]
+    in
+    Some {
+      admission_preflight_json =
+        `Assoc [
+          "status", `String "blocked";
+          "resident_session_lifecycle_root",
+          `String Abi.resident_lifecycle_root;
+          "runtime_readiness_status", `String "admission_rejected";
+          "next_runtime_blocker",
+          `String "program_admission_rejected";
+          "execution_attempted", `Bool false;
+          "phase_contract", `String Abi.resident_lifecycle_schema;
+          "blockers", `List [`String "program_admission_rejected"];
+          "first_transition_issue", first_transition_issue;
+          "transition_plan", `List transition_plan;
+        ];
+      admission_first_transition_issue = first_transition_issue;
+      admission_unsupported_opcodes = unsupported;
+      admission_missing_capabilities = missing;
+      admission_policy_violations = policy_violations;
+    }
+  | Some (_, None) -> assert false
+
 let contract_summary_json
     ~required_count
     ~bound_count
@@ -3897,6 +4068,102 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
 let run_inference_session_file ~timing_mode path =
   let bundle = session_bundle_file path in
   let transition_count = List.length bundle.transitions in
+  match session_admission_preflight bundle with
+  | Some preflight ->
+    let decode_transition_count =
+      count_by
+        (fun transition -> String.equal transition.phase "decode")
+        bundle.transitions
+    in
+    let graph_execution_contract_required_count =
+      count_by transition_requires_graph_execution bundle.transitions
+    in
+    let runtime_semantics =
+      session_runtime_semantics
+        ~transition_count
+        ~runtime_readiness_status:"admission_rejected"
+        ~next_runtime_blocker:"program_admission_rejected"
+        ~decode_token_contract_status:"not_bound"
+        ~decode_token_contract_summary:
+          (contract_summary_json
+             ~required_count:decode_transition_count
+             ~bound_count:0
+             ~mismatch_count:0)
+        ~decode_selected_indices:(`List [])
+        ~decode_prior_state_contract_status:
+          (if decode_transition_count <= 1 then "not_required" else "not_bound")
+        ~decode_prior_state_contract_summary:
+          (contract_summary_json
+             ~required_count:(max 0 (decode_transition_count - 1))
+             ~bound_count:0
+             ~mismatch_count:0)
+        ~graph_execution_contract_status:
+          (if graph_execution_contract_required_count = 0 then "not_required"
+           else "not_bound")
+        ~graph_execution_contract_summary:
+          (graph_execution_contract_summary_json
+             ~required_count:graph_execution_contract_required_count
+             ~bound_count:0
+             ~mismatch_count:0)
+        ~transition_root_chain_summary:
+          (empty_transition_root_chain_summary_json ~transition_count)
+        ~first_transition_issue:preflight.admission_first_transition_issue
+        ~missing_runtime_capabilities:(`List [])
+        ~committed_state_supported:false
+        ~committed_state_transport_bound:false
+        ~continuation_supported:false
+    in
+    let status = "rejected" in
+    let payload =
+      session_report_payload
+        ~continuation_preflight:(Some preflight.admission_preflight_json)
+        ~status
+        ~transition_count
+        ~decode_steps:bundle.decode_steps
+        ~runtime_semantics
+        ~next_runtime_blocker:"program_admission_rejected"
+        ~opened_session_root:None
+        ~final_session_root:None
+        ~final_receipt_root:None
+        ~output_prefix_root:None
+        ~last_transition_output_payload:None
+        ~last_transition_output_root:None
+        ~unsupported_opcodes:preflight.admission_unsupported_opcodes
+        ~missing_capabilities:preflight.admission_missing_capabilities
+        ~policy_violations:preflight.admission_policy_violations
+        ~transitions:[]
+    in
+    let report =
+      `Assoc [
+        "status", `String status;
+        "schema", `String "octra.inference.session.report";
+        "session_path", `String bundle.session_path;
+        "resident_session_lifecycle_root",
+        `String Abi.resident_lifecycle_root;
+        "transition_count", `Int transition_count;
+        "decode_steps", `Int bundle.decode_steps;
+        "session_report_sha256", `String (session_report_sha256 payload);
+        "runtime_semantics", runtime_semantics;
+        "next_runtime_blocker", `String "program_admission_rejected";
+        "opened_session_root", `Null;
+        "final_session_root", `Null;
+        "final_receipt_root", `Null;
+        "output_prefix_root", `Null;
+        "last_transition_output_payload", `Null;
+        "last_transition_output_payload_sha256", `Null;
+        "last_transition_output_root", `Null;
+        "unsupported_opcodes",
+        unique_json_strings preflight.admission_unsupported_opcodes;
+        "missing_capabilities",
+        unique_json_strings preflight.admission_missing_capabilities;
+        "policy_violations", `List preflight.admission_policy_violations;
+        "transitions", `List [];
+        "continuation_preflight", preflight.admission_preflight_json;
+      ]
+    in
+    print_endline (Yojson.Safe.pretty_to_string report);
+    1
+  | None ->
   if transition_count <> 1 then begin
     let cache = batch_cache () in
     let prepared_transitions =

@@ -359,6 +359,13 @@ let graph_real_code =
     VM.STOP;
   |]
 
+let argmax_without_capability_code =
+  [|
+    VM.JDEST Abi.advance_label;
+    VM.ARGMAX_FP (10, 0, 1);
+    VM.STOP;
+  |]
+
 let dead_branch_graph_real_code =
   [|
     VM.JDEST Abi.advance_label;
@@ -2797,6 +2804,85 @@ let check_session_bundle_rejects_invalid_phase_order () =
        = [`String "prefill_decode_phase_sequence_mismatch"])
   | _ -> failwith "report must be an object"
 
+let check_session_bundle_reports_admission_policy_rejection () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~session_abi_root:Abi.v2_root
+      ~transition_count:2
+      dir
+  in
+  write_file
+    (Filename.concat dir "stage/program.ocpg")
+    (Inference_cert.source argmax_without_capability_code);
+  let code, report = run_session_bundle bundle_path in
+  check "admission-policy bundle exits nonzero" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check_session_hash report;
+    check
+      "admission-policy status"
+      (String.equal (string_json "status" fields) "rejected");
+    check
+      "admission-policy blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "program_admission_rejected");
+    check
+      "admission-policy missing capability"
+      (list_json "missing_capabilities" fields = [`String "tensor.argmax"]);
+    check "admission-policy no transitions" (list_json "transitions" fields = []);
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "admission-policy readiness"
+      (String.equal
+         (string_json "runtime_readiness_status" semantics)
+         "admission_rejected");
+    check
+      "admission-policy semantic blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" semantics)
+         "program_admission_rejected");
+    check_decode_selected_indices semantics [];
+    check_first_transition_issue
+      semantics
+      ~transition_id:"token-000"
+      ~phase:"prefill"
+      ~status:"rejected"
+      ~reason:"program_admission_rejected";
+    let preflight = assoc_json "continuation_preflight" fields in
+    check
+      "admission-policy preflight blocked"
+      (String.equal (string_json "status" preflight) "blocked");
+    check
+      "admission-policy execution not attempted"
+      (not (bool_json "execution_attempted" preflight));
+    check
+      "admission-policy blocker list"
+      (list_json "blockers" preflight
+       = [`String "program_admission_rejected"]);
+    (match list_json "transition_plan" preflight with
+     | [`Assoc first; `Assoc second] ->
+       List.iter
+         (fun transition ->
+            check
+              "admission-policy transition rejected"
+              (String.equal
+                 (string_json "admission_status" transition)
+                 "rejected");
+            check
+              "admission-policy transition not run"
+              (String.equal
+                 (string_json "execution_status" transition)
+                 "not_run");
+            check
+              "admission-policy transition missing argmax"
+              (list_json "missing_capabilities" transition
+               = [`String "tensor.argmax"]))
+         [first; second]
+     | _ -> failwith "expected two admission preflight transitions")
+  | _ -> failwith "report must be an object"
+
 let check_session_bundle_reports_top_level_claim_mismatch () =
   with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
   let bundle_path =
@@ -2987,6 +3073,7 @@ let () =
   check_session_bundle_rejects_multiple_prefills ();
   check_session_bundle_rejects_decode_token_contract_mismatch ();
   check_session_bundle_rejects_invalid_phase_order ();
+  check_session_bundle_reports_admission_policy_rejection ();
   check_session_bundle_reports_top_level_claim_mismatch ();
   check_session_bundle_reports_identity_mismatch ();
   check_session_bundle_reports_declaration_mismatch ();
