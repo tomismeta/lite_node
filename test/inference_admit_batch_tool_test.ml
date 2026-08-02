@@ -987,20 +987,27 @@ let check_decode_selected_indices semantics expected =
     "decode selected indices"
     (list_json "decode_selected_indices" semantics = expected_json)
 
+let graph_executed_opcodes_json expected =
+  List.map
+    (fun (transition_id, opcodes) ->
+       `Assoc [
+         "transition_id", `String transition_id;
+         "executed_inference_opcodes",
+         `List (List.map (fun opcode -> `String opcode) opcodes);
+       ])
+    expected
+
 let check_graph_executed_opcodes semantics expected =
-  let expected_json =
-    List.map
-      (fun (transition_id, opcodes) ->
-         `Assoc [
-           "transition_id", `String transition_id;
-           "executed_inference_opcodes",
-           `List (List.map (fun opcode -> `String opcode) opcodes);
-         ])
-      expected
-  in
+  let expected_json = graph_executed_opcodes_json expected in
   check
     "graph executed opcodes"
     (list_json "graph_executed_opcodes" semantics = expected_json)
+
+let check_top_level_graph_executed_opcodes fields expected =
+  let expected_json = graph_executed_opcodes_json expected in
+  check
+    "top-level graph executed opcodes"
+    (list_json "graph_executed_opcodes" fields = expected_json)
 
 let check_decode_prior_state_summary =
   check_contract_summary
@@ -1144,6 +1151,8 @@ let check_session_hash report =
         assoc_value "decode_prior_state_contracts" fields;
         "transition_root_chain",
         assoc_value "transition_root_chain" fields;
+        "graph_executed_opcodes",
+        assoc_value "graph_executed_opcodes" fields;
         "runtime_semantics", assoc_value "runtime_semantics" fields;
         "next_runtime_blocker", assoc_value "next_runtime_blocker" fields;
         "first_transition_issue", assoc_value "first_transition_issue" fields;
@@ -2057,6 +2066,13 @@ let check_session_bundle_accepts_graph_real_feedback_loop () =
       ~mismatched:0;
     check_graph_executed_opcodes
       semantics
+      [
+        "token-000", ["SILU_FP"];
+        "token-001", ["SILU_FP"];
+        "token-002", ["SILU_FP"];
+      ];
+    check_top_level_graph_executed_opcodes
+      fields
       [
         "token-000", ["SILU_FP"];
         "token-001", ["SILU_FP"];
