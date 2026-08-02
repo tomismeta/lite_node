@@ -28,6 +28,11 @@ let expect_compare label actual expected =
   | Some value -> check label (value = expected)
   | None -> failwith (label ^ " returned non-finite")
 
+let expect_less label left right =
+  match Fp64.compare left right with
+  | Some value -> check label (value < 0)
+  | None -> failwith (label ^ " compare returned non-finite")
+
 let expected_binary16 bits =
   let sign = if bits land 0x8000 = 0 then 1.0 else -1.0 in
   let exponent = (bits lsr 10) land 0x1f in
@@ -287,6 +292,31 @@ let check_inverse_sqrt_edges () =
     "fp64 inverse sqrt non-finite rejects"
     (Fp64.inverse_sqrt 0x7ff0000000000000L = None)
 
+let check_exp_nonpositive_edges () =
+  expect_bits
+    "fp64 exp positive zero"
+    (Fp64.exp_nonpositive 0L)
+    0x3ff0000000000000L;
+  expect_bits
+    "fp64 exp negative zero"
+    (Fp64.exp_nonpositive Int64.min_int)
+    0x3ff0000000000000L;
+  check
+    "fp64 exp positive rejects"
+    (Fp64.exp_nonpositive 0x3ff0000000000000L = None);
+  check
+    "fp64 exp non-finite rejects"
+    (Fp64.exp_nonpositive 0x7ff0000000000000L = None);
+  expect_bits
+    "fp64 exp underflow floor"
+    (Fp64.exp_nonpositive 0xc087700000000000L)
+    0L;
+  (match Fp64.exp_nonpositive 0xbff0000000000000L with
+   | Some exp_minus_one ->
+     expect_less "fp64 exp(-1) below one half" exp_minus_one 0x3fe0000000000000L;
+     expect_less "fp64 exp(-1) above one quarter" 0x3fd0000000000000L exp_minus_one
+   | None -> failwith "fp64 exp(-1) rejected")
+
 let check_compare_edges () =
   expect_compare
     "fp64 compare equal zeros"
@@ -319,4 +349,5 @@ let () =
   check_division_edges ();
   check_sqrt_edges ();
   check_inverse_sqrt_edges ();
+  check_exp_nonpositive_edges ();
   check_compare_edges ()

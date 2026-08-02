@@ -580,7 +580,8 @@ let blocker_class = function
   | "fp64_recurrence_add_mul_conformance"
   | "fp64_reduction_conformance"
   | "fp64_sqrt_conformance"
-  | "fp64_subtract_conformance" ->
+  | "fp64_subtract_conformance"
+  | "protocol_owned_exp_conformance" ->
     "software_fp64_conformance"
   | "accumulation_order"
   | "kernel_accumulation_order"
@@ -600,6 +601,8 @@ let blocker_class = function
     "safety_policy"
   | "authenticated_range_binding" ->
     "storage_binding"
+  | "software_exp_effort_reauthorization" ->
+    "resource_policy"
   | "binary16_scale_decode"
   | "epsilon_bit_interpretation"
   | "first_max_tie_policy"
@@ -865,6 +868,17 @@ let of_name = function
         "pin loop order, signed-zero, subnormal, overflow, aliasing, effort, and atomic writeback policy";
       ];
     }
+  | "deterministic-fp64-softmax" as name ->
+    Ok {
+      name;
+      consensus_status = Consensus_candidate;
+      summary = "deterministic finite binary64 softmax profile with protocol-owned nonpositive exp";
+      required_actions = [
+        "bind the numerical profile root in the model or request authority";
+        "qualify protocol-owned nonpositive exp, binary64 score shifting, exponential summation, and probability division across validators";
+        "pin max selection, underflow, overflow, overlap, effort, and atomic writeback policy";
+      ];
+    }
   | "deterministic-q1-g128-fp64-linear" as name ->
     Ok {
       name;
@@ -934,7 +948,7 @@ let current_runtime_profile_entries = [
   "RESIDUAL_ADD_FP", "deterministic-fp64-elementwise";
   "ROPE_APPLY_INDEXED_FP", "host-fp-trig-local-candidate";
   "ATTENTION_SCORES_FP", "deterministic-fp64-accumulation";
-  "SOFTMAX_FP", "host-fp-exp-local-candidate";
+  "SOFTMAX_FP", "deterministic-fp64-softmax";
   "ATTENTION_WEIGHTED_SUM_FP", "deterministic-fp64-accumulation";
   "ARGMAX_FP", "deterministic-fp64-comparison";
 ]
@@ -1010,8 +1024,9 @@ let local_semantics ~opcode =
       "score cells are finite binary64 values";
       "maximum score is selected left-to-right with deterministic finite binary64 comparison before exponentiation";
       "score-minus-maximum shifts use deterministic finite binary64 subtraction";
-      "each shifted score must deterministically compare less than or equal to +0.0 before native exp";
-      "exp is applied to each shifted score using native binary64";
+      "each shifted score must deterministically compare less than or equal to +0.0 before protocol-owned exp";
+      "exp is applied to each shifted score using protocol-owned deterministic nonpositive binary64 exp";
+      "protocol exp uses Q256 range reduction, checked-in round-to-nearest ln(2), 80 Taylor terms over the reduced nonpositive interval, and deterministic binary64 ties-to-even composition";
       "exponentials are summed left-to-right with deterministic finite binary64 addition";
       "probabilities are divided by the binary64 sum of exponentials using deterministic finite binary64 division";
       "destination may equal scores exactly, but partial overlap is rejected";
@@ -1149,8 +1164,8 @@ let consensus_obligations ~opcode =
     ]
   | "SOFTMAX_FP" ->
     [
-      "replace native binary64 exp with protocol-owned deterministic exp behavior";
-      "pin deterministic nonpositive exp-domain gate before protocol-owned deterministic exp evaluation";
+      "bind protocol-owned deterministic nonpositive exp behavior before consensus admission";
+      "pin deterministic nonpositive exp-domain gate before exp evaluation";
       "qualify deterministic binary64 score shifting, exponential summation, and probability division";
       "qualify deterministic binary64 comparison for maximum-score selection";
       "pin max-subtract semantics, ties, underflow, overflow, and non-finite rejection";
@@ -1301,10 +1316,11 @@ let consensus_blocker_codes ~opcode =
     [
       "fp64_comparison_conformance";
       "fp64_subtract_conformance";
-      "host_fp_exp";
+      "protocol_owned_exp_conformance";
       "fp64_reduction_conformance";
       "fp64_divide_conformance";
       "probability_ordering";
+      "software_exp_effort_reauthorization";
       "overlap_policy";
       "cross_platform_conformance";
     ]
@@ -1447,17 +1463,7 @@ let consensus_blocker_codes ~opcode =
 
 let native_dependency_details ~opcode =
   match opcode with
-  | "SOFTMAX_FP" ->
-    Some
-      ( ["native_exp_nonpositive"],
-        ["exp(score[index] - max_score)"],
-        ["protocol_owned_exp_nonpositive_binary64"],
-        [
-          "wide_uniform_tail_1024";
-          "near_underflow_shift";
-          "subnormal_probability_tail";
-          "positive_shifted_exp_reject";
-        ] )
+  | "SOFTMAX_FP" -> None
   | "GATED_DELTA_RULE_FP" ->
     Some
       ( ["native_exp_nonpositive"],
@@ -1734,8 +1740,8 @@ let arithmetic_domain ~profile ~opcode =
     "deterministic-binary64-elementwise-multiply"
   | "deterministic-fp64-elementwise", "RESIDUAL_ADD_FP" ->
     "deterministic-binary64-elementwise-add"
-  | "host-fp-exp-local-candidate", "SOFTMAX_FP" ->
-    "deterministic-binary64-compare-shift-nonpositive-exp-gate-sum-divide-host-exp"
+  | "deterministic-fp64-softmax", "SOFTMAX_FP" ->
+    "deterministic-binary64-compare-shift-protocol-exp-sum-divide"
   | "host-fp-exp-local-candidate", "GATED_DELTA_RULE_FP" ->
     "deterministic-binary64-nonpositive-exp-gate-recurrence-sqrt-divide-host-exp"
   | "host-fp-exp-local-candidate", "SIGMOID_FP" ->
@@ -1766,9 +1772,10 @@ let rounding_mode ~profile ~opcode =
   | ( "deterministic-fp64-normalization",
       ( "RMSNORM_FP_EPS" | "L2NORM_FP" ) ) ->
     "deterministic-binary64-roundTiesToEven"
-  | ( "host-fp-exp-local-candidate",
-      ( "SOFTMAX_FP" | "GATED_DELTA_RULE_FP" ) ) ->
+  | "host-fp-exp-local-candidate", "GATED_DELTA_RULE_FP" ->
     "deterministic-binary64-roundTiesToEven-with-host-exp"
+  | "deterministic-fp64-softmax", "SOFTMAX_FP" ->
+    "deterministic-binary64-roundTiesToEven-with-protocol-exp"
   | ( "host-fp-exp-local-candidate",
       ( "SIGMOID_FP"
       | "SOFTPLUS_FP"
@@ -1841,7 +1848,7 @@ let operation_sequence ~opcode =
       "select_max_left_to_right_deterministic";
       "subtract_max_deterministic";
       "check_shifted_score_nonpositive_deterministic";
-      "exp_each_score_host";
+      "exp_each_score_protocol_q256";
       "sum_exponentials_left_to_right_deterministic";
       "divide_each_exponential_by_sum_deterministic";
       "finite_output_check";

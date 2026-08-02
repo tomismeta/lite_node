@@ -3114,18 +3114,18 @@ let check_p0_plus_rejected_results_empty_when_accepted () =
         ~hint_count:0
         ~repair_count:0
         ~affected_opcodes:[];
-      check_transcendental_dependency_catalog
-        report
-        ~entry_count:1
-        ~dependency_count:1
-        ~opcodes:["SOFTMAX_FP"];
-      check_readiness_transcendental_dependency_gate
-        report
-        ~status:"rejected"
-        ~entry_count:1
-        ~dependency_count:1
-        ~blocker:(Some "unresolved_transcendental_dependencies")
-        ~host_blocker:(Some "host_transcendental_exp")
+	      check_transcendental_dependency_catalog
+	        report
+	        ~entry_count:0
+	        ~dependency_count:0
+	        ~opcodes:[];
+	      check_readiness_transcendental_dependency_gate
+	        report
+	        ~status:"accepted"
+	        ~entry_count:0
+	        ~dependency_count:0
+	        ~blocker:None
+	        ~host_blocker:None
     | _ -> failwith "report must be object")
 
 let check_p0_plus_rejected_results_report_outputs () =

@@ -1099,8 +1099,8 @@ let check_inference_profile_surface_coverage () =
       "ATTENTION_SCORES_FP", "deterministic-fp64-accumulation",
       "consensus_candidate",
       "20bfb100d037cb05d3208ed6c35bb36deae747ff2aa9fc1ac78f1078f19b56e5";
-      "SOFTMAX_FP", "host-fp-exp-local-candidate", "local_only",
-      "490d7d3e871e3cecfdeeeebba26ee85c0689fb5cba0801f5aeb0a4f6e10561cc";
+      "SOFTMAX_FP", "deterministic-fp64-softmax", "consensus_candidate",
+      "407122b6630ad06842386561a931d05325e2c206d6fe4cc4429360fd755de549";
       "ATTENTION_WEIGHTED_SUM_FP", "deterministic-fp64-accumulation",
       "consensus_candidate",
       "31ccd36c648f33a0d1adabed83db830100090a49ad956a625cc53be21d2bc3fd";
@@ -1132,7 +1132,7 @@ let check_inference_profile_surface_coverage () =
        "p0 profile catalog root"
        (String.equal
           (string_value "profile_catalog_root" fields)
-          "fc9e224e6a70602b0e672fb2bc5e29f94eb02886dabde344bf2fae48bc00404f");
+          "e26f8ec94dd7ae2976471791d5e6b720637ce19533635877673bc6304c852a98");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "p0 readiness worklist count" (List.length rows = 5);
@@ -1157,9 +1157,9 @@ let check_inference_profile_surface_coverage () =
                 (string_value "validator_readiness_status" row_fields)
                 "rejected");
            check
-             "softmax readiness includes host exp"
+             "softmax readiness includes protocol exp conformance"
              (List.mem
-                "host_fp_exp"
+                "protocol_owned_exp_conformance"
                 (string_list_value "validator_readiness_blockers" row_fields));
            check
              "softmax readiness includes missing execution"
@@ -1175,10 +1175,10 @@ let check_inference_profile_surface_coverage () =
                      | `Assoc class_fields ->
                        String.equal
                          (string_value "blocker_code" class_fields)
-                         "host_fp_exp"
+                         "protocol_owned_exp_conformance"
                        && String.equal
                             (string_value "blocker_class" class_fields)
-                            "host_native_math"
+                            "software_fp64_conformance"
                      | _ -> false)
                    blocker_classes)
             | _ -> failwith "softmax blocker classes must be a list")
@@ -1192,7 +1192,7 @@ let check_inference_profile_surface_coverage () =
        "runtime profile catalog root"
        (String.equal
           (string_value "profile_catalog_root" fields)
-          "636ef93fc29baaf11bc7ad08d302ab0efdf4d4236f550707e8d376e92363da16");
+          "6d4ef8c02c8c4f110167dbb4ab054b903b3fb6afc6372fe5d0e0729186f567f4");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "runtime readiness worklist count" (List.length rows = 17)
@@ -1235,10 +1235,10 @@ let check_inference_profile_surface_coverage () =
   let counts = Profile.status_counts_of_json_gates gates in
   (match Profile.status_counts_json counts with
    | `Assoc fields ->
-     check "surface local-only count" (int_value "local_only" fields = 6);
+     check "surface local-only count" (int_value "local_only" fields = 5);
      check
        "surface consensus-candidate count"
-       (int_value "consensus_candidate" fields = 11);
+       (int_value "consensus_candidate" fields = 12);
      check "surface consensus-ready count" (int_value "consensus_ready" fields = 0);
      check "surface unknown count" (int_value "unknown" fields = 0)
    | _ -> failwith "surface status counts json must be object");
@@ -1268,9 +1268,9 @@ let check_inference_profile_surface_coverage () =
     "surface profile catalog root"
     (match Profile.profile_catalog_root_json gates with
      | `String root ->
-       String.equal
-         root
-         "636ef93fc29baaf11bc7ad08d302ab0efdf4d4236f550707e8d376e92363da16"
+	       String.equal
+	         root
+	         "6d4ef8c02c8c4f110167dbb4ab054b903b3fb6afc6372fe5d0e0729186f567f4"
      | _ -> false);
   check
     "empty profile catalog root"
@@ -1323,10 +1323,9 @@ let check_inference_profile_surface_coverage () =
      check_blocker_class
        "binary16_scale_decode"
        "encoding_or_layout";
-     check_blocker
-       "host_fp_exp"
-       ["SIGMOID_FP"; "SOFTPLUS_FP"; "SILU_FP"; "SOFTMAX_FP";
-        "GATED_DELTA_RULE_FP"];
+	     check_blocker
+	       "host_fp_exp"
+	       ["SIGMOID_FP"; "SOFTPLUS_FP"; "SILU_FP"; "GATED_DELTA_RULE_FP"];
      check_blocker_class
        "host_fp_exp"
        "host_native_math";
@@ -1373,10 +1372,10 @@ let check_inference_profile_surface_coverage () =
        "software_fp64_conformance"
        "fp64_sqrt_conformance"
        "RMSNORM_FP_EPS";
-     check_class
-       "host_native_math"
-       "host_fp_exp"
-       "SOFTMAX_FP";
+	     check_class
+	       "host_native_math"
+	       "host_fp_exp"
+	       "GATED_DELTA_RULE_FP";
      check_class
        "safety_policy"
        "atomic_writeback"
@@ -1482,18 +1481,17 @@ let check_remaining_p0_profile_obligations () =
     (List.mem "fp64_divide_conformance" l2_blockers);
   let softmax_gate = profile_gate "SOFTMAX_FP" in
   check
-    "softmax exp-local profile"
+    "softmax deterministic profile"
     (String.equal
        (string_value "name" softmax_gate)
-       "host-fp-exp-local-candidate");
+       "deterministic-fp64-softmax");
   check
-    "softmax remains local-only"
-    (String.equal (string_value "consensus_status" softmax_gate) "local_only");
-  check_protocol_owned_transcendental_obligation "SOFTMAX_FP" softmax_gate;
+    "softmax is consensus candidate"
+    (String.equal (string_value "consensus_status" softmax_gate) "consensus_candidate");
   check
-    "softmax requires protocol-owned exp replacement"
+    "softmax binds protocol-owned exp qualification"
     (list_contains_substring
-       "protocol-owned deterministic software math"
+       "protocol-owned nonpositive exp"
        (string_list_value "required_actions" softmax_gate));
   let softmax_blockers =
     string_list_value "consensus_blocker_codes" softmax_gate
@@ -1511,11 +1509,17 @@ let check_remaining_p0_profile_obligations () =
     "softmax reduction blocker"
     (List.mem "fp64_reduction_conformance" softmax_blockers);
   check
-    "softmax exp blocker"
-    (List.mem "host_fp_exp" softmax_blockers);
+    "softmax protocol exp blocker"
+    (List.mem "protocol_owned_exp_conformance" softmax_blockers);
+  check
+    "softmax host exp retired"
+    (not (List.mem "host_fp_exp" softmax_blockers));
   check
     "softmax divide conformance blocker"
     (List.mem "fp64_divide_conformance" softmax_blockers);
+  check
+    "softmax effort reauthorization blocker"
+    (List.mem "software_exp_effort_reauthorization" softmax_blockers);
   check
     "softmax nonpositive exp gate"
     (list_contains_substring
@@ -1526,12 +1530,17 @@ let check_remaining_p0_profile_obligations () =
      check
        "softmax contract profile"
        (String.equal
-          (string_value "profile_name" contract)
-          "host-fp-exp-local-candidate");
+         (string_value "profile_name" contract)
+          "deterministic-fp64-softmax");
      check
        "softmax profile records exp gate"
        (list_contains_substring
-          "check_shifted_score_nonpositive"
+         "check_shifted_score_nonpositive"
+         (string_list_value "operation_sequence" contract));
+     check
+       "softmax profile records protocol exp"
+       (List.mem
+          "exp_each_score_protocol_q256"
           (string_list_value "operation_sequence" contract));
      check
        "softmax edge policy records positive shift rejection"
@@ -1587,33 +1596,36 @@ let check_remaining_p0_profile_obligations () =
           "reject_positive_log_decay_before_state_mutation"
           (string_list_value "edge_value_policy" contract))
    | _ -> failwith "missing delta profile contract");
-  List.iter
-    (fun opcode ->
-      (match
-         Profile.validate_for_opcode
-           ~opcode
-           ~profile:"host-fp-local-candidate"
-       with
-       | Error (Profile.Unsupported_opcode_profile { opcode = actual; profile; expected }) ->
-         check (opcode ^ " old host profile opcode") (String.equal actual opcode);
-         check
-           (opcode ^ " old host profile rejected")
-           (String.equal profile "host-fp-local-candidate");
-         check
-           (opcode ^ " old host profile expected")
-           (String.equal expected "host-fp-exp-local-candidate")
-       | Error error -> failwith (Profile.error_message error)
-       | Ok _ -> failwith (opcode ^ " should reject old host profile"));
-      match Profile.validate_for_opcode ~opcode ~profile:"q16-exact" with
-      | Error (Profile.Unsupported_opcode_profile { opcode = actual; profile; expected }) ->
-        check (opcode ^ " q16 overclaim opcode") (String.equal actual opcode);
-        check (opcode ^ " q16 overclaim profile") (String.equal profile "q16-exact");
-        check
-          (opcode ^ " q16 overclaim expected")
-          (String.equal expected "host-fp-exp-local-candidate")
-      | Error error -> failwith (Profile.error_message error)
-      | Ok _ -> failwith (opcode ^ " should reject q16 overclaim"))
-    ["SOFTMAX_FP"; "GATED_DELTA_RULE_FP"];
+	  List.iter
+	    (fun (opcode, expected_profile) ->
+	      (match
+	         Profile.validate_for_opcode
+	           ~opcode
+	           ~profile:"host-fp-local-candidate"
+	       with
+	       | Error (Profile.Unsupported_opcode_profile { opcode = actual; profile; expected }) ->
+	         check (opcode ^ " old host profile opcode") (String.equal actual opcode);
+	         check
+	           (opcode ^ " old host profile rejected")
+	           (String.equal profile "host-fp-local-candidate");
+	         check
+	           (opcode ^ " old host profile expected")
+	           (String.equal expected expected_profile)
+	       | Error error -> failwith (Profile.error_message error)
+	       | Ok _ -> failwith (opcode ^ " should reject old host profile"));
+	      match Profile.validate_for_opcode ~opcode ~profile:"q16-exact" with
+	      | Error (Profile.Unsupported_opcode_profile { opcode = actual; profile; expected }) ->
+	        check (opcode ^ " q16 overclaim opcode") (String.equal actual opcode);
+	        check (opcode ^ " q16 overclaim profile") (String.equal profile "q16-exact");
+	        check
+	          (opcode ^ " q16 overclaim expected")
+	          (String.equal expected expected_profile)
+	      | Error error -> failwith (Profile.error_message error)
+	      | Ok _ -> failwith (opcode ^ " should reject q16 overclaim"))
+	    [
+	      "SOFTMAX_FP", "deterministic-fp64-softmax";
+	      "GATED_DELTA_RULE_FP", "host-fp-exp-local-candidate";
+	    ];
   let oracle_root gate =
     match List.assoc_opt "profile_contract" gate with
     | Some (`Assoc contract) -> string_value "oracle_vector_root" contract
@@ -2520,17 +2532,19 @@ let check_p0_vm_semantics_contracts () =
           | None -> failwith (opcode ^ " missing vm semantics root"))
        | _ -> failwith (opcode ^ " missing vm semantics contract"))
     Template.p0_opcodes;
-  (match Template.vm_semantics_contract_json ~opcode:"SOFTMAX_FP" with
-   | Some (`Assoc semantics) ->
-     check
-       "softmax semantics marks host exp"
-       (list_contains_substring
-          "native host exp"
-          (string_list_value "arithmetic_policy" semantics));
-     check
-       "softmax semantics marks local-only"
-       (contains_substring "local-only" (string_value "consensus_note" semantics))
-   | _ -> failwith "missing softmax vm semantics contract");
+	  (match Template.vm_semantics_contract_json ~opcode:"SOFTMAX_FP" with
+	   | Some (`Assoc semantics) ->
+	     check
+	       "softmax semantics marks protocol exp"
+	       (list_contains_substring
+	          "protocol-owned deterministic nonpositive binary64 exp"
+	          (string_list_value "arithmetic_policy" semantics));
+	     check
+	       "softmax semantics marks consensus candidate"
+	       (contains_substring
+	          "consensus candidate"
+	          (string_value "consensus_note" semantics))
+	   | _ -> failwith "missing softmax vm semantics contract");
   (match Template.vm_semantics_contract_json ~opcode:"GATED_DELTA_RULE_FP" with
    | Some (`Assoc semantics) ->
      check

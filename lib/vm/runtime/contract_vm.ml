@@ -3243,7 +3243,7 @@ let exec_one st op =
               | Some shifted_bits ->
                 (match Inference_fp64.compare shifted_bits 0L with
                  | Some cmp when cmp <= 0 ->
-                   (match host_fp64_exp_nonpositive_bits shifted_bits with
+                   (match Inference_fp64.exp_nonpositive shifted_bits with
                     | Some value_bits ->
                       Array.unsafe_set exps index value_bits;
                       (match Inference_fp64.add !sum_exp_bits value_bits with

@@ -350,6 +350,107 @@ let inverse_sqrt bits =
   else
     None
 
+let exp_fraction_bits = 256
+
+let exp_one =
+  Z.shift_left Z.one exp_fraction_bits
+
+let exp_ln_two =
+  Z.of_string "80260960185991308862233904206310070533990667611589946606122867505419956976172"
+
+let exp_min_input =
+  Z.neg (Z.mul (Z.of_int 750) exp_one)
+
+let exp_taylor_terms = 80
+
+let round_signed_ratio_even numerator denominator =
+  if Z.sign numerator < 0 then
+    Z.neg (round_ratio_even (Z.neg numerator) denominator)
+  else
+    round_ratio_even numerator denominator
+
+let round_signed_shift_right_even value shift =
+  if shift <= 0 then
+    Z.shift_left value (-shift)
+  else if Z.sign value < 0 then
+    Z.neg (round_shift_right_even (Z.neg value) shift)
+  else
+    round_shift_right_even value shift
+
+let fixed_of_value value =
+  let magnitude =
+    round_scaled_integer
+      value.significand
+      (value.exponent + exp_fraction_bits)
+  in
+  if value.negative then Z.neg magnitude else magnitude
+
+let fixed_mul left right =
+  round_signed_shift_right_even (Z.mul left right) exp_fraction_bits
+
+let fixed_div_int value divisor =
+  round_signed_ratio_even value (Z.of_int divisor)
+
+let exp_reduced_nonpositive value =
+  let rec loop index term sum =
+    if index > exp_taylor_terms || Z.sign term = 0 then
+      sum
+    else
+      let next = fixed_div_int (fixed_mul term value) index in
+      loop (index + 1) next (Z.add sum next)
+  in
+  loop 1 exp_one exp_one
+
+let normalize_exp_reduction quotient remainder =
+  let rec lower quotient remainder =
+    if Z.sign remainder > 0 then
+      lower
+        (quotient + 1)
+        (Z.sub remainder exp_ln_two)
+    else
+      quotient, remainder
+  in
+  let rec raise quotient remainder =
+    if Z.lt remainder (Z.neg exp_ln_two) then
+      raise
+        (quotient - 1)
+        (Z.add remainder exp_ln_two)
+    else
+      quotient, remainder
+  in
+  let quotient, remainder = lower quotient remainder in
+  raise quotient remainder
+
+let exp_nonpositive bits =
+  match compare bits 0L, decode bits with
+  | Some cmp, Some value when cmp <= 0 ->
+    if Z.sign value.significand = 0 then
+      Some one_bits
+    else
+      let fixed = fixed_of_value value in
+      if Z.leq fixed exp_min_input then
+        Some 0L
+      else
+        let quotient =
+          Z.to_int (Z.div (Z.neg fixed) exp_ln_two)
+        in
+        let remainder =
+          Z.add fixed (Z.mul (Z.of_int quotient) exp_ln_two)
+        in
+        let quotient, remainder =
+          normalize_exp_reduction quotient remainder
+        in
+        let output = exp_reduced_nonpositive remainder in
+        if Z.sign output <= 0 then
+          None
+        else
+          round_positive_ratio
+            ~negative:false
+            output
+            Z.one
+            (-(exp_fraction_bits + quotient))
+  | _ -> None
+
 let of_int value =
   let value = Z.of_int value in
   if Z.sign value = 0 then

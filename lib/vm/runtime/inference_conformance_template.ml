@@ -388,7 +388,8 @@ let vm_semantics_contract_json ~opcode =
           `String "for index ascending: replace max_score only when compare(scores[index], max_score) is greater than zero";
           `String "shifted[index] = scores[index] - max_score using deterministic finite binary64 subtraction";
           `String "every shifted score must compare less than or equal to positive zero";
-          `String "exp(shifted[index]) currently uses native host exp and is local-only";
+          `String "exp(shifted[index]) uses protocol-owned deterministic nonpositive binary64 exp";
+          `String "protocol exp uses Q256 range reduction, round-to-nearest ln(2), 80 Taylor terms, and deterministic ties-to-even binary64 composition";
           `String "sum_exp starts as positive zero binary64 and accumulates exps in index order";
           `String "output[index] = exp[index] / sum_exp using deterministic finite binary64 division";
         ];
@@ -403,7 +404,7 @@ let vm_semantics_contract_json ~opcode =
           `String "the opcode does not mutate session ABI registers";
         ];
         "consensus_note",
-        `String "native host exp keeps this VM semantics contract local-only until a deterministic exp profile replaces it";
+        `String "protocol-owned nonpositive exp is deterministic but remains a consensus candidate until P0 vectors and cross-platform conformance are accepted";
         "effort_policy",
         `List [
           `String "opcode base effort is 100";
@@ -416,7 +417,7 @@ let vm_semantics_contract_json ~opcode =
       (`Assoc [
         "schema", `String "octra.inference.vm-semantics.v1";
         "opcode", `String opcode;
-        "bytecode", `String "0x8c";
+        "bytecode", `String "0x8e";
         "signature",
         `String
           "GATED_DELTA_RULE_FP(output, state_dst, q, k, v, log_decay, beta, state, t, q_heads, k_heads, v_heads, key_dim, value_dim)";

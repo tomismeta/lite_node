@@ -181,9 +181,9 @@ let check_p0_catalog_exports_transcendental_dependencies () =
          (string_value "next_action" host_gate)
          "implement_protocol_owned_transcendental_replacements");
     check
-      "host native math gate softmax"
+      "host native math gate gated delta"
       (List.mem
-         (`String "SOFTMAX_FP")
+         (`String "GATED_DELTA_RULE_FP")
          (list_value "blocked_opcodes" host_gate));
     check
       "host native math gate host exp"
@@ -195,51 +195,9 @@ let check_p0_catalog_exports_transcendental_dependencies () =
       | Some fields -> fields
       | None -> failwith ("missing dependency entry: " ^ opcode)
     in
-    let softmax = entry "SOFTMAX_FP" in
     check
-      "softmax local only"
-      (String.equal (string_value "status" softmax) "local_only");
-    check
-      "softmax native exp"
-      (List.mem
-         "native_exp_nonpositive"
-         (string_list_value "dependencies" softmax));
-    check
-      "softmax replacement"
-      (List.mem
-         "protocol_owned_exp_nonpositive_binary64"
-         (string_list_value "required_replacements" softmax));
-    check
-      "softmax action"
-      (String.equal
-         (string_value "consensus_action" softmax)
-         "qualified_protocol_owned_replacement_required_before_validator_admission");
-    check
-      "softmax consensus admission blocked"
-      (String.equal
-         (string_value "consensus_admission_status" softmax)
-         "blocked");
-    check
-      "softmax validator blocker"
-      (String.equal
-         (string_value "validator_admission_blocker" softmax)
-         "host_transcendental_exp");
-    check
-      "softmax punitive status"
-      (String.equal
-         (string_value "punitive_math_status" softmax)
-         "required_before_consensus");
-    let softmax_explanation = assoc_value "formal_explanation" softmax in
-    check
-      "softmax explanation status"
-      (String.equal
-         (string_value "status" softmax_explanation)
-         "formally_explained");
-    check
-      "softmax acceptance gates"
-      (List.mem
-         (`String "cross_platform_matrix_matches")
-         (list_value "acceptance_gates" softmax));
+      "softmax retired from host dependency catalog"
+      (List.find_map (dependency_entry "SOFTMAX_FP") entries = None);
     let gated_delta = entry "GATED_DELTA_RULE_FP" in
     check
       "gated delta local only"
@@ -281,8 +239,8 @@ let check_all_catalog_exports_complete_transcendental_inventory () =
   | `Assoc fields ->
     let catalog = assoc_value "transcendental_dependency_catalog" fields in
     let entries = list_value "entries" catalog in
-    check "entry count" (int_value "entry_count" catalog = 6);
-    check "dependency count" (int_value "dependency_count" catalog = 9);
+    check "entry count" (int_value "entry_count" catalog = 5);
+    check "dependency count" (int_value "dependency_count" catalog = 8);
     check
       "dependency catalog root"
       (String.equal
@@ -296,7 +254,6 @@ let check_all_catalog_exports_complete_transcendental_inventory () =
            "ROPE_APPLY_INDEXED_FP";
            "SIGMOID_FP";
            "SILU_FP";
-           "SOFTMAX_FP";
            "SOFTPLUS_FP";
          ]);
     let entry opcode =
