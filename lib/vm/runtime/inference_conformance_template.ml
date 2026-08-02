@@ -463,13 +463,13 @@ let vm_semantics_contract_json ~opcode =
           `String "state is copied before recurrence mutation";
           `String "scale = deterministic finite binary64 inverse_sqrt(key_dim)";
           `String "for timestep ascending and value-head ascending: q_head = head mod q_heads, k_head = head mod k_heads";
-          `String "decay = exp(log_decay[timestep, head]) using native host exp gated to finite nonpositive input";
+          `String "decay = exp_nonpositive(log_decay[timestep, head]) using protocol-owned Q256 range reduction, ln(2), 80 fixed Taylor terms, and deterministic binary64 composition";
           `String "state[head,:,:] *= decay in row-major state order";
           `String "memory[row] = sum_col state[row,col] * k[col] in col ascending order";
           `String "delta[row] = (v[row] - memory[row]) * beta[timestep, head]";
           `String "state[row,col] += k[col] * delta[row] in row-major order";
           `String "output[row] = sum_col state[row,col] * q[col] * scale in col ascending order";
-          `String "all non-exp multiply, add, subtract, divide, and sqrt steps use the deterministic finite binary64 core";
+          `String "all multiply, add, subtract, divide, sqrt, and output-scaling steps use the deterministic finite binary64 core";
         ];
         "read_write_policy",
         `List [
@@ -483,7 +483,7 @@ let vm_semantics_contract_json ~opcode =
           `String "the opcode does not mutate session ABI registers";
         ];
         "consensus_note",
-        `String "native host exp keeps this VM semantics contract local-only until deterministic decay semantics replace it";
+        `String "protocol-owned nonpositive exp is deterministic but remains a consensus candidate until P0 vectors and cross-platform conformance are accepted";
         "effort_policy",
         `List [
           `String "opcode base effort is 200";

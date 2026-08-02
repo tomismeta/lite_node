@@ -167,51 +167,32 @@ let check_p0_catalog_exports_transcendental_dependencies () =
          (Profile.transcendental_dependency_catalog_root (`Assoc catalog)));
     let entries = list_value "entries" catalog in
     let host_gate = assoc_value "host_native_math_gate" catalog in
+    check "p0 dependency entries retired" (entries = []);
     check
-      "host native math gate rejected"
-      (String.equal (string_value "status" host_gate) "rejected");
+      "host native math gate accepted"
+      (String.equal (string_value "status" host_gate) "accepted");
     check
-      "host native math gate blocks consensus"
+      "host native math gate does not block consensus"
       (String.equal
          (string_value "consensus_admission_status" host_gate)
-         "blocked");
+         "not_blocked");
     check
       "host native math gate next action"
       (String.equal
          (string_value "next_action" host_gate)
-         "implement_protocol_owned_transcendental_replacements");
+         "continue_validator_readiness");
     check
-      "host native math gate gated delta"
-      (List.mem
-         (`String "GATED_DELTA_RULE_FP")
-         (list_value "blocked_opcodes" host_gate));
+      "host native math gate has no blocked opcodes"
+      (list_value "blocked_opcodes" host_gate = []);
     check
-      "host native math gate host exp"
-      (List.mem
-         (`String "host_transcendental_exp")
-         (list_value "validator_admission_blockers" host_gate));
-    let entry opcode =
-      match List.find_map (dependency_entry opcode) entries with
-      | Some fields -> fields
-      | None -> failwith ("missing dependency entry: " ^ opcode)
-    in
+      "host native math gate has no blockers"
+      (list_value "validator_admission_blockers" host_gate = []);
     check
       "softmax retired from host dependency catalog"
       (List.find_map (dependency_entry "SOFTMAX_FP") entries = None);
-    let gated_delta = entry "GATED_DELTA_RULE_FP" in
     check
-      "gated delta local only"
-      (String.equal (string_value "status" gated_delta) "local_only");
-    check
-      "gated delta native exp"
-      (List.mem
-         "native_exp_nonpositive"
-         (string_list_value "dependencies" gated_delta));
-    check
-      "gated delta validator blocker"
-      (String.equal
-         (string_value "validator_admission_blocker" gated_delta)
-         "host_transcendental_exp")
+      "gated delta retired from host dependency catalog"
+      (List.find_map (dependency_entry "GATED_DELTA_RULE_FP") entries = None)
   | _ -> failwith "catalog output must be an object"
 
 let int_value name fields =
@@ -239,8 +220,8 @@ let check_all_catalog_exports_complete_transcendental_inventory () =
   | `Assoc fields ->
     let catalog = assoc_value "transcendental_dependency_catalog" fields in
     let entries = list_value "entries" catalog in
-    check "entry count" (int_value "entry_count" catalog = 5);
-    check "dependency count" (int_value "dependency_count" catalog = 8);
+    check "entry count" (int_value "entry_count" catalog = 4);
+    check "dependency count" (int_value "dependency_count" catalog = 7);
     check
       "dependency catalog root"
       (String.equal
@@ -250,7 +231,6 @@ let check_all_catalog_exports_complete_transcendental_inventory () =
       "dependency opcodes"
       (sorted_dependency_opcodes entries
        = [
-           "GATED_DELTA_RULE_FP";
            "ROPE_APPLY_INDEXED_FP";
            "SIGMOID_FP";
            "SILU_FP";

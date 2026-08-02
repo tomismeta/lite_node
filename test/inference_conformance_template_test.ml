@@ -1080,8 +1080,9 @@ let check_inference_profile_surface_coverage () =
       "CAUSAL_DEPTHWISE_CONV1D_FP", "deterministic-fp64-accumulation",
       "consensus_candidate",
       "df645d83fe5fa0e32a7d5349b9b230de9002c0a980e32eb3d6582852fa05d545";
-      "GATED_DELTA_RULE_FP", "host-fp-exp-local-candidate", "local_only",
-      "aeed9783cd2d88b8078aa66f154a658d609c31bed048fcd05259264f152f4225";
+      "GATED_DELTA_RULE_FP", "deterministic-fp64-gated-delta",
+      "consensus_candidate",
+      "f79dba18fda942ef0bc862c017b643688d45d15be1b46b0acf7494936cfe2bf0";
       "RMSNORM_FP_EPS", "deterministic-fp64-normalization",
       "consensus_candidate",
       "a77dc41d33540e3c6872f830b4c0df1280d23ea9f0a8e1ff2273039c23fe88f9";
@@ -1130,9 +1131,9 @@ let check_inference_profile_surface_coverage () =
      check "p0 profile catalog count" (int_value "opcode_count" fields = 5);
      check
        "p0 profile catalog root"
-       (String.equal
-          (string_value "profile_catalog_root" fields)
-          "e26f8ec94dd7ae2976471791d5e6b720637ce19533635877673bc6304c852a98");
+	       (String.equal
+	          (string_value "profile_catalog_root" fields)
+	          "8fcfd494596c84d4c2fb456acd3087ecb4882b46e5a933fb70662b0f4e42b8ab");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "p0 readiness worklist count" (List.length rows = 5);
@@ -1190,9 +1191,9 @@ let check_inference_profile_surface_coverage () =
      check "runtime profile catalog count" (int_value "opcode_count" fields = 17);
      check
        "runtime profile catalog root"
-       (String.equal
-          (string_value "profile_catalog_root" fields)
-          "6d4ef8c02c8c4f110167dbb4ab054b903b3fb6afc6372fe5d0e0729186f567f4");
+	       (String.equal
+	          (string_value "profile_catalog_root" fields)
+	          "73e0d05be057622b36931c6c604735658a861e5fd1bdb5d07e1c0e4eec6c41f2");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "runtime readiness worklist count" (List.length rows = 17)
@@ -1235,10 +1236,10 @@ let check_inference_profile_surface_coverage () =
   let counts = Profile.status_counts_of_json_gates gates in
   (match Profile.status_counts_json counts with
    | `Assoc fields ->
-     check "surface local-only count" (int_value "local_only" fields = 5);
+     check "surface local-only count" (int_value "local_only" fields = 4);
      check
        "surface consensus-candidate count"
-       (int_value "consensus_candidate" fields = 12);
+       (int_value "consensus_candidate" fields = 13);
      check "surface consensus-ready count" (int_value "consensus_ready" fields = 0);
      check "surface unknown count" (int_value "unknown" fields = 0)
    | _ -> failwith "surface status counts json must be object");
@@ -1270,7 +1271,7 @@ let check_inference_profile_surface_coverage () =
      | `String root ->
 	       String.equal
 	         root
-	         "6d4ef8c02c8c4f110167dbb4ab054b903b3fb6afc6372fe5d0e0729186f567f4"
+		         "73e0d05be057622b36931c6c604735658a861e5fd1bdb5d07e1c0e4eec6c41f2"
      | _ -> false);
   check
     "empty profile catalog root"
@@ -1324,8 +1325,8 @@ let check_inference_profile_surface_coverage () =
        "binary16_scale_decode"
        "encoding_or_layout";
 	     check_blocker
-	       "host_fp_exp"
-	       ["SIGMOID_FP"; "SOFTPLUS_FP"; "SILU_FP"; "GATED_DELTA_RULE_FP"];
+      "host_fp_exp"
+      ["SIGMOID_FP"; "SOFTPLUS_FP"; "SILU_FP"];
      check_blocker_class
        "host_fp_exp"
        "host_native_math";
@@ -1375,7 +1376,7 @@ let check_inference_profile_surface_coverage () =
 	     check_class
 	       "host_native_math"
 	       "host_fp_exp"
-	       "GATED_DELTA_RULE_FP";
+	       "SILU_FP";
      check_class
        "safety_policy"
        "atomic_writeback"
@@ -1550,13 +1551,13 @@ let check_remaining_p0_profile_obligations () =
    | _ -> failwith "missing softmax profile contract");
   let delta_gate = profile_gate "GATED_DELTA_RULE_FP" in
   check
-    "delta exp-local profile"
+    "delta deterministic profile"
     (String.equal
        (string_value "name" delta_gate)
-       "host-fp-exp-local-candidate");
+       "deterministic-fp64-gated-delta");
   check
-    "delta remains local-only"
-    (String.equal (string_value "consensus_status" delta_gate) "local_only");
+    "delta is consensus candidate"
+    (String.equal (string_value "consensus_status" delta_gate) "consensus_candidate");
   check_protocol_owned_transcendental_obligation "GATED_DELTA_RULE_FP" delta_gate;
   let delta_blockers =
     string_list_value "consensus_blocker_codes" delta_gate
@@ -1565,8 +1566,14 @@ let check_remaining_p0_profile_obligations () =
     "delta recurrence blocker"
     (List.mem "fp64_recurrence_add_mul_conformance" delta_blockers);
   check
-    "delta exp blocker"
-    (List.mem "host_fp_exp" delta_blockers);
+    "delta protocol exp blocker"
+    (List.mem "protocol_owned_exp_conformance" delta_blockers);
+  check
+    "delta has no host exp blocker"
+    (not (List.mem "host_fp_exp" delta_blockers));
+  check
+    "delta software exp effort blocker"
+    (List.mem "software_exp_effort_reauthorization" delta_blockers);
   check
     "delta sqrt blocker"
     (List.mem "fp64_sqrt_conformance" delta_blockers);
@@ -1576,7 +1583,7 @@ let check_remaining_p0_profile_obligations () =
   check
     "delta nonpositive exp gate"
     (list_contains_substring
-       "less than or equal to +0.0"
+       "protocol-owned"
        (string_list_value "local_semantics" delta_gate));
   (match List.assoc_opt "profile_contract" delta_gate with
    | Some (`Assoc contract) ->
@@ -1584,12 +1591,12 @@ let check_remaining_p0_profile_obligations () =
        "delta contract profile"
        (String.equal
           (string_value "profile_name" contract)
-          "host-fp-exp-local-candidate");
+          "deterministic-fp64-gated-delta");
      check
        "delta profile records exp gate"
        (list_contains_substring
-          "check_log_decay_nonpositive"
-          (string_list_value "operation_sequence" contract));
+	          "compute_decay_protocol_q256"
+	          (string_list_value "operation_sequence" contract));
      check
        "delta edge policy records positive decay rejection"
        (List.mem
@@ -1624,7 +1631,7 @@ let check_remaining_p0_profile_obligations () =
 	      | Ok _ -> failwith (opcode ^ " should reject q16 overclaim"))
 	    [
 	      "SOFTMAX_FP", "deterministic-fp64-softmax";
-	      "GATED_DELTA_RULE_FP", "host-fp-exp-local-candidate";
+	      "GATED_DELTA_RULE_FP", "deterministic-fp64-gated-delta";
 	    ];
   let oracle_root gate =
     match List.assoc_opt "profile_contract" gate with
@@ -2552,14 +2559,16 @@ let check_p0_vm_semantics_contracts () =
        (list_contains_substring
           "delta[row] = (v[row] - memory[row]) * beta"
           (string_list_value "arithmetic_policy" semantics));
-     check
-       "gated delta semantics marks host exp"
-       (list_contains_substring
-          "native host exp"
-          (string_list_value "arithmetic_policy" semantics));
-     check
-       "gated delta semantics marks local-only"
-       (contains_substring "local-only" (string_value "consensus_note" semantics))
+	    check
+	      "gated delta semantics marks protocol exp"
+	      (list_contains_substring
+	         "protocol-owned Q256"
+	         (string_list_value "arithmetic_policy" semantics));
+	    check
+	      "gated delta semantics marks consensus candidate"
+	      (contains_substring
+	         "consensus candidate"
+	         (string_value "consensus_note" semantics))
    | _ -> failwith "missing gated delta vm semantics contract");
   (match Template.vm_semantics_contract_json ~opcode:"RMSNORM_FP_EPS" with
    | Some (`Assoc semantics) ->

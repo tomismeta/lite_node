@@ -2647,7 +2647,7 @@ let exec_one st op =
                        in
                        let decay_bits =
                          match
-                           host_fp64_exp_nonpositive_bits decay_input_bits
+                          Inference_fp64.exp_nonpositive decay_input_bits
                          with
                          | Some decay_bits -> decay_bits
                          | None -> ok := false; 0L

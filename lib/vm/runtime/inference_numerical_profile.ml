@@ -879,6 +879,18 @@ let of_name = function
         "pin max selection, underflow, overflow, overlap, effort, and atomic writeback policy";
       ];
     }
+  | "deterministic-fp64-gated-delta" as name ->
+    Ok {
+      name;
+      consensus_status = Consensus_candidate;
+      summary =
+        "deterministic finite binary64 Gated Delta recurrence profile with protocol-owned nonpositive exp";
+      required_actions = [
+        "bind the numerical profile root in the model or request authority";
+        "qualify protocol-owned nonpositive exp, recurrence add/mul, dot-product, reciprocal division, and sqrt behavior across validators";
+        "pin head mapping, decay order, beta application, state update order, aliasing, effort, and atomic writeback policy";
+      ];
+    }
   | "deterministic-q1-g128-fp64-linear" as name ->
     Ok {
       name;
@@ -941,7 +953,7 @@ let current_runtime_profile_entries = [
   "SOFTPLUS_FP", "host-fp-exp-local-candidate";
   "SILU_FP", "host-fp-exp-local-candidate";
   "CAUSAL_DEPTHWISE_CONV1D_FP", "deterministic-fp64-accumulation";
-  "GATED_DELTA_RULE_FP", "host-fp-exp-local-candidate";
+  "GATED_DELTA_RULE_FP", "deterministic-fp64-gated-delta";
   "RMSNORM_FP_EPS", "deterministic-fp64-normalization";
   "L2NORM_FP", "deterministic-fp64-normalization";
   "ELEMWISE_MUL_FP", "deterministic-fp64-elementwise";
@@ -1073,8 +1085,8 @@ let local_semantics ~opcode =
     [
       "query, key, value, decay, beta, and recurrent-state cells are finite binary64 values";
       "value heads map to query and key heads by modulo";
-      "finite log_decay inputs must deterministically compare less than or equal to +0.0 before native exp";
-      "state decay uses native exp(log_decay) over the nonpositive domain and query-scale sqrt uses deterministic finite binary64";
+      "finite log_decay inputs must deterministically compare less than or equal to +0.0 before protocol-owned exp";
+      "state decay uses protocol-owned exp_nonpositive(log_decay) over the nonpositive domain and query-scale sqrt uses deterministic finite binary64";
       "integer key-dimension conversion, query-scale reciprocal division, recurrence add/mul, and output scaling multiply use deterministic finite binary64";
       "loop order is timestep, value head, value row, key column";
       "output and next-state cells are written only after both buffers are finite";
@@ -1217,7 +1229,7 @@ let consensus_obligations ~opcode =
     ]
   | "GATED_DELTA_RULE_FP" ->
     [
-      "replace native binary64 exp for state decay with protocol-owned deterministic exp behavior";
+      "bind protocol-owned deterministic nonpositive exp behavior for state decay before consensus admission";
       "pin deterministic finite nonpositive log_decay gate before protocol-owned deterministic exp evaluation";
       "qualify deterministic binary64 recurrence add/mul, dot-product, and reciprocal division behavior";
       "qualify deterministic binary64 query-scale sqrt behavior";
@@ -1365,7 +1377,8 @@ let consensus_blocker_codes ~opcode =
     [
       "fp64_recurrence_add_mul_conformance";
       "state_transition_order";
-      "host_fp_exp";
+      "protocol_owned_exp_conformance";
+      "software_exp_effort_reauthorization";
       "fp64_sqrt_conformance";
       "fp64_divide_conformance";
       "alias_rejection";
@@ -1464,17 +1477,7 @@ let consensus_blocker_codes ~opcode =
 let native_dependency_details ~opcode =
   match opcode with
   | "SOFTMAX_FP" -> None
-  | "GATED_DELTA_RULE_FP" ->
-    Some
-      ( ["native_exp_nonpositive"],
-        ["exp(log_decay[timestep, value_head])"],
-        ["protocol_owned_exp_nonpositive_binary64"],
-        [
-          "state_decay_tail";
-          "negative_subnormal_decay";
-          "positive_log_decay_reject";
-          "state_writeback_atomicity";
-        ] )
+  | "GATED_DELTA_RULE_FP" -> None
   | "SIGMOID_FP" ->
     Some
       ( ["native_exp_nonpositive"],
@@ -1742,8 +1745,8 @@ let arithmetic_domain ~profile ~opcode =
     "deterministic-binary64-elementwise-add"
   | "deterministic-fp64-softmax", "SOFTMAX_FP" ->
     "deterministic-binary64-compare-shift-protocol-exp-sum-divide"
-  | "host-fp-exp-local-candidate", "GATED_DELTA_RULE_FP" ->
-    "deterministic-binary64-nonpositive-exp-gate-recurrence-sqrt-divide-host-exp"
+  | "deterministic-fp64-gated-delta", "GATED_DELTA_RULE_FP" ->
+    "deterministic-binary64-nonpositive-protocol-exp-recurrence-sqrt-divide"
   | "host-fp-exp-local-candidate", "SIGMOID_FP" ->
     "deterministic-binary64-sigmoid-nonpositive-exp-gate-host-exp"
   | "host-fp-exp-local-candidate", "SOFTPLUS_FP" ->
@@ -1772,8 +1775,8 @@ let rounding_mode ~profile ~opcode =
   | ( "deterministic-fp64-normalization",
       ( "RMSNORM_FP_EPS" | "L2NORM_FP" ) ) ->
     "deterministic-binary64-roundTiesToEven"
-  | "host-fp-exp-local-candidate", "GATED_DELTA_RULE_FP" ->
-    "deterministic-binary64-roundTiesToEven-with-host-exp"
+  | "deterministic-fp64-gated-delta", "GATED_DELTA_RULE_FP" ->
+    "deterministic-binary64-roundTiesToEven-with-protocol-exp"
   | "deterministic-fp64-softmax", "SOFTMAX_FP" ->
     "deterministic-binary64-roundTiesToEven-with-protocol-exp"
   | ( "host-fp-exp-local-candidate",
@@ -1890,7 +1893,7 @@ let operation_sequence ~opcode =
       "snapshot_operands_and_state";
       "iterate_timestep_value_head_row_column";
       "check_log_decay_nonpositive_deterministic";
-      "compute_decay_host";
+      "compute_decay_protocol_q256";
       "compute_query_scale_sqrt_deterministic";
       "compute_query_scale_reciprocal_deterministic";
       "apply_state_decay_deterministic";
