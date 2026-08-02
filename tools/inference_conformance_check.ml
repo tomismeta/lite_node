@@ -1621,6 +1621,71 @@ let producer_repair_manifest ?corpus_root hints =
     "hints", `List hints;
   ]
 
+let producer_static_preflight_gate
+    ~schema_status
+    ~root_binding_counts
+    ~vm_semantics_binding_counts
+    ~abi_declaration_binding_counts
+    repair_manifest =
+  let schema_accepted = String.equal schema_status "accepted" in
+  let roots_ready =
+    Profile.root_bindings_are_consensus_ready root_binding_counts
+  in
+  let vm_semantics_ready =
+    Profile.root_bindings_are_consensus_ready vm_semantics_binding_counts
+  in
+  let abi_ready =
+    Profile.root_bindings_are_consensus_ready abi_declaration_binding_counts
+  in
+  let producer_repair_ready =
+    match repair_manifest with
+    | `Assoc fields ->
+      (match string_field "status" fields with
+       | Some "no_hints" -> true
+       | _ -> false)
+    | _ -> false
+  in
+  let ready =
+    schema_accepted
+    && roots_ready
+    && vm_semantics_ready
+    && abi_ready
+    && producer_repair_ready
+  in
+  let blockers =
+    []
+    |> add_blocker (not schema_accepted) "schema_rejected"
+    |> add_blocker (not producer_repair_ready) "producer_repair_required"
+    |> fun blockers -> blockers @ Profile.root_binding_blockers root_binding_counts
+    |> fun blockers -> blockers @ vm_semantics_root_blockers vm_semantics_binding_counts
+    |> fun blockers -> blockers @ abi_declaration_binding_blockers abi_declaration_binding_counts
+  in
+  `Assoc [
+    "diagnostic_only", `Bool true;
+    "status", `String (if ready then "accepted" else "rejected");
+    "schema_status", `String schema_status;
+    "producer_repair_status",
+    (match repair_manifest with
+     | `Assoc fields ->
+       (match string_field "status" fields with
+        | Some status -> `String status
+        | None -> `String "unknown")
+     | _ -> `String "unknown");
+    "profile_root_status",
+    `String (if roots_ready then "accepted" else "rejected");
+    "vm_semantics_root_status",
+    `String (if vm_semantics_ready then "accepted" else "rejected");
+    "abi_declaration_status",
+    `String (if abi_ready then "accepted" else "rejected");
+    "next_action",
+    `String
+      (if ready then "run_strict_execution_conformance"
+       else "repair_producer_template_index");
+    "next_blocker", next_blocker_json blockers;
+    "blockers",
+    `List (List.map (fun blocker -> `String blocker) blockers);
+  ]
+
 let failure_issues path opcode fields =
   match list_field "expected_failure_atomicity_behavior" fields with
   | None -> [issue ~opcode path "missing expected_failure_atomicity_behavior"]
@@ -2572,6 +2637,19 @@ let producer_index_report index_path =
         ~abi_declaration_binding_counts
         profile_status_counts
     in
+    let producer_repair_manifest_json =
+      producer_repair_manifest
+        ?corpus_root:profile_catalog_root
+        repair_hints
+    in
+    let producer_static_preflight_gate_json =
+      producer_static_preflight_gate
+        ~schema_status
+        ~root_binding_counts:profile_root_binding_counts
+        ~vm_semantics_binding_counts
+        ~abi_declaration_binding_counts
+        producer_repair_manifest_json
+    in
     let status =
       if
         String.equal schema_status "accepted"
@@ -2642,9 +2720,8 @@ let producer_index_report index_path =
       "abi_declaration_binding_gate", abi_declaration_binding_gate_json abi_declaration_binding_counts;
       "validator_readiness_gate", validator_readiness_gate_json;
       "producer_repair_manifest",
-      producer_repair_manifest
-        ?corpus_root:profile_catalog_root
-        repair_hints;
+      producer_repair_manifest_json;
+      "producer_static_preflight_gate", producer_static_preflight_gate_json;
       "consensus_candidate_gate",
       consensus_candidate_gate
         ~profile_gate_count
@@ -2756,6 +2833,19 @@ let () =
               ~abi_declaration_binding_counts
               profile_status_counts
           in
+          let producer_repair_manifest_json =
+            producer_repair_manifest
+              ?corpus_root:profile_catalog_root
+              repair_hints
+          in
+          let producer_static_preflight_gate_json =
+            producer_static_preflight_gate
+              ~schema_status
+              ~root_binding_counts:profile_root_binding_counts
+              ~vm_semantics_binding_counts
+              ~abi_declaration_binding_counts
+              producer_repair_manifest_json
+          in
           let status =
             if
               profile_roots_required_passes
@@ -2820,9 +2910,9 @@ let () =
               "abi_declaration_binding_gate", abi_declaration_binding_gate_json abi_declaration_binding_counts;
               "validator_readiness_gate", validator_readiness_gate_json;
               "producer_repair_manifest",
-              producer_repair_manifest
-                ?corpus_root:profile_catalog_root
-                repair_hints;
+              producer_repair_manifest_json;
+              "producer_static_preflight_gate",
+              producer_static_preflight_gate_json;
               "consensus_candidate_gate",
               consensus_candidate_gate
                 ~profile_gate_count
@@ -2897,6 +2987,19 @@ let () =
         ~abi_declaration_binding_counts
         status_counts
     in
+    let producer_repair_manifest_json =
+      producer_repair_manifest
+        ?corpus_root:profile_catalog_root
+        repair_hints
+    in
+    let producer_static_preflight_gate_json =
+      producer_static_preflight_gate
+        ~schema_status
+        ~root_binding_counts
+        ~vm_semantics_binding_counts
+        ~abi_declaration_binding_counts
+        producer_repair_manifest_json
+    in
     let status =
       if
         profile_roots_required_passes
@@ -2960,9 +3063,9 @@ let () =
         "abi_declaration_binding_gate", abi_declaration_binding_gate_json abi_declaration_binding_counts;
         "validator_readiness_gate", validator_readiness_gate_json;
         "producer_repair_manifest",
-        producer_repair_manifest
-          ?corpus_root:profile_catalog_root
-          repair_hints;
+        producer_repair_manifest_json;
+        "producer_static_preflight_gate",
+        producer_static_preflight_gate_json;
         "consensus_candidate_gate",
         consensus_candidate_gate
           ~profile_gate_count

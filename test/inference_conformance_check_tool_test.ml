@@ -444,6 +444,13 @@ let report_manifest = function
      | _ -> failwith "producer_repair_manifest must be object")
   | _ -> failwith "report must be object"
 
+let report_preflight = function
+  | `Assoc fields ->
+    (match assoc_value "producer_static_preflight_gate" fields with
+     | `Assoc gate -> gate
+     | _ -> failwith "producer_static_preflight_gate must be object")
+  | _ -> failwith "report must be object"
+
 let manifest_repair_fields manifest =
   manifest
   |> list_value "hints"
@@ -487,7 +494,16 @@ let check_accepts_bound_abi_declaration () =
       (String.equal (string_value "status" manifest) "no_hints");
     check
       "accepted manifest has no repairs"
-      (List.length (list_value "hints" manifest) = 0))
+      (List.length (list_value "hints" manifest) = 0);
+    let preflight = report_preflight report in
+    check
+      "accepted static preflight"
+      (String.equal (string_value "status" preflight) "accepted");
+    check
+      "accepted static preflight action"
+      (String.equal
+         (string_value "next_action" preflight)
+         "run_strict_execution_conformance"))
 
 let check_accepts_v2_bound_abi_declaration () =
   with_temp_dir (fun dir ->
@@ -526,7 +542,11 @@ let check_rejects_stale_session_abi_root () =
       (String.equal (string_value "status" manifest) "hints_available");
     check
       "stale ABI repair field"
-      (List.mem "abi.session_abi_root" (manifest_repair_fields manifest)))
+      (List.mem "abi.session_abi_root" (manifest_repair_fields manifest));
+    let preflight = report_preflight report in
+    check
+      "stale ABI static preflight rejected"
+      (String.equal (string_value "status" preflight) "rejected"))
 
 let check_rejects_narrow_output_unit () =
   with_temp_dir (fun dir ->
@@ -542,7 +562,11 @@ let check_rejects_narrow_output_unit () =
     let manifest = report_manifest report in
     check
       "narrow output unit repair field"
-      (List.mem "abi.output_count_unit" (manifest_repair_fields manifest)))
+      (List.mem "abi.output_count_unit" (manifest_repair_fields manifest));
+    let preflight = report_preflight report in
+    check
+      "narrow output unit preflight rejected"
+      (String.equal (string_value "status" preflight) "rejected"))
 
 let check_rejects_r1_output_count_drift () =
   with_temp_dir (fun dir ->
