@@ -673,11 +673,19 @@ let q1_failure_mutation_payload_shape_ok result_fields case_fields =
   | Some (`List [`Assoc mutation_fields]) ->
     (match case with
      | "nonfinite_input_nan" ->
-       mutation_matches "replace_first_f64_input_cell" "lhs" mutation_fields
+       (mutation_matches "replace_first_f64_input_cell" "lhs" mutation_fields
+        || mutation_matches
+             "replace_first_f64_input_cell"
+             "input"
+             mutation_fields)
        && json_intlike_string "value_bits" mutation_fields
           = Some "9221120237041090560"
      | "nonfinite_input_infinity" ->
-       mutation_matches "replace_first_f64_input_cell" "lhs" mutation_fields
+       (mutation_matches "replace_first_f64_input_cell" "lhs" mutation_fields
+        || mutation_matches
+             "replace_first_f64_input_cell"
+             "input"
+             mutation_fields)
        && json_intlike_string "value_bits" mutation_fields
           = Some "9218868437227405312"
      | "output_input_aliasing" ->

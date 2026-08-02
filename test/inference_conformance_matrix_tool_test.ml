@@ -1990,6 +1990,49 @@ let check_matrix_accepts_nonfinite_fp16_nan_scale_payload () =
       check "nonfinite fp16 nan scale accepted" (String.equal (string_value "status" fields) "accepted")
     | _ -> failwith "matrix output must be object")
 
+let check_matrix_accepts_q1_input_alias_failure_payload () =
+  with_temp_dir (fun dir ->
+    let input_alias =
+      failure_case
+        ~case:"nonfinite_input_nan"
+        ~executable_mutations:
+          [
+            executable_mutation
+              "replace_first_f64_input_cell"
+              "input"
+              ["value_bits", `Intlit "9221120237041090560"];
+          ]
+        ()
+    in
+    let a =
+      write_report
+        dir
+        "a.cjson"
+        (report
+           ~runner_sha:(hex_root '1')
+           ~failure:input_alias
+           "Darwin"
+           "arm64")
+    in
+    let b =
+      write_report
+        dir
+        "b.cjson"
+        (report
+           ~runner_sha:(hex_root '2')
+           ~failure:input_alias
+           "Linux"
+           "x86_64")
+    in
+    let code, json = run_matrix [a; b] in
+    check "Q1 input alias payload matrix exits zero" (code = 0);
+    match json with
+    | `Assoc fields ->
+      check
+        "Q1 input alias payload accepted"
+        (String.equal (string_value "status" fields) "accepted")
+    | _ -> failwith "matrix output must be object")
+
 let check_matrix_rejects_partial_alias_payload_outside_lhs () =
   with_temp_dir (fun dir ->
     let forged =
@@ -3283,6 +3326,7 @@ let () =
   check_matrix_rejects_forged_reject_failure_partial_output_span ();
   check_matrix_rejects_forged_snapshot_failure_unchanged_active_span ();
   check_matrix_accepts_nonfinite_fp16_nan_scale_payload ();
+  check_matrix_accepts_q1_input_alias_failure_payload ();
   check_matrix_rejects_partial_alias_payload_outside_lhs ();
   check_matrix_rejects_missing_failure_mutation_payload ();
   check_matrix_rejects_missing_required_q1_failure_row ();
