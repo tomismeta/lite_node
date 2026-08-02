@@ -1106,6 +1106,8 @@ let check_session_hash report =
         "runtime_semantics", assoc_value "runtime_semantics" fields;
         "next_runtime_blocker", assoc_value "next_runtime_blocker" fields;
         "opened_session_root", assoc_value "opened_session_root" fields;
+        "opened_output_prefix_root",
+        assoc_value "opened_output_prefix_root" fields;
         "final_session_root", assoc_value "final_session_root" fields;
         "final_receipt_root", assoc_value "final_receipt_root" fields;
         "output_prefix_root", assoc_value "output_prefix_root" fields;
@@ -1481,6 +1483,9 @@ let check_session_bundle_accepts_v2_multi_transition () =
       "v2 no continuation preflight in accepted report"
       (List.assoc_opt "continuation_preflight" fields = None);
     let opened_session_root = string_json "opened_session_root" fields in
+    let opened_output_prefix_root =
+      string_json "opened_output_prefix_root" fields
+    in
     let final_session_root = string_json "final_session_root" fields in
     let final_receipt_root = string_json "final_receipt_root" fields in
     let output_prefix_root = string_json "output_prefix_root" fields in
@@ -1500,6 +1505,7 @@ let check_session_bundle_accepts_v2_multi_transition () =
            (String.length root = 64))
       [
         "opened_session_root", opened_session_root;
+        "opened_output_prefix_root", opened_output_prefix_root;
         "final_session_root", final_session_root;
         "final_receipt_root", final_receipt_root;
         "output_prefix_root", output_prefix_root;
@@ -1508,6 +1514,9 @@ let check_session_bundle_accepts_v2_multi_transition () =
     check
       "v2 session root advanced"
       (not (String.equal opened_session_root final_session_root));
+    check
+      "v2 output prefix advanced"
+      (not (String.equal opened_output_prefix_root output_prefix_root));
     let semantics = assoc_json "runtime_semantics" fields in
     check
       "v2 resident mode"
@@ -1958,6 +1967,7 @@ let check_session_bundle_accepts_graph_real_feedback_loop () =
       "graph feedback blocker cleared"
       (String.equal (string_json "next_runtime_blocker" fields) "none");
     ignore (string_json "opened_session_root" fields);
+    ignore (string_json "opened_output_prefix_root" fields);
     ignore (string_json "final_session_root" fields);
     ignore (string_json "final_receipt_root" fields);
     ignore (string_json "output_prefix_root" fields);
@@ -2951,6 +2961,9 @@ let check_session_bundle_reports_open_session_error () =
          "open_session_error");
     ignore (string_json "open_session_error" fields);
     check "open-error opened root null" (assoc_value "opened_session_root" fields = `Null);
+    check
+      "open-error opened prefix null"
+      (assoc_value "opened_output_prefix_root" fields = `Null);
     check "open-error final root null" (assoc_value "final_session_root" fields = `Null);
     check
       "open-error final receipt null"
@@ -3027,6 +3040,7 @@ let check_session_bundle_reports_advance_session_error () =
          (string_json "next_runtime_blocker" fields)
          "advance_session_error");
     ignore (string_json "opened_session_root" fields);
+    ignore (string_json "opened_output_prefix_root" fields);
     check
       "advance-error final root null"
       (assoc_value "final_session_root" fields = `Null);
@@ -3123,6 +3137,7 @@ let check_session_bundle_reports_finalize_session_error () =
          (string_json "next_runtime_blocker" fields)
          "finalize_session_error");
     ignore (string_json "opened_session_root" fields);
+    ignore (string_json "opened_output_prefix_root" fields);
     check
       "finalize-error final root null"
       (assoc_value "final_session_root" fields = `Null);

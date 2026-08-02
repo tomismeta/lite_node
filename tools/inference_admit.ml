@@ -3740,6 +3740,7 @@ let session_report_payload
     ~runtime_semantics
     ~next_runtime_blocker
     ~opened_session_root
+    ~opened_output_prefix_root
     ~final_session_root
     ~final_receipt_root
     ~output_prefix_root
@@ -3759,6 +3760,8 @@ let session_report_payload
     "runtime_semantics", runtime_semantics;
     "next_runtime_blocker", `String next_runtime_blocker;
     "opened_session_root", nullable_string_json opened_session_root;
+    "opened_output_prefix_root",
+    nullable_string_json opened_output_prefix_root;
     "final_session_root", nullable_string_json final_session_root;
     "final_receipt_root", nullable_string_json final_receipt_root;
     "output_prefix_root", nullable_string_json output_prefix_root;
@@ -3865,6 +3868,7 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
       ~runtime_semantics
       ~next_runtime_blocker:"open_session_error"
       ~opened_session_root:None
+      ~opened_output_prefix_root:None
       ~final_session_root:None
       ~final_receipt_root:None
       ~output_prefix_root:None
@@ -3889,6 +3893,7 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
       "next_runtime_blocker", `String "open_session_error";
       "open_session_error", `String error;
       "opened_session_root", `Null;
+      "opened_output_prefix_root", `Null;
       "final_session_root", `Null;
       "final_receipt_root", `Null;
       "output_prefix_root", `Null;
@@ -4299,6 +4304,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       ~runtime_semantics
       ~next_runtime_blocker
       ~opened_session_root:(Some (Session.root opened))
+      ~opened_output_prefix_root:(Some (Session.output_prefix_root opened))
       ~final_session_root:(Option.map Session.root finalized)
       ~final_receipt_root:(Option.map Receipt.root final_receipt)
       ~output_prefix_root:(Option.map Session.output_prefix_root finalized)
@@ -4323,6 +4329,8 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       "next_runtime_blocker", `String next_runtime_blocker;
       "finalize_session_error", nullable_string_json finalize_session_error;
       "opened_session_root", `String (Session.root opened);
+      "opened_output_prefix_root",
+      `String (Session.output_prefix_root opened);
       "final_session_root",
       nullable_string_json (Option.map Session.root finalized);
       "final_receipt_root",
@@ -4413,6 +4421,7 @@ let run_inference_session_file ~timing_mode path =
         ~runtime_semantics
         ~next_runtime_blocker:"program_admission_rejected"
         ~opened_session_root:None
+        ~opened_output_prefix_root:None
         ~final_session_root:None
         ~final_receipt_root:None
         ~output_prefix_root:None
@@ -4436,6 +4445,7 @@ let run_inference_session_file ~timing_mode path =
         "runtime_semantics", runtime_semantics;
         "next_runtime_blocker", `String "program_admission_rejected";
         "opened_session_root", `Null;
+        "opened_output_prefix_root", `Null;
         "final_session_root", `Null;
         "final_receipt_root", `Null;
         "output_prefix_root", `Null;
@@ -4541,6 +4551,7 @@ let run_inference_session_file ~timing_mode path =
         ~runtime_semantics
         ~next_runtime_blocker:preflight.continuation_next_runtime_blocker
         ~opened_session_root:None
+        ~opened_output_prefix_root:None
         ~final_session_root:None
         ~final_receipt_root:None
         ~output_prefix_root:None
@@ -4563,6 +4574,7 @@ let run_inference_session_file ~timing_mode path =
         "session_report_sha256", `String (session_report_sha256 payload);
         "runtime_semantics", runtime_semantics;
         "opened_session_root", `Null;
+        "opened_output_prefix_root", `Null;
         "final_session_root", `Null;
         "final_receipt_root", `Null;
         "output_prefix_root", `Null;
@@ -4656,6 +4668,7 @@ let run_inference_session_file ~timing_mode path =
           ~runtime_semantics
           ~next_runtime_blocker
           ~opened_session_root:None
+          ~opened_output_prefix_root:None
           ~final_session_root:None
           ~final_receipt_root:None
           ~output_prefix_root:None
@@ -4679,6 +4692,7 @@ let run_inference_session_file ~timing_mode path =
           "runtime_semantics", runtime_semantics;
           "next_runtime_blocker", `String next_runtime_blocker;
           "opened_session_root", `Null;
+          "opened_output_prefix_root", `Null;
           "final_session_root", `Null;
           "final_receipt_root", `Null;
           "output_prefix_root", `Null;
@@ -4769,6 +4783,7 @@ let run_inference_session_file ~timing_mode path =
         ~next_runtime_blocker:
           "session_continuation_state_carry_not_supported"
         ~opened_session_root:None
+        ~opened_output_prefix_root:None
         ~final_session_root:None
         ~final_receipt_root:None
         ~output_prefix_root:None
@@ -4793,6 +4808,7 @@ let run_inference_session_file ~timing_mode path =
         "next_runtime_blocker",
         `String "session_continuation_state_carry_not_supported";
         "opened_session_root", `Null;
+        "opened_output_prefix_root", `Null;
         "final_session_root", `Null;
         "final_receipt_root", `Null;
         "output_prefix_root", `Null;
