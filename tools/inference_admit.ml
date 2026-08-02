@@ -3291,6 +3291,22 @@ let empty_transition_root_chain_summary_json ~transition_count =
     "incomplete_transition_ids", `List [];
   ]
 
+let decode_selected_indices_json results =
+  results
+  |> List.filter (fun result -> String.equal result.session_stage_phase "decode")
+  |> List.filter_map
+       (fun result ->
+          match result.session_stage_selected_index with
+          | None -> None
+          | Some selected_index ->
+            Some
+              (`Assoc [
+                 "transition_id",
+                 `String result.session_stage_transition_id;
+                 "selected_index", `String selected_index;
+               ]))
+  |> fun values -> `List values
+
 let independent_batch_runtime_semantics =
   `Assoc [
     "diagnostic_only", `Bool true;
@@ -3323,6 +3339,7 @@ let session_runtime_semantics
     ~next_runtime_blocker
     ~decode_token_contract_status
     ~decode_token_contract_summary
+    ~decode_selected_indices
     ~decode_prior_state_contract_status
     ~decode_prior_state_contract_summary
     ~graph_execution_contract_status
@@ -3377,6 +3394,7 @@ let session_runtime_semantics
     "next_runtime_blocker", `String next_runtime_blocker;
     "decode_token_contract_status", `String decode_token_contract_status;
     "decode_token_contract_summary", decode_token_contract_summary;
+    "decode_selected_indices", decode_selected_indices;
     "decode_prior_state_contract_status",
     `String decode_prior_state_contract_status;
     "decode_prior_state_contract_summary", decode_prior_state_contract_summary;
@@ -3797,20 +3815,22 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
   let first_transition_issue =
     first_transition_issue_json ~status ~next_runtime_blocker results
   in
+  let decode_selected_indices = decode_selected_indices_json results in
   let runtime_semantics =
     session_runtime_semantics
       ~transition_count:(List.length bundle.transitions)
       ~runtime_readiness_status:"resident_session_candidate"
-        ~next_runtime_blocker
-        ~decode_token_contract_status
-        ~decode_token_contract_summary
-        ~decode_prior_state_contract_status
-        ~decode_prior_state_contract_summary
-        ~graph_execution_contract_status
-        ~graph_execution_contract_summary
-        ~transition_root_chain_summary
-        ~first_transition_issue
-        ~missing_runtime_capabilities
+      ~next_runtime_blocker
+      ~decode_token_contract_status
+      ~decode_token_contract_summary
+      ~decode_selected_indices
+      ~decode_prior_state_contract_status
+      ~decode_prior_state_contract_summary
+      ~graph_execution_contract_status
+      ~graph_execution_contract_summary
+      ~transition_root_chain_summary
+      ~first_transition_issue
+      ~missing_runtime_capabilities
       ~committed_state_supported
       ~committed_state_transport_bound
       ~continuation_supported:true
@@ -3929,26 +3949,27 @@ let run_inference_session_file ~timing_mode path =
         ~runtime_readiness_status:
           preflight.continuation_runtime_readiness_status
         ~next_runtime_blocker:preflight.continuation_next_runtime_blocker
-          ~decode_token_contract_status:"not_bound"
-          ~decode_token_contract_summary
-          ~decode_prior_state_contract_status:
-            (if bundle.decode_steps <= 1 then "not_required" else "not_bound")
-          ~decode_prior_state_contract_summary
-          ~graph_execution_contract_status
-          ~graph_execution_contract_summary:
-            (graph_execution_contract_summary_json
-               ~required_count:
-                 preflight.continuation_graph_execution_contract_required_count
-               ~bound_count:
-                 preflight.continuation_graph_execution_contract_bound_count
-               ~mismatch_count:
-                 preflight.continuation_graph_execution_contract_mismatch_count)
-          ~transition_root_chain_summary:
-            (empty_transition_root_chain_summary_json ~transition_count)
-          ~first_transition_issue:
-            preflight.continuation_first_transition_issue
-          ~missing_runtime_capabilities:missing_resident_runtime_capabilities
-          ~committed_state_supported:false
+        ~decode_token_contract_status:"not_bound"
+        ~decode_token_contract_summary
+        ~decode_selected_indices:(`List [])
+        ~decode_prior_state_contract_status:
+          (if bundle.decode_steps <= 1 then "not_required" else "not_bound")
+        ~decode_prior_state_contract_summary
+        ~graph_execution_contract_status
+        ~graph_execution_contract_summary:
+          (graph_execution_contract_summary_json
+             ~required_count:
+               preflight.continuation_graph_execution_contract_required_count
+             ~bound_count:
+               preflight.continuation_graph_execution_contract_bound_count
+             ~mismatch_count:
+               preflight.continuation_graph_execution_contract_mismatch_count)
+        ~transition_root_chain_summary:
+          (empty_transition_root_chain_summary_json ~transition_count)
+        ~first_transition_issue:
+          preflight.continuation_first_transition_issue
+        ~missing_runtime_capabilities:missing_resident_runtime_capabilities
+        ~committed_state_supported:false
         ~committed_state_transport_bound:false
         ~continuation_supported:false
     in
@@ -4039,6 +4060,7 @@ let run_inference_session_file ~timing_mode path =
                ~required_count:decode_transition_count
                ~bound_count:0
                ~mismatch_count:0)
+          ~decode_selected_indices:(`List [])
           ~decode_prior_state_contract_status:"not_required"
           ~decode_prior_state_contract_summary:
             (contract_summary_json
@@ -4149,18 +4171,19 @@ let run_inference_session_file ~timing_mode path =
         ~runtime_readiness_status:"partial_single_transition"
         ~next_runtime_blocker:
           "session_continuation_state_carry_not_supported"
-          ~decode_token_contract_status
-          ~decode_token_contract_summary
-          ~decode_prior_state_contract_status:"not_required"
-          ~decode_prior_state_contract_summary:
-            (contract_summary_json
-               ~required_count:0
-               ~bound_count:0
-               ~mismatch_count:0)
-          ~graph_execution_contract_status:"not_required"
-          ~graph_execution_contract_summary:
-            (graph_execution_contract_summary_json
-               ~required_count:0
+        ~decode_token_contract_status
+        ~decode_token_contract_summary
+        ~decode_selected_indices:(`List [])
+        ~decode_prior_state_contract_status:"not_required"
+        ~decode_prior_state_contract_summary:
+          (contract_summary_json
+             ~required_count:0
+             ~bound_count:0
+             ~mismatch_count:0)
+        ~graph_execution_contract_status:"not_required"
+        ~graph_execution_contract_summary:
+          (graph_execution_contract_summary_json
+             ~required_count:0
                ~bound_count:0
                ~mismatch_count:0)
           ~transition_root_chain_summary:

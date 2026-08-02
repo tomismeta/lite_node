@@ -893,6 +893,9 @@ let check_session_runtime_semantics
   check
     "session decode token contracts mismatched"
     (int_json "mismatched" token_summary = decode_token_mismatched);
+  check
+    "session decode selected indices empty"
+    (list_json "decode_selected_indices" semantics = []);
   let prior_summary =
     assoc_json "decode_prior_state_contract_summary" semantics
   in
@@ -940,6 +943,20 @@ let check_contract_summary
 
 let check_decode_token_summary =
   check_contract_summary "decode_token_contract_summary" "decode token"
+
+let check_decode_selected_indices semantics expected =
+  let expected_json =
+    List.map
+      (fun (transition_id, selected_index) ->
+         `Assoc [
+           "transition_id", `String transition_id;
+           "selected_index", `String selected_index;
+         ])
+      expected
+  in
+  check
+    "decode selected indices"
+    (list_json "decode_selected_indices" semantics = expected_json)
 
 let check_decode_prior_state_summary =
   check_contract_summary
@@ -1493,6 +1510,7 @@ let check_session_bundle_accepts_v2_multi_transition () =
       (String.equal
          (string_json "decode_token_contract_status" semantics)
          "not_bound");
+    check_decode_selected_indices semantics [];
     check_session_hash report;
     (match list_json "transitions" fields with
      | [`Assoc first; `Assoc second] ->
@@ -1921,6 +1939,12 @@ let check_session_bundle_accepts_graph_real_feedback_loop () =
       ~required:2
       ~bound:2
       ~mismatched:0;
+    check_decode_selected_indices
+      semantics
+      [
+        "token-001", string_of_int feedback_selected_index;
+        "token-002", string_of_int feedback_selected_index;
+      ];
     check
       "graph feedback prior contract bound"
       (String.equal
@@ -2030,6 +2054,7 @@ let check_session_bundle_binds_decode_token_contract () =
       ~required:1
       ~bound:1
       ~mismatched:0;
+    check_decode_selected_indices semantics ["token-001", "1"];
     check_decode_prior_state_summary
       semantics
       ~required:0
@@ -2106,6 +2131,7 @@ let check_session_bundle_requires_decode_token_contract () =
       ~required:1
       ~bound:0
       ~mismatched:0;
+    check_decode_selected_indices semantics [];
     check_decode_prior_state_summary
       semantics
       ~required:0
@@ -2201,6 +2227,7 @@ let check_session_bundle_binds_committed_state_transport () =
       ~required:1
       ~bound:1
       ~mismatched:0;
+    check_decode_selected_indices semantics ["token-001", "1"];
     check_decode_prior_state_summary
       semantics
       ~required:0
@@ -2311,6 +2338,12 @@ let check_session_bundle_binds_decode_prior_state_contract () =
       ~required:2
       ~bound:2
       ~mismatched:0;
+    check_decode_selected_indices
+      semantics
+      [
+        "token-001", string_of_int feedback_selected_index;
+        "token-002", string_of_int feedback_selected_index;
+      ];
     check
       "feedback contract bound"
       (String.equal
@@ -2422,6 +2455,12 @@ let check_session_bundle_requires_decode_prior_state_contract () =
       ~required:2
       ~bound:2
       ~mismatched:0;
+    check_decode_selected_indices
+      semantics
+      [
+        "token-001", string_of_int feedback_selected_index;
+        "token-002", string_of_int feedback_selected_index;
+      ];
     check_decode_prior_state_summary
       semantics
       ~required:1
@@ -2503,6 +2542,9 @@ let check_session_bundle_rejects_decode_prior_state_contract_mismatch () =
       ~required:2
       ~bound:1
       ~mismatched:0;
+    check_decode_selected_indices
+      semantics
+      ["token-001", string_of_int feedback_selected_index];
     check_decode_prior_state_summary
       semantics
       ~required:1
@@ -2578,6 +2620,10 @@ let check_session_bundle_rejects_nonadjacent_prior_state_contract () =
       (String.equal
          (string_json "next_runtime_blocker" fields)
          "decode_loop_prior_state_contract_mismatch");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check_decode_selected_indices
+      semantics
+      ["token-001", string_of_int feedback_selected_index];
     check_session_hash report;
     (match list_json "transitions" fields with
      | [_; _; `Assoc second_decode] ->
@@ -2670,6 +2716,7 @@ let check_session_bundle_rejects_decode_token_contract_mismatch () =
       ~required:1
       ~bound:0
       ~mismatched:1;
+    check_decode_selected_indices semantics [];
     check_decode_prior_state_summary
       semantics
       ~required:0
