@@ -359,6 +359,50 @@ let graph_real_code =
     VM.STOP;
   |]
 
+let graph_real_feedback_code =
+  [|
+    VM.JDEST Abi.advance_label;
+    VM.LDI (0, VM.VInt (Z.of_int 40));
+    VM.LDI (1, VM.VString "\000\000\000\000\000\000\240\063");
+    VM.LDI (2, VM.VInt Z.zero);
+    VM.LDI (3, VM.VInt Z.one);
+    VM.LOAD_F64_LE_FP (0, 1, 2, 3);
+    VM.SILU_FP (0, 3);
+    VM.MLOAD (20, Abi.sequence_cell);
+    VM.LDI (21, VM.VInt Z.zero);
+    VM.EQ (22, 20, 21);
+    VM.JIF (22, 101);
+    VM.LDI (21, VM.VInt Z.one);
+    VM.EQ (22, 20, 21);
+    VM.JIF (22, 102);
+    VM.MLOAD (5, Abi.committed_target_state_root_cell);
+    VM.FLOAD (6, 5);
+    VM.MSTORE (30, 6);
+    VM.LDI (2, VM.VInt (Z.of_int feedback_selected_index));
+    VM.MSTORE (10, 2);
+    VM.LDI (0, VM.VInt (Z.of_int 10));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+    VM.JDEST 101;
+    VM.LDI (5, VM.VString feedback_prefill_payload);
+    VM.FSTORE (6, 5);
+    VM.MSTORE (Abi.committed_target_state_root_cell, 6);
+    VM.LDI (2, VM.VInt Z.zero);
+    VM.MSTORE (10, 2);
+    VM.LDI (0, VM.VInt (Z.of_int 10));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+    VM.JDEST 102;
+    VM.LDI (5, VM.VString feedback_selected_index_payload);
+    VM.FSTORE (6, 5);
+    VM.MSTORE (Abi.committed_target_state_root_cell, 6);
+    VM.LDI (2, VM.VInt (Z.of_int feedback_selected_index));
+    VM.MSTORE (10, 2);
+    VM.LDI (0, VM.VInt (Z.of_int 10));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+  |]
+
 let selected_index_contract ?(output_base = 10) () =
   `Assoc [
     "kind", `String "selected_index";
@@ -1579,6 +1623,118 @@ let check_graph_execution_contract_requires_opcode_timing () =
     check_session_hash report
   | _ -> failwith "report must be an object"
 
+let check_session_bundle_accepts_graph_real_feedback_loop () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~decode_steps:(Some 2)
+      ~session_abi_root:Abi.committed_state_root
+      ~code:graph_real_feedback_code
+      ~execution_contract_for_index:(fun _ ->
+        Some (graph_real_contract ~min_program_instructions:8 ()))
+      ~output_contract_for_index:(fun index ->
+        if index > 0 then Some (selected_index_contract ())
+        else None)
+      ~prior_state_contract_for_index:(fun index ->
+        if index = 2 then
+          Some
+            (selected_index_feedback_contract
+               ~offset:feedback_selected_index_offset
+               "token-001")
+        else None)
+      ~transition_count:3
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "graph feedback bundle exits cleanly" (code = 0);
+  match report with
+  | `Assoc fields ->
+    check
+      "graph feedback bundle accepted"
+      (String.equal (string_json "status" fields) "accepted");
+    check
+      "graph feedback blocker cleared"
+      (String.equal (string_json "next_runtime_blocker" fields) "none");
+    ignore (string_json "opened_session_root" fields);
+    ignore (string_json "final_session_root" fields);
+    ignore (string_json "final_receipt_root" fields);
+    ignore (string_json "output_prefix_root" fields);
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "graph feedback graph contract bound"
+      (String.equal
+         (string_json "graph_execution_contract_status" semantics)
+         "bound");
+    check
+      "graph feedback token contract bound"
+      (String.equal
+         (string_json "decode_token_contract_status" semantics)
+         "bound");
+    check
+      "graph feedback prior contract bound"
+      (String.equal
+         (string_json "decode_prior_state_contract_status" semantics)
+         "bound");
+    check
+      "graph feedback missing capabilities clear"
+      (list_json "missing_runtime_capabilities" semantics = []);
+    check_session_hash report;
+    (match list_json "transitions" fields with
+     | [
+       `Assoc prefill;
+       `Assoc first_decode;
+       `Assoc second_decode;
+     ] ->
+       List.iter
+         (fun transition ->
+            ignore (string_json "advanced_session_root" transition);
+            ignore (string_json "advance_receipt_root" transition);
+            ignore (string_json "output_prefix_root" transition);
+            let contract = assoc_json "execution_contract" transition in
+            check
+              "graph feedback contract matched"
+              (String.equal
+                 (string_json "status" contract)
+                 "matched");
+            check
+              "graph feedback contract graph-real"
+              (bool_json "graph_real" contract);
+            check
+              "graph feedback executed silu"
+              (List.exists
+                 (( = ) (`String "SILU_FP"))
+                 (list_json "executed_inference_opcodes" contract)))
+         [prefill; first_decode; second_decode];
+       check
+         "graph feedback first decode output contract"
+         (String.equal
+            (string_json
+               "status"
+               (assoc_json "output_contract" first_decode))
+            "matched");
+       check
+         "graph feedback second decode output contract"
+         (String.equal
+            (string_json
+               "status"
+               (assoc_json "output_contract" second_decode))
+            "matched");
+       check
+         "graph feedback second decode prior contract"
+         (String.equal
+            (string_json
+               "status"
+               (assoc_json "prior_state_contract" second_decode))
+            "matched");
+       check
+         "graph feedback last payload"
+         (String.equal
+            (string_json "last_transition_output_payload" fields)
+            ("base=10|length=1|values=int:"
+             ^ string_of_int feedback_selected_index))
+     | _ -> failwith "expected three graph feedback transitions")
+  | _ -> failwith "report must be an object"
+
 let check_session_bundle_binds_decode_token_contract () =
   with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
   let bundle_path =
@@ -2289,6 +2445,7 @@ let () =
   check_session_bundle_rejects_graph_execution_overclaim ();
   check_single_transition_rejects_graph_execution_contract ();
   check_graph_execution_contract_requires_opcode_timing ();
+  check_session_bundle_accepts_graph_real_feedback_loop ();
   check_session_bundle_binds_decode_token_contract ();
   check_session_bundle_binds_committed_state_transport ();
   check_session_bundle_binds_decode_prior_state_contract ();
