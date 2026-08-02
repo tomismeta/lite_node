@@ -14,6 +14,7 @@ Include at startup:
 
 module Template = Octra_vm.Inference_conformance_template
 module Profile = Octra_vm.Inference_numerical_profile
+module Abi = Octra_vm.Inference_session_abi
 module Fp64 = Octra_vm.Inference_fp64
 
 let template_path = ref None
@@ -139,6 +140,12 @@ let int_field name fields =
   | Some (`Int value) -> Some value
   | _ -> None
 
+let int_string_field name fields =
+  match field name fields with
+  | Some (`Int value) -> Some (string_of_int value)
+  | Some (`Intlit value) -> Some value
+  | _ -> None
+
 let list_field name fields =
   match field name fields with
   | Some (`List values) -> Some values
@@ -148,6 +155,22 @@ let assoc_field name fields =
   match field name fields with
   | Some (`Assoc values) -> Some values
   | _ -> None
+
+let string_or_null = function
+  | Some value -> `String value
+  | None -> `Null
+
+let optional_string_list_field name fields =
+  match field name fields with
+  | Some (`List values) ->
+    values
+    |> List.filter_map (function
+      | `String value -> Some value
+      | _ -> None)
+  | _ -> []
+
+let assoc_upsert name value fields =
+  (name, value) :: List.filter (fun (key, _) -> not (String.equal key name)) fields
 
 let mutation_name = function
   | `Assoc fields -> string_field "mutation" fields
@@ -1118,6 +1141,486 @@ let q1_required_mutation_shape_ok fields case mutations =
      | _ -> true)
   | _ -> false
 
+let reg_name index = "r" ^ string_of_int index
+
+let repair_field ~field ?case ?expected_prefix ?required_case ?observed ?expected
+    ?(blockers = []) action =
+  let optional_string name = function
+    | None -> []
+    | Some value -> [name, `String value]
+  in
+  let optional_json name = function
+    | None -> []
+    | Some value -> [name, value]
+  in
+  `Assoc
+    ([
+       "field", `String field;
+       "action", `String action;
+       "observed", string_or_null observed;
+       "expected", string_or_null expected;
+       "blockers",
+       `List (List.map (fun blocker -> `String blocker) blockers);
+     ]
+     @ optional_string "case" case
+     @ optional_string "expected_prefix" expected_prefix
+     @ optional_json "required_case" required_case)
+
+let binding_repair ~field ~observed_name ~expected_name binding =
+  match binding with
+  | `Assoc fields ->
+    (match string_field "status" fields with
+     | Some "matched" -> []
+     | _ ->
+       [
+         repair_field
+           ~field
+           ?observed:(string_field observed_name fields)
+           ?expected:(string_field expected_name fields)
+           ~blockers:(optional_string_list_field "blockers" fields)
+           "replace_with_litenode_authority";
+       ])
+  | _ -> [repair_field ~field "emit_litenode_authority_binding"]
+
+let abi_repair binding =
+  match binding with
+  | `Assoc fields ->
+    (match string_field "status" fields with
+     | Some "matched" -> []
+     | _ ->
+       let blockers = optional_string_list_field "blockers" fields in
+       let has blocker = List.exists (String.equal blocker) blockers in
+       let known =
+         [
+           ( "entrypoint_mismatch",
+             "abi.entrypoint",
+             "set_entrypoint",
+             string_field "entrypoint" fields,
+             Some Abi.advance_entrypoint );
+           ( "entry_label_mismatch",
+             "abi.label",
+             "set_entrypoint_label",
+             int_string_field "label" fields,
+             Some (string_of_int Abi.advance_label) );
+           ( "output_base_register_mismatch",
+             "abi.output_base_register",
+             "set_output_base_register",
+             string_field "output_base_register" fields,
+             Some (reg_name Abi.output_base_register) );
+           ( "output_count_register_mismatch",
+             "abi.output_count_register",
+             "set_output_count_register",
+             string_field "output_count_register" fields,
+             Some (reg_name Abi.output_count_register) );
+           ( "output_count_unit_mismatch",
+             "abi.output_count_unit",
+             "set_output_count_unit",
+             string_field "output_count_unit" fields,
+             Some "cells" );
+           ( "session_abi_root_mismatch",
+             "abi.session_abi_root",
+             "set_session_abi_root",
+             string_field "session_abi_root" fields,
+             string_field "litenode_session_abi_root" fields );
+           ( "request_input_root_cell_mismatch",
+             "abi.request_input_root_cell",
+             "set_request_input_root_cell",
+             int_string_field "request_input_root_cell" fields,
+             Some (string_of_int Abi.input_root_cell) );
+           ( "r0_output_base_mismatch",
+             "output.abi_registers.r0",
+             "match_output_base_address",
+             int_string_field "r0" fields,
+             int_string_field "output_base_address" fields );
+           ( "r1_output_count_mismatch",
+             "output.abi_registers.r1",
+             "match_output_count",
+             int_string_field "r1" fields,
+             int_string_field "output_count" fields );
+         ]
+       in
+       let repairs =
+         List.filter_map
+           (fun (blocker, field, action, observed, expected) ->
+              if has blocker then
+                Some
+                  (repair_field
+                     ~field
+                     ?observed
+                     ?expected
+                     ~blockers:[blocker]
+                     action)
+              else None)
+           known
+       in
+       let known_blockers =
+         List.map (fun (blocker, _, _, _, _) -> blocker) known
+       in
+       let manual_repairs =
+         blockers
+         |> List.filter (fun blocker -> not (List.mem blocker known_blockers))
+         |> List.map
+              (fun blocker ->
+                 repair_field
+                   ~field:"abi"
+                   ~blockers:[blocker]
+                   "manual_abi_diagnosis")
+       in
+       repairs @ manual_repairs)
+  | _ ->
+    [
+      repair_field
+        ~field:"abi"
+        ~expected:"session ABI declaration"
+        "emit_session_abi_declaration";
+    ]
+
+let q1_repair_mutation ?value ?value_bits ?value_hex_le ?offset_cells
+    ?truncate_bytes name target =
+  let optional_int name = function
+    | None -> []
+    | Some value -> [name, `Int value]
+  in
+  let optional_intlit name = function
+    | None -> []
+    | Some value -> [name, `Intlit value]
+  in
+  let optional_string name = function
+    | None -> []
+    | Some value -> [name, `String value]
+  in
+  `Assoc
+    ([
+       "mutation", `String name;
+       "target", `String target;
+     ]
+     @ optional_int "value" value
+     @ optional_intlit "value_bits" value_bits
+     @ optional_string "value_hex_le" value_hex_le
+     @ optional_int "offset_cells" offset_cells
+     @ optional_int "truncate_bytes" truncate_bytes)
+
+let q1_repair_span name base cells =
+  `Assoc [
+    "name", `String name;
+    "base_address", `Int base;
+    "length_f64_cells", `Int cells;
+  ]
+
+let q1_case_field ?suffix case =
+  "expected_failure_atomicity_behavior[" ^ case ^ "]"
+  ^
+  match suffix with
+  | None -> ""
+  | Some suffix -> "." ^ suffix
+
+let q1_required_case fields case =
+  match
+    q1_output_span fields,
+    (match assoc_field "parameter_addresses_and_scalar_params" fields with
+     | Some params ->
+       (match assoc_field "values" params with
+        | Some values -> int_field "lhs" values
+        | None -> None)
+     | None -> None),
+    int_field "expected_effort" fields,
+    q1_owner_source_bytes fields,
+    q1_required_owner_bytes fields
+  with
+  | Some (output_base, output_cells),
+    Some lhs_base,
+    Some expected_effort,
+    Some owner_bytes,
+    Some required_owner_bytes ->
+    let reject_case mutation =
+      Some
+        (`Assoc [
+          "case", `String case;
+          "expected", `String "reject_before_write";
+          "executable_mutations", `List [mutation];
+          "unchanged_spans",
+          `List [q1_repair_span "expected" output_base output_cells];
+        ])
+    in
+    (match case with
+     | "nonfinite_input_nan" ->
+       reject_case
+         (q1_repair_mutation
+            ~value_bits:"9221120237041090560"
+            "replace_first_f64_input_cell"
+            "lhs")
+     | "nonfinite_input_infinity" ->
+       reject_case
+         (q1_repair_mutation
+            ~value_bits:"9218868437227405312"
+            "replace_first_f64_input_cell"
+            "lhs")
+     | "output_input_aliasing" ->
+       Some
+         (`Assoc [
+           "case", `String case;
+           "expected", `String "accept_from_snapshot_exact";
+           "executable_mutations",
+           `List [
+             q1_repair_mutation
+               ~offset_cells:0
+               "set_output_base_to_first_input_base_plus"
+               "output.base_address";
+           ];
+           "unchanged_spans",
+           `List [q1_repair_span case lhs_base output_cells];
+         ])
+     | "partial_output_input_aliasing" ->
+       let offset = 1 in
+       Some
+         (`Assoc [
+           "case", `String case;
+           "expected", `String "accept_from_snapshot_partial";
+           "executable_mutations",
+           `List [
+             q1_repair_mutation
+               ~offset_cells:offset
+               "set_output_base_to_first_input_base_plus"
+               "output.base_address";
+           ];
+           "unchanged_spans",
+           `List [q1_repair_span case (lhs_base + offset) output_cells];
+         ])
+     | "k_not_multiple_of_128" ->
+       reject_case
+         (q1_repair_mutation
+            ~value:127
+            "set_scalar_param"
+            "parameter_addresses_and_scalar_params.values.k")
+     | "bad_q1_owner_length" ->
+       reject_case
+         (q1_repair_mutation
+            ~truncate_bytes:1
+            "truncate_input_manifest"
+            "q1_owner")
+     | "negative_byte_offset" ->
+       reject_case
+         (q1_repair_mutation
+            ~value:(-1)
+            "set_scalar_param"
+            "parameter_addresses_and_scalar_params.values.byte_offset")
+     | "byte_offset_out_of_bounds" ->
+       reject_case
+         (q1_repair_mutation
+            ~value:(owner_bytes + 1)
+            "set_scalar_param"
+            "parameter_addresses_and_scalar_params.values.byte_offset")
+     | "byte_offset_truncated_span" ->
+       reject_case
+         (q1_repair_mutation
+            ~value:(max 0 (owner_bytes - required_owner_bytes + 1))
+            "set_scalar_param"
+            "parameter_addresses_and_scalar_params.values.byte_offset")
+     | "nonfinite_fp16_scale" ->
+       reject_case
+         (q1_repair_mutation
+            ~value_hex_le:"007c"
+            "replace_q1_scale_bits"
+            "q1_owner[0..2]")
+     | "lower_effort_limit" ->
+       reject_case
+         (q1_repair_mutation
+            ~value:(max 0 (expected_effort - 1))
+            "lower_effort_limit"
+            "effort")
+     | _ -> None)
+  | _ -> None
+
+let q1_expected_from_required_case = function
+  | Some (`Assoc fields) -> string_field "expected" fields
+  | _ -> None
+
+let q1_failure_repairs fields =
+  let rows =
+    match list_field "expected_failure_atomicity_behavior" fields with
+    | Some rows -> rows
+    | None -> []
+  in
+  let row_for case =
+    List.find_opt
+      (function
+        | `Assoc row_fields -> string_field "case" row_fields = Some case
+        | _ -> false)
+      rows
+  in
+  Template.q1_required_failure_expectations
+  |> List.concat_map (fun (case, expected_prefix) ->
+    let required_case = q1_required_case fields case in
+    let required_expected = q1_expected_from_required_case required_case in
+    match row_for case with
+    | None ->
+      [
+        repair_field
+          ~field:(q1_case_field case)
+          ~case
+          ~expected_prefix
+          ?required_case
+          ~blockers:["q1_failure_case_missing_" ^ case]
+          "add_required_failure_case";
+      ]
+    | Some (`Assoc row_fields) ->
+      let expected_repairs =
+        match string_field "expected" row_fields, required_expected with
+        | Some actual, Some required when String.equal actual required -> []
+        | Some actual, Some required ->
+          [
+            repair_field
+              ~field:(q1_case_field ~suffix:"expected" case)
+              ~case
+              ~expected_prefix
+              ?required_case
+              ~observed:actual
+              ~expected:required
+              ~blockers:["q1_failure_case_expected_mismatch_" ^ case]
+              "set_expected_prefix";
+          ]
+        | _ -> []
+      in
+      let mutations =
+        match list_field "executable_mutations" row_fields with
+        | Some mutations -> mutations
+        | None -> []
+      in
+      let mutation_repairs =
+        if q1_required_mutation_shape_ok fields case mutations then []
+        else
+          [
+            repair_field
+              ~field:(q1_case_field ~suffix:"executable_mutations" case)
+              ~case
+              ~expected_prefix
+              ?required_case
+              ~blockers:["q1_failure_case_mutation_mismatch_" ^ case]
+              "set_required_mutation_shape";
+          ]
+      in
+      let unchanged_spans =
+        match list_field "unchanged_spans" row_fields with
+        | Some spans -> spans
+        | None -> []
+      in
+      let span_repairs =
+        match required_expected, q1_output_span fields with
+        | Some expected, Some (base, cells)
+          when starts_with "reject_before_write" expected
+               && not (List.exists (span_covers base cells) unchanged_spans) ->
+          [
+            repair_field
+              ~field:(q1_case_field ~suffix:"unchanged_spans" case)
+              ~case
+              ~expected_prefix
+              ?required_case
+              ~blockers:["q1_failure_case_output_span_not_covered"]
+              "cover_output_span";
+          ]
+        | _ -> []
+      in
+      expected_repairs @ mutation_repairs @ span_repairs
+    | Some _ ->
+      [
+        repair_field
+          ~field:(q1_case_field case)
+          ~case
+          ~expected_prefix
+          ?required_case
+          ~blockers:["q1_failure_case_invalid_" ^ case]
+          "replace_invalid_failure_case";
+      ])
+
+let producer_repair_hint ?template_path template_json =
+  match template_json with
+  | `Assoc fields ->
+    let opcode = Option.value ~default:"unknown" (string_field "opcode" fields) in
+    let template_path = Option.value ~default:"unknown" template_path in
+    let profile_repairs =
+      match field "profile_root_binding" fields with
+      | Some binding ->
+        binding_repair
+          ~field:"numerical_profile_root"
+          ~observed_name:"numerical_profile_root"
+          ~expected_name:"profile_root"
+          binding
+      | None -> []
+    in
+    let vm_semantics_repairs =
+      match field "vm_semantics_binding" fields with
+      | Some binding ->
+        binding_repair
+          ~field:"vm_semantics_root"
+          ~observed_name:"vm_semantics_root"
+          ~expected_name:"litenode_vm_semantics_root"
+          binding
+      | None -> []
+    in
+    let abi_repairs =
+      match field "abi_declaration_binding" fields with
+      | Some binding -> abi_repair binding
+      | None -> []
+    in
+    let failure_repairs =
+      if String.equal opcode "LINEAR_Q1_G128_FP" then
+        q1_failure_repairs fields
+      else
+        []
+    in
+    let repairs =
+      profile_repairs @ vm_semantics_repairs @ abi_repairs @ failure_repairs
+    in
+    if repairs = [] then None
+    else
+      Some
+        (`Assoc [
+          "opcode", `String opcode;
+          "template_path", `String template_path;
+          "repairs", `List repairs;
+        ])
+  | _ -> None
+
+let producer_repair_manifest ?corpus_root hints =
+  let hint_count = List.length hints in
+  let repair_count =
+    List.fold_left
+      (fun count hint ->
+         match hint with
+         | `Assoc fields ->
+           count
+           +
+           (match field "repairs" fields with
+            | Some (`List repairs) -> List.length repairs
+            | _ -> 0)
+         | _ -> count)
+      0
+      hints
+  in
+  let affected_opcodes =
+    hints
+    |> List.filter_map (function
+      | `Assoc fields -> string_field "opcode" fields
+      | _ -> None)
+    |> List.sort_uniq String.compare
+  in
+  `Assoc [
+    "schema", `String "octra.inference.producer-repair-manifest.v1";
+    "diagnostic_only", `Bool true;
+    "authority", `String "litenode-conformance-checker";
+    "scope", `String "static_template_repair_hints";
+    "status", `String (if hint_count = 0 then "no_hints" else "hints_available");
+    "producer_repair_required", `Bool (hint_count > 0);
+    "corpus_root",
+    (match corpus_root with
+     | Some root -> `String root
+     | None -> `Null);
+    "hint_count", `Int hint_count;
+    "repair_count", `Int repair_count;
+    "affected_opcodes", `List (List.map (fun opcode -> `String opcode) affected_opcodes);
+    "hints", `List hints;
+  ]
+
 let failure_issues path opcode fields =
   match list_field "expected_failure_atomicity_behavior" fields with
   | None -> [issue ~opcode path "missing expected_failure_atomicity_behavior"]
@@ -1524,6 +2027,30 @@ let profile_gate_entry path opcode fields =
         "abi_declaration_binding", abi_declaration_binding;
       ])
   | Error _ -> None
+
+let template_json_with_static_bindings path opcode = function
+  | `Assoc fields as json ->
+    (match profile_gate_entry path opcode fields with
+     | Some (`Assoc gate_fields) ->
+       let binding name =
+         match field name gate_fields with
+         | Some value -> value
+         | None -> `Null
+       in
+       `Assoc
+         (fields
+          |> assoc_upsert "profile_gate" (binding "profile_gate")
+          |> assoc_upsert
+               "profile_root_binding"
+               (binding "profile_root_binding")
+          |> assoc_upsert
+               "vm_semantics_binding"
+               (binding "vm_semantics_binding")
+          |> assoc_upsert
+               "abi_declaration_binding"
+               (binding "abi_declaration_binding"))
+     | _ -> json)
+  | json -> json
 
 let template_identity_issues path opcode primitive fields =
   let opcode_issues =
@@ -1944,14 +2471,14 @@ let producer_index_report index_path =
               | Some _ -> []
               | None -> [issue ?opcode index_path "missing vm_execution_template"]
             in
-            let template_issues, profile_gate =
+            let template_issues, profile_gate, repair_hint =
               match template_path with
-              | None -> [], None
+              | None -> [], None, None
               | Some raw_path ->
                 let resolved = resolve_template_path index_path raw_path in
                 (match read_template_for_diagnostics resolved with
                  | None ->
-                   [issue ?opcode resolved "template file is unreadable"], None
+                   [issue ?opcode resolved "template file is unreadable"], None, None
                  | Some json ->
                    let opcode_value =
                      match opcode with Some value -> value | None -> "<unknown>"
@@ -1965,16 +2492,35 @@ let producer_index_report index_path =
                        profile_gate_entry resolved opcode fields
                      | _ -> None
                    in
-                   issues, profile_gate)
+                   let repair_hint =
+                     match opcode with
+                     | Some opcode ->
+                       json
+                       |> template_json_with_static_bindings resolved opcode
+                       |> producer_repair_hint ~template_path:resolved
+                     | None -> None
+                   in
+                   issues, profile_gate, repair_hint)
             in
-            opcode, path_issues @ template_issues, profile_gate
+            opcode, path_issues @ template_issues, profile_gate, repair_hint
           | _ ->
-            None, [issue index_path "template index entry must be object"], None)
+            None,
+            [issue index_path "template index entry must be object"],
+            None,
+            None)
         templates
     in
-    let opcodes = List.filter_map (fun (opcode, _, _) -> opcode) entries in
+    let opcodes = List.filter_map (fun (opcode, _, _, _) -> opcode) entries in
     let profile_gates =
-      List.filter_map (fun (_, _, profile_gate) -> profile_gate) entries
+      List.filter_map (fun (_, _, profile_gate, _) -> profile_gate) entries
+    in
+    let repair_hints =
+      List.filter_map (fun (_, _, _, repair_hint) -> repair_hint) entries
+    in
+    let profile_catalog_root =
+      match Profile.profile_catalog_root_json profile_gates with
+      | `Assoc fields -> string_field "profile_catalog_root" fields
+      | _ -> None
     in
     let profile_gate_count =
       List.length (List.filter profile_gate_present profile_gates)
@@ -2010,7 +2556,7 @@ let producer_index_report index_path =
         else begin Hashtbl.add seen opcode (); None end)
     in
     let issues =
-      List.concat (List.map (fun (_, issues, _) -> issues) entries)
+      List.concat (List.map (fun (_, issues, _, _) -> issues) entries)
       @ missing
       @ duplicates
     in
@@ -2095,6 +2641,10 @@ let producer_index_report index_path =
       Profile.root_binding_counts_json abi_declaration_binding_counts;
       "abi_declaration_binding_gate", abi_declaration_binding_gate_json abi_declaration_binding_counts;
       "validator_readiness_gate", validator_readiness_gate_json;
+      "producer_repair_manifest",
+      producer_repair_manifest
+        ?corpus_root:profile_catalog_root
+        repair_hints;
       "consensus_candidate_gate",
       consensus_candidate_gate
         ~profile_gate_count
@@ -2165,6 +2715,16 @@ let () =
             fail "--opcode is supported only with --template-index";
           let checked = check_template path in
           let template_json = Template.to_json checked.template in
+          let repair_hints =
+            List.filter_map
+              Fun.id
+              [producer_repair_hint ~template_path:path template_json]
+          in
+          let profile_catalog_root =
+            match Profile.profile_catalog_root_json [template_json] with
+            | `Assoc fields -> string_field "profile_catalog_root" fields
+            | _ -> None
+          in
           let profile_gate_count =
             if profile_gate_present template_json then 1 else 0
           in
@@ -2259,6 +2819,10 @@ let () =
               Profile.root_binding_counts_json abi_declaration_binding_counts;
               "abi_declaration_binding_gate", abi_declaration_binding_gate_json abi_declaration_binding_counts;
               "validator_readiness_gate", validator_readiness_gate_json;
+              "producer_repair_manifest",
+              producer_repair_manifest
+                ?corpus_root:profile_catalog_root
+                repair_hints;
               "consensus_candidate_gate",
               consensus_candidate_gate
                 ~profile_gate_count
@@ -2290,6 +2854,19 @@ let () =
     in
     let template_jsons =
       List.map (fun checked -> Template.to_json checked.template) templates
+    in
+    let repair_hints =
+      List.filter_map
+        (fun checked ->
+           producer_repair_hint
+             ~template_path:checked.path
+             (Template.to_json checked.template))
+        templates
+    in
+    let profile_catalog_root =
+      match Profile.profile_catalog_root_json template_jsons with
+      | `Assoc fields -> string_field "profile_catalog_root" fields
+      | _ -> None
     in
     let status_counts = profile_status_counts template_jsons in
     let root_binding_counts =
@@ -2382,6 +2959,10 @@ let () =
         Profile.root_binding_counts_json abi_declaration_binding_counts;
         "abi_declaration_binding_gate", abi_declaration_binding_gate_json abi_declaration_binding_counts;
         "validator_readiness_gate", validator_readiness_gate_json;
+        "producer_repair_manifest",
+        producer_repair_manifest
+          ?corpus_root:profile_catalog_root
+          repair_hints;
         "consensus_candidate_gate",
         consensus_candidate_gate
           ~profile_gate_count

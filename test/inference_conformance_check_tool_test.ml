@@ -437,6 +437,24 @@ let report_gate name = function
      | _ -> failwith ("gate must be object: " ^ name))
   | _ -> failwith "report must be object"
 
+let report_manifest = function
+  | `Assoc fields ->
+    (match assoc_value "producer_repair_manifest" fields with
+     | `Assoc manifest -> manifest
+     | _ -> failwith "producer_repair_manifest must be object")
+  | _ -> failwith "report must be object"
+
+let manifest_repair_fields manifest =
+  manifest
+  |> list_value "hints"
+  |> List.concat_map (function
+    | `Assoc hint_fields ->
+      list_value "repairs" hint_fields
+      |> List.filter_map (function
+        | `Assoc repair_fields -> Some (string_value "field" repair_fields)
+        | _ -> None)
+    | _ -> [])
+
 let check_q1_contract_visible report =
   match report with
   | `Assoc fields ->
@@ -462,7 +480,14 @@ let check_accepts_bound_abi_declaration () =
     | fields ->
       check
         "accepted ABI declaration gate"
-        (String.equal (string_value "status" fields) "accepted"))
+        (String.equal (string_value "status" fields) "accepted");
+    let manifest = report_manifest report in
+    check
+      "accepted manifest status"
+      (String.equal (string_value "status" manifest) "no_hints");
+    check
+      "accepted manifest has no repairs"
+      (List.length (list_value "hints" manifest) = 0))
 
 let check_accepts_v2_bound_abi_declaration () =
   with_temp_dir (fun dir ->
@@ -494,7 +519,14 @@ let check_rejects_stale_session_abi_root () =
     let readiness = report_gate "validator_readiness_gate" report in
     check
       "stale ABI root next blocker"
-      (String.equal (string_value "next_blocker" readiness) "schema_rejected"))
+      (String.equal (string_value "next_blocker" readiness) "schema_rejected");
+    let manifest = report_manifest report in
+    check
+      "stale ABI manifest status"
+      (String.equal (string_value "status" manifest) "hints_available");
+    check
+      "stale ABI repair field"
+      (List.mem "abi.session_abi_root" (manifest_repair_fields manifest)))
 
 let check_rejects_narrow_output_unit () =
   with_temp_dir (fun dir ->
@@ -506,7 +538,11 @@ let check_rejects_narrow_output_unit () =
       "narrow output unit issue"
       (List.mem
          "ABI declaration binding rejected: output_count_unit_mismatch"
-         (report_issues report)))
+         (report_issues report));
+    let manifest = report_manifest report in
+    check
+      "narrow output unit repair field"
+      (List.mem "abi.output_count_unit" (manifest_repair_fields manifest)))
 
 let check_rejects_r1_output_count_drift () =
   with_temp_dir (fun dir ->
