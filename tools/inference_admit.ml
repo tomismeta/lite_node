@@ -3593,6 +3593,25 @@ let decode_selected_indices_json results =
                ]))
   |> fun values -> `List values
 
+let decode_prior_state_contracts_json results =
+  results
+  |> List.filter (fun result -> String.equal result.session_stage_phase "decode")
+  |> List.map
+       (fun result ->
+          let prior_state_contract =
+            match result.session_stage_json with
+            | `Assoc fields ->
+              (match List.assoc_opt "prior_state_contract" fields with
+               | Some value -> value
+               | None -> `Null)
+            | _ -> `Null
+          in
+          `Assoc [
+            "transition_id", `String result.session_stage_transition_id;
+            "prior_state_contract", prior_state_contract;
+          ])
+  |> fun values -> `List values
+
 let graph_executed_opcodes_json results =
   results
   |> List.filter (fun result -> result.session_stage_graph_execution_bound)
@@ -3738,6 +3757,7 @@ let session_report_payload
     ~transition_count
     ~decode_steps
     ~decode_selected_indices
+    ~decode_prior_state_contracts
     ~runtime_semantics
     ~next_runtime_blocker
     ~opened_session_root
@@ -3761,6 +3781,7 @@ let session_report_payload
     "transition_count", `Int transition_count;
     "decode_steps", `Int decode_steps;
     "decode_selected_indices", decode_selected_indices;
+    "decode_prior_state_contracts", decode_prior_state_contracts;
     "runtime_semantics", runtime_semantics;
     "next_runtime_blocker", `String next_runtime_blocker;
     "opened_session_root", nullable_string_json opened_session_root;
@@ -3876,6 +3897,7 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
       ~transition_count
       ~decode_steps:bundle.decode_steps
       ~decode_selected_indices:(`List [])
+      ~decode_prior_state_contracts:(`List [])
       ~runtime_semantics
       ~next_runtime_blocker:"open_session_error"
       ~opened_session_root:None
@@ -3902,6 +3924,7 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
       "transition_count", `Int transition_count;
       "decode_steps", `Int bundle.decode_steps;
       "decode_selected_indices", `List [];
+      "decode_prior_state_contracts", `List [];
       "session_report_sha256", `String (session_report_sha256 payload);
       "runtime_semantics", runtime_semantics;
       "next_runtime_blocker", `String "open_session_error";
@@ -4302,6 +4325,9 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       results
   in
   let decode_selected_indices = decode_selected_indices_json results in
+  let decode_prior_state_contracts =
+    decode_prior_state_contracts_json results
+  in
   let graph_executed_opcodes = graph_executed_opcodes_json results in
   let runtime_semantics =
     session_runtime_semantics
@@ -4330,6 +4356,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       ~transition_count:(List.length bundle.transitions)
       ~decode_steps:bundle.decode_steps
       ~decode_selected_indices
+      ~decode_prior_state_contracts
       ~runtime_semantics
       ~next_runtime_blocker
       ~opened_session_root:(Some (Session.root opened))
@@ -4356,6 +4383,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       "transition_count", `Int (List.length bundle.transitions);
       "decode_steps", `Int bundle.decode_steps;
       "decode_selected_indices", decode_selected_indices;
+      "decode_prior_state_contracts", decode_prior_state_contracts;
       "session_report_sha256", `String (session_report_sha256 payload);
       "runtime_semantics", runtime_semantics;
       "next_runtime_blocker", `String next_runtime_blocker;
@@ -4459,6 +4487,7 @@ let run_inference_session_file ~timing_mode path =
         ~transition_count
         ~decode_steps:bundle.decode_steps
         ~decode_selected_indices:(`List [])
+        ~decode_prior_state_contracts:(`List [])
         ~runtime_semantics
         ~next_runtime_blocker:"program_admission_rejected"
         ~opened_session_root:None
@@ -4485,6 +4514,7 @@ let run_inference_session_file ~timing_mode path =
         "transition_count", `Int transition_count;
         "decode_steps", `Int bundle.decode_steps;
         "decode_selected_indices", `List [];
+        "decode_prior_state_contracts", `List [];
         "session_report_sha256", `String (session_report_sha256 payload);
         "runtime_semantics", runtime_semantics;
         "next_runtime_blocker", `String "program_admission_rejected";
@@ -4596,6 +4626,7 @@ let run_inference_session_file ~timing_mode path =
         ~transition_count
         ~decode_steps:bundle.decode_steps
         ~decode_selected_indices:(`List [])
+        ~decode_prior_state_contracts:(`List [])
         ~runtime_semantics
         ~next_runtime_blocker:preflight.continuation_next_runtime_blocker
         ~opened_session_root:None
@@ -4622,6 +4653,7 @@ let run_inference_session_file ~timing_mode path =
         "transition_count", `Int transition_count;
         "decode_steps", `Int bundle.decode_steps;
         "decode_selected_indices", `List [];
+        "decode_prior_state_contracts", `List [];
         "session_report_sha256", `String (session_report_sha256 payload);
         "runtime_semantics", runtime_semantics;
         "opened_session_root", `Null;
@@ -4720,6 +4752,7 @@ let run_inference_session_file ~timing_mode path =
           ~transition_count
           ~decode_steps:bundle.decode_steps
           ~decode_selected_indices:(`List [])
+          ~decode_prior_state_contracts:(`List [])
           ~runtime_semantics
           ~next_runtime_blocker
           ~opened_session_root:None
@@ -4746,6 +4779,7 @@ let run_inference_session_file ~timing_mode path =
           "transition_count", `Int transition_count;
           "decode_steps", `Int bundle.decode_steps;
           "decode_selected_indices", `List [];
+          "decode_prior_state_contracts", `List [];
           "session_report_sha256", `String (session_report_sha256 payload);
           "runtime_semantics", runtime_semantics;
           "next_runtime_blocker", `String next_runtime_blocker;
@@ -4852,6 +4886,7 @@ let run_inference_session_file ~timing_mode path =
         ~transition_count
         ~decode_steps:bundle.decode_steps
         ~decode_selected_indices
+        ~decode_prior_state_contracts:(`List [])
         ~runtime_semantics
         ~next_runtime_blocker:
           "session_continuation_state_carry_not_supported"
@@ -4879,6 +4914,7 @@ let run_inference_session_file ~timing_mode path =
         "transition_count", `Int transition_count;
         "decode_steps", `Int bundle.decode_steps;
         "decode_selected_indices", decode_selected_indices;
+        "decode_prior_state_contracts", `List [];
         "session_report_sha256", `String (session_report_sha256 payload);
         "runtime_semantics", runtime_semantics;
         "next_runtime_blocker",

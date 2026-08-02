@@ -1106,6 +1106,8 @@ let check_session_hash report =
         "decode_steps", `Int (int_json "decode_steps" fields);
         "decode_selected_indices",
         assoc_value "decode_selected_indices" fields;
+        "decode_prior_state_contracts",
+        assoc_value "decode_prior_state_contracts" fields;
         "runtime_semantics", assoc_value "runtime_semantics" fields;
         "next_runtime_blocker", assoc_value "next_runtime_blocker" fields;
         "opened_session_root", assoc_value "opened_session_root" fields;
@@ -1205,6 +1207,9 @@ let check_session_bundle_single_transition () =
     check
       "single top-level selected indices empty"
       (list_json "decode_selected_indices" fields = []);
+    check
+      "single top-level prior-state contracts empty"
+      (list_json "decode_prior_state_contracts" fields = []);
     check
       "session last output root"
       (String.length (string_json "last_transition_output_root" fields) = 64);
@@ -2050,6 +2055,40 @@ let check_session_bundle_accepts_graph_real_feedback_loop () =
       ~required:1
       ~bound:1
       ~mismatched:0;
+    (match list_json "decode_prior_state_contracts" fields with
+     | [`Assoc first; `Assoc second] ->
+       check
+         "top-level first decode prior feedback absent"
+         (String.equal
+            (string_json
+               "status"
+               (assoc_json "prior_state_contract" first))
+            "not_declared");
+       check
+         "top-level first decode transition id"
+         (String.equal
+            (string_json "transition_id" first)
+            "token-001");
+       let feedback = assoc_json "prior_state_contract" second in
+       check
+         "top-level second decode feedback matched"
+         (String.equal (string_json "status" feedback) "matched");
+       check
+         "top-level second decode feedback source"
+         (String.equal
+            (string_json "source_transition_id" feedback)
+            "token-001");
+       check
+         "top-level second decode feedback index"
+         (String.equal
+            (string_json "selected_index" feedback)
+            (string_of_int feedback_selected_index));
+       check
+         "top-level second decode feedback transition id"
+         (String.equal
+            (string_json "transition_id" second)
+            "token-002")
+     | _ -> failwith "expected two top-level prior-state contracts");
     check_transition_root_chain_summary
       semantics
       ~transition_count:3
