@@ -3097,6 +3097,108 @@ let check_session_bundle_reports_advance_session_error () =
      | _ -> failwith "expected one failed resident transition")
   | _ -> failwith "report must be an object"
 
+let check_session_bundle_reports_finalize_session_error () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~session_abi_root:Abi.v2_root
+      ~max_session_bytes:530
+      ~code:continuation_token_code
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "finalize-error bundle exits nonzero" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check_session_hash report;
+    check
+      "finalize-error status"
+      (String.equal
+         (string_json "status" fields)
+         "finalize_session_error");
+    check
+      "finalize-error blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "finalize_session_error");
+    ignore (string_json "opened_session_root" fields);
+    check
+      "finalize-error final root null"
+      (assoc_value "final_session_root" fields = `Null);
+    check
+      "finalize-error final receipt null"
+      (assoc_value "final_receipt_root" fields = `Null);
+    check
+      "finalize-error output prefix null"
+      (assoc_value "output_prefix_root" fields = `Null);
+    ignore (string_json "last_transition_output_payload" fields);
+    ignore (string_json "last_transition_output_root" fields);
+    ignore (string_json "finalize_session_error" fields);
+    check
+      "finalize-error unsupported empty"
+      (list_json "unsupported_opcodes" fields = []);
+    check
+      "finalize-error missing capabilities empty"
+      (list_json "missing_capabilities" fields = []);
+    check
+      "finalize-error policy violations empty"
+      (list_json "policy_violations" fields = []);
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "finalize-error readiness"
+      (String.equal
+         (string_json "runtime_readiness_status" semantics)
+         "resident_session_candidate");
+    check
+      "finalize-error semantic blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" semantics)
+         "finalize_session_error");
+    check_decode_selected_indices semantics [];
+    check_transition_root_chain_summary
+      semantics
+      ~transition_count:2
+      ~complete_transitions:2
+      ~advanced_session_roots:2
+      ~advance_receipt_roots:2
+      ~output_prefix_roots:2
+      ~incomplete_transition_ids:[];
+    let issue = assoc_json "first_transition_issue" semantics in
+    check
+      "finalize-error issue status"
+      (String.equal
+         (string_json "status" issue)
+         "finalize_session_error");
+    check
+      "finalize-error issue reason"
+      (String.equal
+         (string_json "reason" issue)
+         "finalize_session_error");
+    ignore (string_json "finalize_session_error" issue);
+    (match list_json "transitions" fields with
+     | [`Assoc first; `Assoc second] ->
+       check
+         "finalize-error transition accepted"
+         (String.equal (string_json "status" first) "accepted");
+       check
+         "finalize-error transition session accepted"
+         (String.equal (string_json "session_status" first) "accepted");
+       ignore (string_json "advanced_session_root" first);
+       ignore (string_json "advance_receipt_root" first);
+       ignore (string_json "output_prefix_root" first);
+       check
+         "finalize-error second transition accepted"
+         (String.equal (string_json "status" second) "accepted");
+       check
+         "finalize-error second transition session accepted"
+         (String.equal (string_json "session_status" second) "accepted");
+       ignore (string_json "advanced_session_root" second);
+       ignore (string_json "advance_receipt_root" second);
+       ignore (string_json "output_prefix_root" second)
+     | _ -> failwith "expected two accepted resident transitions")
+  | _ -> failwith "report must be an object"
+
 let check_session_bundle_reports_top_level_claim_mismatch () =
   with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
   let bundle_path =
@@ -3290,6 +3392,7 @@ let () =
   check_session_bundle_reports_admission_policy_rejection ();
   check_session_bundle_reports_open_session_error ();
   check_session_bundle_reports_advance_session_error ();
+  check_session_bundle_reports_finalize_session_error ();
   check_session_bundle_reports_top_level_claim_mismatch ();
   check_session_bundle_reports_identity_mismatch ();
   check_session_bundle_reports_declaration_mismatch ();

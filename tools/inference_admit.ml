@@ -3907,7 +3907,11 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
   print_endline (Yojson.Safe.pretty_to_string report);
   1
 
-let first_transition_issue_json ~status ~next_runtime_blocker results =
+let first_transition_issue_json
+    ?finalize_session_error
+    ~status
+    ~next_runtime_blocker
+    results =
   let issue result reason =
     `Assoc [
       "transition_id", `String result.session_stage_transition_id;
@@ -3948,6 +3952,13 @@ let first_transition_issue_json ~status ~next_runtime_blocker results =
       (fun result ->
          String.equal result.session_stage_status "advance_session_error")
       next_runtime_blocker
+  | "finalize_session_error" ->
+    `Assoc [
+      "status", `String status;
+      "reason", `String next_runtime_blocker;
+      "finalize_session_error",
+      `String (Option.value finalize_session_error ~default:"unknown");
+    ]
   | "committed_target_state_payload_transport_not_bound" ->
     issue_from
       ~values:decode_results
@@ -4026,16 +4037,16 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
          String.equal result.session_stage_status "advance_session_error")
       results
   in
-  let finalized, final_receipt =
-    if advance_session_error then None, None
+  let finalized, final_receipt, finalize_session_error =
+    if advance_session_error then None, None, None
     else
       match
         Session.finalize
           ~expected_sequence:(Session.sequence final_advanced)
           final_advanced
       with
-      | Error error -> fail (Session.error_message error)
-      | Ok (finalized, receipt) -> Some finalized, Some receipt
+      | Error error -> None, None, Some (Session.error_message error)
+      | Ok (finalized, receipt) -> Some finalized, Some receipt, None
   in
   let transitions =
     List.map (fun result -> result.session_stage_json) results
@@ -4205,6 +4216,8 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     else if prior_state_contract_mismatch then
       "decode_loop_prior_state_contract_mismatch"
     else if advance_session_error then "advance_session_error"
+    else if Option.is_some finalize_session_error then
+      "finalize_session_error"
     else if not committed_state_transport_bound then
       "committed_target_state_payload_transport_not_bound"
     else if not decode_token_contract_bound then
@@ -4228,6 +4241,8 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       else if prior_state_contract_mismatch then
         "prior_state_contract_mismatch"
       else if advance_session_error then "advance_session_error"
+      else if Option.is_some finalize_session_error then
+        "finalize_session_error"
       else if reference_mismatch then "reference_mismatch"
     else if not (String.equal next_runtime_blocker "none") then
       "runtime_incomplete"
@@ -4247,7 +4262,11 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     transition_root_chain_summary_json results
   in
   let first_transition_issue =
-    first_transition_issue_json ~status ~next_runtime_blocker results
+    first_transition_issue_json
+      ?finalize_session_error
+      ~status
+      ~next_runtime_blocker
+      results
   in
   let decode_selected_indices = decode_selected_indices_json results in
   let graph_executed_opcodes = graph_executed_opcodes_json results in
@@ -4302,6 +4321,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       "session_report_sha256", `String (session_report_sha256 payload);
       "runtime_semantics", runtime_semantics;
       "next_runtime_blocker", `String next_runtime_blocker;
+      "finalize_session_error", nullable_string_json finalize_session_error;
       "opened_session_root", `String (Session.root opened);
       "final_session_root",
       nullable_string_json (Option.map Session.root finalized);
