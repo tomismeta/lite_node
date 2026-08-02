@@ -280,7 +280,10 @@ runs. An inference opcode in an untaken branch remains an overclaim and reports
 `no_inference_opcode_executed`. This keeps lifecycle-only prefill from being
 overclaimed as Bonsai graph work. The contract is intentionally generic. It does
 not prove model-family semantics, tensor-layout correctness, full-model
-completeness, or tokenization.
+completeness, or tokenization. `runtime_semantics` also reports a diagnostic
+`graph_execution_contract_summary` with required, bound, and mismatched counts
+so callers can audit session-level graph-real claims without re-walking every
+transition.
 
 ## Canonical Session
 

@@ -212,6 +212,9 @@ type continuation_preflight = {
   continuation_runtime_readiness_status : string;
   continuation_next_runtime_blocker : string;
   continuation_session_abi_v2_supported : bool;
+  continuation_graph_execution_contract_required_count : int;
+  continuation_graph_execution_contract_bound_count : int;
+  continuation_graph_execution_contract_mismatch_count : int;
   continuation_unsupported_opcodes : string list;
   continuation_missing_capabilities : string list;
   continuation_policy_violations : Yojson.Safe.t list;
@@ -2960,6 +2963,30 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
          not execution_contract.execution_contract_mismatch)
       preflight
   in
+  let graph_execution_contract_required_count =
+    List.fold_left
+      (fun count (transition, _, _, _) ->
+         if transition_requires_graph_execution transition then count + 1
+         else count)
+      0
+      preflight
+  in
+  let graph_execution_contract_bound_count =
+    List.fold_left
+      (fun count (_, _, execution_contract, _) ->
+         if execution_contract.graph_execution_bound then count + 1
+         else count)
+      0
+      preflight
+  in
+  let graph_execution_contract_mismatch_count =
+    List.fold_left
+      (fun count (_, _, execution_contract, _) ->
+         if execution_contract.execution_contract_mismatch then count + 1
+         else count)
+      0
+      preflight
+  in
   let transition_plan =
     List.map (fun (_, _, _, json) -> json) preflight
   in
@@ -3060,6 +3087,12 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
       ];
       "identity_blockers", list_json identity_blockers;
       "declaration_blockers", list_json declaration_blockers;
+      "graph_execution_contract_summary",
+      `Assoc [
+        "required", `Int graph_execution_contract_required_count;
+        "bound", `Int graph_execution_contract_bound_count;
+        "mismatched", `Int graph_execution_contract_mismatch_count;
+      ];
       "blockers",
       `List
         (List.map
@@ -3083,6 +3116,12 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
     continuation_runtime_readiness_status = runtime_readiness_status;
     continuation_next_runtime_blocker = next_runtime_blocker;
     continuation_session_abi_v2_supported = session_abi_v2_supported;
+    continuation_graph_execution_contract_required_count =
+      graph_execution_contract_required_count;
+    continuation_graph_execution_contract_bound_count =
+      graph_execution_contract_bound_count;
+    continuation_graph_execution_contract_mismatch_count =
+      graph_execution_contract_mismatch_count;
     continuation_unsupported_opcodes = unsupported;
     continuation_missing_capabilities = missing;
     continuation_policy_violations = policy_violations;
@@ -3155,6 +3194,22 @@ let remaining_session_runtime_capabilities
      @ decode_prior_state
      @ graph_execution)
 
+let count_by predicate values =
+  List.fold_left
+    (fun count value -> if predicate value then count + 1 else count)
+    0
+    values
+
+let graph_execution_contract_summary_json
+    ~required_count
+    ~bound_count
+    ~mismatch_count =
+  `Assoc [
+    "required", `Int required_count;
+    "bound", `Int bound_count;
+    "mismatched", `Int mismatch_count;
+  ]
+
 let independent_batch_runtime_semantics =
   `Assoc [
     "diagnostic_only", `Bool true;
@@ -3188,6 +3243,7 @@ let session_runtime_semantics
     ~decode_token_contract_status
     ~decode_prior_state_contract_status
     ~graph_execution_contract_status
+    ~graph_execution_contract_summary
     ~missing_runtime_capabilities
     ~committed_state_supported
     ~committed_state_transport_bound
@@ -3239,6 +3295,8 @@ let session_runtime_semantics
     `String decode_prior_state_contract_status;
     "graph_execution_contract_status",
     `String graph_execution_contract_status;
+    "graph_execution_contract_summary",
+    graph_execution_contract_summary;
     "missing_runtime_capabilities",
     missing_runtime_capabilities;
   ]
@@ -3425,6 +3483,19 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     let graph_execution_contract_required =
       graph_execution_contract_results <> []
     in
+    let graph_execution_contract_required_count =
+      List.length graph_execution_contract_results
+    in
+    let graph_execution_contract_bound_count =
+      count_by
+        (fun result -> result.session_stage_graph_execution_bound)
+        graph_execution_contract_results
+    in
+    let graph_execution_contract_mismatch_count =
+      count_by
+        (fun result -> result.session_stage_execution_contract_mismatch)
+        graph_execution_contract_results
+    in
     let graph_execution_contract_bound =
       not graph_execution_contract_required
       || List.for_all
@@ -3436,6 +3507,12 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       else if graph_execution_contract_bound && graph_execution_contract_required
       then "bound"
       else "not_required"
+    in
+    let graph_execution_contract_summary =
+      graph_execution_contract_summary_json
+        ~required_count:graph_execution_contract_required_count
+        ~bound_count:graph_execution_contract_bound_count
+        ~mismatch_count:graph_execution_contract_mismatch_count
     in
     let decode_results =
       List.filter
@@ -3532,6 +3609,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
         ~decode_token_contract_status
         ~decode_prior_state_contract_status
         ~graph_execution_contract_status
+        ~graph_execution_contract_summary
         ~missing_runtime_capabilities
       ~committed_state_supported
       ~committed_state_transport_bound
@@ -3638,6 +3716,14 @@ let run_inference_session_file ~timing_mode path =
           ~decode_prior_state_contract_status:
             (if bundle.decode_steps <= 1 then "not_required" else "not_bound")
           ~graph_execution_contract_status
+          ~graph_execution_contract_summary:
+            (graph_execution_contract_summary_json
+               ~required_count:
+                 preflight.continuation_graph_execution_contract_required_count
+               ~bound_count:
+                 preflight.continuation_graph_execution_contract_bound_count
+               ~mismatch_count:
+                 preflight.continuation_graph_execution_contract_mismatch_count)
           ~missing_runtime_capabilities:missing_resident_runtime_capabilities
           ~committed_state_supported:false
         ~committed_state_transport_bound:false
@@ -3724,6 +3810,11 @@ let run_inference_session_file ~timing_mode path =
           ~decode_token_contract_status:"not_bound"
           ~decode_prior_state_contract_status:"not_required"
           ~graph_execution_contract_status:"mismatch"
+          ~graph_execution_contract_summary:
+            (graph_execution_contract_summary_json
+               ~required_count:1
+               ~bound_count:0
+               ~mismatch_count:1)
           ~missing_runtime_capabilities
           ~committed_state_supported:false
           ~committed_state_transport_bound:false
@@ -3806,6 +3897,11 @@ let run_inference_session_file ~timing_mode path =
           ~decode_token_contract_status
           ~decode_prior_state_contract_status:"not_required"
           ~graph_execution_contract_status:"not_required"
+          ~graph_execution_contract_summary:
+            (graph_execution_contract_summary_json
+               ~required_count:0
+               ~bound_count:0
+               ~mismatch_count:0)
           ~missing_runtime_capabilities:missing_resident_runtime_capabilities
         ~committed_state_supported:false
         ~committed_state_transport_bound:false

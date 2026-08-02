@@ -876,7 +876,37 @@ let check_session_runtime_semantics
     "session next blocker"
     (String.equal
        (string_json "next_runtime_blocker" semantics)
-       next_runtime_blocker)
+       next_runtime_blocker);
+  let graph_summary =
+    assoc_json "graph_execution_contract_summary" semantics
+  in
+  check
+    "session graph contracts not required"
+    (int_json "required" graph_summary = 0);
+  check
+    "session graph contracts not bound"
+    (int_json "bound" graph_summary = 0);
+  check
+    "session graph contracts not mismatched"
+    (int_json "mismatched" graph_summary = 0)
+
+let check_graph_execution_summary
+    semantics
+    ~required
+    ~bound
+    ~mismatched =
+  let summary =
+    assoc_json "graph_execution_contract_summary" semantics
+  in
+  check
+    "graph execution required count"
+    (int_json "required" summary = required);
+  check
+    "graph execution bound count"
+    (int_json "bound" summary = bound);
+  check
+    "graph execution mismatched count"
+    (int_json "mismatched" summary = mismatched)
 
 let check_batch_hash report =
   match report with
@@ -1483,6 +1513,11 @@ let check_session_bundle_binds_graph_execution_contract () =
       (String.equal
          (string_json "graph_execution_contract_status" semantics)
          "bound");
+    check_graph_execution_summary
+      semantics
+      ~required:1
+      ~bound:1
+      ~mismatched:0;
     check_session_hash report;
     (match list_json "transitions" fields with
      | [`Assoc first; `Assoc second] ->
@@ -1534,6 +1569,12 @@ let check_session_bundle_rejects_graph_execution_overclaim () =
       (String.equal
          (string_json "next_runtime_blocker" fields)
          "graph_execution_contract_mismatch");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check_graph_execution_summary
+      semantics
+      ~required:2
+      ~bound:0
+      ~mismatched:2;
     check "graph overclaim no executed transitions" (list_json "transitions" fields = []);
     check_session_hash report;
     let preflight = assoc_json "continuation_preflight" fields in
@@ -1589,6 +1630,11 @@ let check_single_transition_rejects_graph_execution_contract () =
       (String.equal
          (string_json "graph_execution_contract_status" semantics)
          "mismatch");
+    check_graph_execution_summary
+      semantics
+      ~required:1
+      ~bound:0
+      ~mismatched:1;
     check
       "single graph contract no execution"
       (list_json "transitions" fields = []);
@@ -1629,6 +1675,11 @@ let check_graph_execution_contract_requires_opcode_timing () =
       (String.equal
          (string_json "graph_execution_contract_status" semantics)
          "mismatch");
+    check_graph_execution_summary
+      semantics
+      ~required:1
+      ~bound:0
+      ~mismatched:1;
     (match list_json "transitions" fields with
      | `Assoc first :: _ ->
        let contract = assoc_json "execution_contract" first in
@@ -1677,6 +1728,11 @@ let check_graph_execution_contract_rejects_dead_branch_opcode () =
       (String.equal
          (string_json "graph_execution_contract_status" semantics)
          "mismatch");
+    check_graph_execution_summary
+      semantics
+      ~required:1
+      ~bound:0
+      ~mismatched:1;
     check_session_hash report;
     (match list_json "transitions" fields with
      | `Assoc first :: _ ->
@@ -1744,6 +1800,11 @@ let check_session_bundle_accepts_graph_real_feedback_loop () =
       (String.equal
          (string_json "graph_execution_contract_status" semantics)
          "bound");
+    check_graph_execution_summary
+      semantics
+      ~required:3
+      ~bound:3
+      ~mismatched:0;
     check
       "graph feedback token contract bound"
       (String.equal
