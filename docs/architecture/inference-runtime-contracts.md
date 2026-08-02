@@ -309,6 +309,22 @@ session report stays structured with `program_admission_rejected`,
 preflight transition plan carrying unsupported opcode, missing capability, and
 policy details.
 
+Session bundles default to `lifecycle_mode = token_generation`. In that mode,
+decode transitions must bind the selected-index contract before the session can
+be product-complete. A bundle may instead declare:
+
+```json
+{"lifecycle_mode":"graph_slice","graph_slice_kind":"prefill_slice"}
+```
+
+`graph_slice` is the product mode for proving generic graph execution before the
+graph reaches logits. It does not require selected-token or prior-token decode
+contracts, and an otherwise matched resident session reports
+`graph_slice_accepted` only when at least one transition binds
+`execution_contract = graph_real`. Transition-level `execution_contract =
+graph_real` remains the protocol claim that generic inference compute actually
+executed.
+
 ## Canonical Session
 
 A canonical session contains only logical progress:

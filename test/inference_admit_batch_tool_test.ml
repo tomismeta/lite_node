@@ -753,6 +753,8 @@ let stage_json_from_batch batch_path =
 let write_session_bundle_fixture
     ?(schema = Some "octra.inference.session.bundle")
     ?(decode_steps = Some 1)
+    ?lifecycle_mode
+    ?graph_slice_kind
     ?session_abi_root
     ?max_model_bytes
     ?max_view_bytes
@@ -865,6 +867,15 @@ let write_session_bundle_fixture
     | None -> []
     | Some value -> ["decode_steps", `Int value]
   in
+  let lifecycle_fields =
+    (match lifecycle_mode with
+     | None -> []
+     | Some value -> ["lifecycle_mode", `String value])
+    @
+    match graph_slice_kind with
+    | None -> []
+    | Some value -> ["graph_slice_kind", `String value]
+  in
   let declared_root_fields =
     (match request_root with
      | None -> []
@@ -879,6 +890,7 @@ let write_session_bundle_fixture
     (`Assoc
        (schema_fields
         @ decode_fields
+        @ lifecycle_fields
         @ declared_root_fields
         @ [
           "transitions", `List transitions;
@@ -2752,6 +2764,120 @@ let check_session_bundle_requires_decode_token_contract () =
      | _ -> failwith "expected two missing-token transitions")
   | _ -> failwith "report must be an object"
 
+let check_graph_slice_session_does_not_require_decode_token_contract () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~lifecycle_mode:"graph_slice"
+      ~graph_slice_kind:"prefill_slice"
+      ~session_abi_root:Abi.committed_state_root
+      ~code:graph_real_feedback_code
+      ~execution_contract_for_index:(fun _ ->
+        Some (graph_real_contract ~min_program_instructions:8 ()))
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "graph-slice bundle exits zero" (code = 0);
+  match report with
+  | `Assoc fields ->
+    check
+      "graph-slice accepted"
+      (String.equal (string_json "status" fields) "graph_slice_accepted");
+    check
+      "graph-slice blocker"
+      (String.equal (string_json "next_runtime_blocker" fields) "none");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "graph-slice lifecycle mode"
+      (String.equal (string_json "lifecycle_mode" semantics) "graph_slice");
+    check
+      "graph-slice kind"
+      (String.equal
+         (string_json "graph_slice_kind" semantics)
+         "prefill_slice");
+    check
+      "graph-slice token contract not required"
+      (String.equal
+         (string_json "decode_token_contract_status" semantics)
+         "not_required");
+    check_decode_token_summary
+      semantics
+      ~required:0
+      ~bound:0
+      ~mismatched:0;
+    check
+      "graph-slice prior contract not required"
+      (String.equal
+         (string_json "decode_prior_state_contract_status" semantics)
+         "not_required");
+    check
+      "graph-slice graph contract bound"
+      (String.equal
+         (string_json "graph_execution_contract_status" semantics)
+         "bound");
+    check_graph_execution_summary
+      semantics
+      ~required:2
+      ~bound:2
+      ~mismatched:0;
+    check
+      "graph-slice clears missing runtime caps"
+      (list_json "missing_runtime_capabilities" semantics = []);
+    check_decode_selected_indices semantics [];
+    check_transition_root_chain_summary
+      semantics
+      ~transition_count:2
+      ~complete_transitions:2
+      ~advanced_session_roots:2
+      ~advance_receipt_roots:2
+      ~output_prefix_roots:2
+      ~incomplete_transition_ids:[];
+    check_session_hash report
+  | _ -> failwith "report must be an object"
+
+let check_graph_slice_session_requires_graph_execution_contract () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~lifecycle_mode:"graph_slice"
+      ~graph_slice_kind:"prefill_slice"
+      ~session_abi_root:Abi.committed_state_root
+      ~code:committed_state_token_code
+      ~execution_contract_for_index:(fun _ -> Some lifecycle_only_contract)
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "graph-slice lifecycle-only exits incomplete" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check
+      "graph-slice lifecycle-only incomplete"
+      (String.equal (string_json "status" fields) "runtime_incomplete");
+    check
+      "graph-slice lifecycle-only blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "graph_execution_contract_not_bound");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "graph-slice lifecycle-only graph not bound"
+      (String.equal
+         (string_json "graph_execution_contract_status" semantics)
+         "not_bound");
+    check_graph_execution_summary
+      semantics
+      ~required:1
+      ~bound:0
+      ~mismatched:0;
+    check
+      "graph-slice lifecycle-only missing graph contract"
+      (list_json "missing_runtime_capabilities" semantics
+       = [`String "graph_execution_contract"]);
+    check_session_hash report
+  | _ -> failwith "report must be an object"
+
 let check_session_bundle_binds_committed_state_transport () =
   with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
   let bundle_path =
@@ -4017,6 +4143,8 @@ let () =
   check_session_bundle_accepts_producer_argmax_graph_real_loop ();
   check_session_bundle_binds_decode_token_contract ();
   check_session_bundle_requires_decode_token_contract ();
+  check_graph_slice_session_does_not_require_decode_token_contract ();
+  check_graph_slice_session_requires_graph_execution_contract ();
   check_session_bundle_binds_committed_state_transport ();
   check_session_bundle_binds_decode_prior_state_contract ();
   check_session_bundle_requires_decode_prior_state_contract ();

@@ -122,6 +122,10 @@ type execution_contract =
       min_program_instructions : int option;
     }
 
+type session_lifecycle_mode =
+  | Token_generation
+  | Graph_slice
+
 type session_transition = {
   transition_id : string;
   phase : string;
@@ -133,6 +137,8 @@ type session_transition = {
 
 type session_bundle = {
   session_path : string;
+  lifecycle_mode : session_lifecycle_mode;
+  graph_slice_kind : string option;
   declared_request_root : string option;
   declared_model_deployment_root : string option;
   decode_steps : int;
@@ -143,6 +149,35 @@ let execution_contract_requires_graph_execution = function
   | Some (Graph_real _) -> true
   | None
   | Some Lifecycle_only -> false
+
+let lifecycle_mode_to_string = function
+  | Token_generation -> "token_generation"
+  | Graph_slice -> "graph_slice"
+
+let parse_lifecycle_mode = function
+  | None -> Ok Token_generation
+  | Some "token_generation" -> Ok Token_generation
+  | Some "graph_slice" -> Ok Graph_slice
+  | Some value -> Error ("unsupported lifecycle_mode: " ^ value)
+
+let graph_slice_mode = function
+  | Graph_slice -> true
+  | Token_generation -> false
+
+let token_generation_mode = function
+  | Token_generation -> true
+  | Graph_slice -> false
+
+let expected_decode_contract_count
+    ~lifecycle_mode
+    ~decode_transition_count
+    ~decode_steps =
+  if token_generation_mode lifecycle_mode then
+    max decode_transition_count decode_steps
+  else 0
+
+let expected_decode_prior_state_contract_count expected_decode_count =
+  max 0 (expected_decode_count - 1)
 
 type batch_cache = {
   owner_bytes : (string, string) Hashtbl.t;
@@ -1505,6 +1540,8 @@ let parse_session_bundle_json session_path (json : Yojson.Safe.t) =
            "harness";
            "harness_sha256";
            "lite_node_commit";
+           "lifecycle_mode";
+           "graph_slice_kind";
            "model_deployment_root";
            "octra_inference_commit";
            "request_root";
@@ -1527,6 +1564,8 @@ let parse_session_bundle_json session_path (json : Yojson.Safe.t) =
               "harness";
               "harness_sha256";
               "lite_node_commit";
+              "lifecycle_mode";
+              "graph_slice_kind";
               "model_deployment_root";
               "octra_inference_commit";
               "request_root";
@@ -1540,76 +1579,93 @@ let parse_session_bundle_json session_path (json : Yojson.Safe.t) =
         | _, Error error, _
         | _, _, Error error -> Error error
         | Ok (), Ok (), Ok () ->
-       let top_support =
-         match optional_string_field "support" fields with
-         | Ok None -> Ok None
-         | Ok (Some path) -> Ok (Some (resolve_path ~base:bundle_base path))
-         | Error error -> Error error
-       in
-       let decode_steps =
-         match int_field "decode_steps" fields with
-         | Ok value when value >= 0 -> Ok value
-         | Ok _ -> Error "decode_steps must be non-negative"
-         | Error error -> Error error
-       in
-       (match
-          top_support,
-          decode_steps,
-          optional_string_field "request_root" fields,
-          optional_string_field "model_deployment_root" fields,
-          list_field "transitions" fields
-        with
-        | Error error, _, _, _, _
-        | _, Error error, _, _, _
-        | _, _, Error error, _, _
-        | _, _, _, Error error, _
-        | _, _, _, _, Error error -> Error error
-        | Ok top_support,
-          Ok decode_steps,
-          Ok declared_request_root,
-          Ok declared_model_deployment_root,
-          Ok transitions ->
-          if List.length transitions = 0 then
-            Error "session bundle must contain at least one transition"
-          else if List.length transitions > max_batch_stages then
-            Error
-              (Printf.sprintf
-                 "session bundle has too many transitions: %d > %d"
-                 (List.length transitions)
-                 max_batch_stages)
-          else
-            let rec loop acc = function
-              | [] ->
-                Ok {
-                  session_path;
-                  declared_request_root;
-                  declared_model_deployment_root;
-                  decode_steps;
-                  transitions = List.rev acc;
-                }
-              | value :: rest ->
-                (match
-                   parse_session_transition
-                     ~bundle_base
-                     ~top_support
-                     value
-                 with
-                 | Error error -> Error error
-                 | Ok transition ->
-                   if
-                     List.exists
-                       (fun existing ->
-                          String.equal
-                            existing.transition_id
-                            transition.transition_id)
-                       acc
-                   then
-                     Error
-                       ("duplicate transition_id: "
-                        ^ transition.transition_id)
-                   else loop (transition :: acc) rest)
-            in
-            loop [] transitions))
+          let top_support =
+            match optional_string_field "support" fields with
+            | Ok None -> Ok None
+            | Ok (Some path) ->
+              Ok (Some (resolve_path ~base:bundle_base path))
+            | Error error -> Error error
+          in
+          let decode_steps =
+            match int_field "decode_steps" fields with
+            | Ok value when value >= 0 -> Ok value
+            | Ok _ -> Error "decode_steps must be non-negative"
+            | Error error -> Error error
+          in
+          (match
+             top_support,
+             decode_steps,
+             optional_string_field "request_root" fields,
+             optional_string_field "model_deployment_root" fields,
+             optional_string_field "lifecycle_mode" fields,
+             optional_string_field "graph_slice_kind" fields,
+             list_field "transitions" fields
+           with
+           | Error error, _, _, _, _, _, _
+           | _, Error error, _, _, _, _, _
+           | _, _, Error error, _, _, _, _
+           | _, _, _, Error error, _, _, _
+           | _, _, _, _, Error error, _, _
+           | _, _, _, _, _, Error error, _
+           | _, _, _, _, _, _, Error error -> Error error
+           | Ok top_support,
+             Ok decode_steps,
+             Ok declared_request_root,
+             Ok declared_model_deployment_root,
+             Ok lifecycle_mode_raw,
+             Ok graph_slice_kind,
+             Ok transitions ->
+             (match parse_lifecycle_mode lifecycle_mode_raw with
+              | Error error -> Error error
+              | Ok lifecycle_mode ->
+                if
+                  Option.is_some graph_slice_kind
+                  && not (graph_slice_mode lifecycle_mode)
+                then Error "graph_slice_kind requires lifecycle_mode=graph_slice"
+                else if List.length transitions = 0 then
+                  Error "session bundle must contain at least one transition"
+                else if List.length transitions > max_batch_stages then
+                  Error
+                    (Printf.sprintf
+                       "session bundle has too many transitions: %d > %d"
+                       (List.length transitions)
+                       max_batch_stages)
+                else
+                  let rec loop acc = function
+                    | [] ->
+                      Ok {
+                        session_path;
+                        lifecycle_mode;
+                        graph_slice_kind;
+                        declared_request_root;
+                        declared_model_deployment_root;
+                        decode_steps;
+                        transitions = List.rev acc;
+                      }
+                    | value :: rest ->
+                      (match
+                         parse_session_transition
+                           ~bundle_base
+                           ~top_support
+                           value
+                       with
+                       | Error error -> Error error
+                       | Ok transition ->
+                         if
+                           List.exists
+                             (fun existing ->
+                                String.equal
+                                  existing.transition_id
+                                  transition.transition_id)
+                             acc
+                         then
+                           Error
+                             ("duplicate transition_id: "
+                              ^ transition.transition_id)
+                         else loop (transition :: acc) rest)
+                  in
+                  loop [] transitions))
+          )
        )
   | _ -> Error "session bundle must be an object"
 
@@ -3316,18 +3372,23 @@ let missing_resident_runtime_capabilities =
   ]
 
 let remaining_session_runtime_capabilities
+    ~decode_token_contract_required
     ~decode_token_contract_bound
     ~decode_prior_state_contract_required
     ~decode_prior_state_contract_bound
     ~graph_execution_contract_required
     ~graph_execution_contract_bound
+    ~committed_state_transport_required
     ~committed_state_transport_bound =
   let committed_state =
-    if committed_state_transport_bound then []
+    if
+      (not committed_state_transport_required)
+      || committed_state_transport_bound
+    then []
     else [`String "committed_target_state_payload_transport"]
   in
   let decode_token =
-    if decode_token_contract_bound then []
+    if (not decode_token_contract_required) || decode_token_contract_bound then []
     else [`String "decode_loop_token_contract"]
   in
   let decode_prior_state =
@@ -3688,6 +3749,8 @@ let independent_batch_runtime_semantics =
   ]
 
 let session_runtime_semantics
+    ~lifecycle_mode
+    ~graph_slice_kind
     ~transition_count
     ~runtime_readiness_status
     ~next_runtime_blocker
@@ -3706,7 +3769,16 @@ let session_runtime_semantics
     ~committed_state_transport_bound
     ~continuation_supported =
   let single_transition = transition_count = 1 in
-  `Assoc [
+  let lifecycle_fields =
+    if graph_slice_mode lifecycle_mode || Option.is_some graph_slice_kind then
+      [
+        "lifecycle_mode", `String (lifecycle_mode_to_string lifecycle_mode);
+        "graph_slice_kind", nullable_string_json graph_slice_kind;
+      ]
+    else []
+  in
+  `Assoc
+    ([
     "diagnostic_only", `Bool true;
     "resident_session_lifecycle_root",
     `String Abi.resident_lifecycle_root;
@@ -3763,6 +3835,7 @@ let session_runtime_semantics
     "missing_runtime_capabilities",
     missing_runtime_capabilities;
   ]
+     @ lifecycle_fields)
 
 let transition_report_json ?output_contract transition stage_json =
   match stage_json with
@@ -3938,6 +4011,8 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
   in
   let runtime_semantics =
     session_runtime_semantics
+      ~lifecycle_mode:bundle.lifecycle_mode
+      ~graph_slice_kind:bundle.graph_slice_kind
       ~transition_count
       ~runtime_readiness_status:"resident_session_candidate"
       ~next_runtime_blocker:"open_session_error"
@@ -4210,76 +4285,98 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       (fun result -> result.session_stage_output_contract_mismatch)
       results
   in
-    let prior_state_contract_mismatch =
-      List.exists
-        (fun result -> result.session_stage_prior_state_contract_mismatch)
-        results
-    in
-    let execution_contract_mismatch =
-      List.exists
-        (fun result -> result.session_stage_execution_contract_mismatch)
-        results
-    in
-    let graph_execution_contract_results =
-      List.filter
-        (fun result ->
-           result.session_stage_graph_execution_required
-           || result.session_stage_graph_execution_bound
-           || result.session_stage_execution_contract_mismatch)
-        results
-    in
-    let graph_execution_contract_required_results =
-      List.filter
-        (fun result -> result.session_stage_graph_execution_required)
-        graph_execution_contract_results
-    in
-    let graph_execution_contract_required =
-      graph_execution_contract_required_results <> []
-    in
-    let graph_execution_contract_required_count =
-      List.length graph_execution_contract_required_results
-    in
-    let graph_execution_contract_bound_count =
-      count_by
-        (fun result -> result.session_stage_graph_execution_bound)
-        graph_execution_contract_required_results
-    in
-    let graph_execution_contract_mismatch_count =
-      count_by
-        (fun result -> result.session_stage_execution_contract_mismatch)
-        graph_execution_contract_required_results
-    in
-    let graph_execution_contract_bound =
-      not graph_execution_contract_required
-      || List.for_all
-           (fun result -> result.session_stage_graph_execution_bound)
-           graph_execution_contract_required_results
-    in
-    let graph_execution_contract_status =
-      if execution_contract_mismatch then "mismatch"
-      else if graph_execution_contract_bound && graph_execution_contract_required
-      then "bound"
-      else if graph_execution_contract_required then "not_bound"
-      else "not_required"
-    in
-    let graph_execution_contract_summary =
-      graph_execution_contract_summary_json
-        ~required_count:graph_execution_contract_required_count
-        ~bound_count:graph_execution_contract_bound_count
-        ~mismatch_count:graph_execution_contract_mismatch_count
-    in
-    let decode_results =
-      List.filter
-        (fun result -> String.equal result.session_stage_phase "decode")
+  let prior_state_contract_mismatch =
+    List.exists
+      (fun result -> result.session_stage_prior_state_contract_mismatch)
       results
   in
+  let execution_contract_mismatch =
+    List.exists
+      (fun result -> result.session_stage_execution_contract_mismatch)
+      results
+  in
+  let graph_execution_contract_results =
+    List.filter
+      (fun result ->
+         result.session_stage_graph_execution_required
+         || result.session_stage_graph_execution_bound
+         || result.session_stage_execution_contract_mismatch)
+      results
+  in
+  let graph_slice_requires_graph_execution =
+    graph_slice_mode bundle.lifecycle_mode
+  in
+  let graph_execution_contract_required_results =
+    List.filter
+      (fun result -> result.session_stage_graph_execution_required)
+      graph_execution_contract_results
+  in
+  let declared_graph_execution_contract_required_count =
+    List.length graph_execution_contract_required_results
+  in
+  let graph_execution_contract_required =
+    graph_slice_requires_graph_execution
+    || declared_graph_execution_contract_required_count > 0
+  in
+  let graph_execution_contract_required_count =
+    if declared_graph_execution_contract_required_count > 0 then
+      declared_graph_execution_contract_required_count
+    else if graph_slice_requires_graph_execution then 1
+    else 0
+  in
+  let graph_execution_contract_bound_count =
+    count_by
+      (fun result -> result.session_stage_graph_execution_bound)
+      graph_execution_contract_required_results
+  in
+  let graph_execution_contract_mismatch_count =
+    count_by
+      (fun result -> result.session_stage_execution_contract_mismatch)
+      graph_execution_contract_required_results
+  in
+  let graph_execution_contract_bound =
+    if not graph_execution_contract_required then true
+    else
+      graph_execution_contract_required_results <> []
+      && List.for_all
+           (fun result -> result.session_stage_graph_execution_bound)
+           graph_execution_contract_required_results
+  in
+  let graph_execution_contract_status =
+    if execution_contract_mismatch then "mismatch"
+    else if graph_execution_contract_bound && graph_execution_contract_required
+    then "bound"
+    else if graph_execution_contract_required then "not_bound"
+    else "not_required"
+  in
+  let graph_execution_contract_summary =
+    graph_execution_contract_summary_json
+      ~required_count:graph_execution_contract_required_count
+      ~bound_count:graph_execution_contract_bound_count
+      ~mismatch_count:graph_execution_contract_mismatch_count
+  in
+  let decode_results =
+    List.filter
+      (fun result -> String.equal result.session_stage_phase "decode")
+      results
+  in
+  let expected_decode_count =
+    expected_decode_contract_count
+      ~lifecycle_mode:bundle.lifecycle_mode
+      ~decode_transition_count:(List.length decode_results)
+      ~decode_steps:bundle.decode_steps
+  in
+  let decode_token_contract_required = expected_decode_count > 0
+  in
   let decode_token_contract_required_count =
-    List.length decode_results
+    expected_decode_count
   in
   let decode_token_contract_bound_count =
-    count_by
-      (fun result -> result.session_stage_decode_token_contract_bound)
-      decode_results
+    if decode_token_contract_required then
+      count_by
+        (fun result -> result.session_stage_decode_token_contract_bound)
+        decode_results
+    else 0
   in
   let decode_token_contract_mismatch_count =
     count_by
@@ -4287,10 +4384,11 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       decode_results
   in
   let decode_token_contract_bound =
-    decode_results <> []
-    && List.for_all
-         (fun result -> result.session_stage_decode_token_contract_bound)
-         decode_results
+    not decode_token_contract_required
+    || (List.length decode_results >= expected_decode_count
+        && List.for_all
+             (fun result -> result.session_stage_decode_token_contract_bound)
+             decode_results)
   in
   let decode_token_contract_summary =
     contract_summary_json
@@ -4300,32 +4398,37 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
   in
   let decode_token_contract_status =
     if output_contract_mismatch then "mismatch"
+    else if not decode_token_contract_required then "not_required"
     else if decode_token_contract_bound then "bound"
     else "not_bound"
   in
   let decode_feedback_results = list_tail decode_results in
   let decode_prior_state_contract_required_count =
-    max 0 (List.length decode_results - 1)
+    expected_decode_prior_state_contract_count expected_decode_count
+  in
+  let decode_prior_state_contract_required =
+    decode_prior_state_contract_required_count > 0
   in
   let decode_prior_state_contract_bound_count =
-    count_by
-      (fun result -> result.session_stage_prior_state_contract_bound)
-      decode_feedback_results
+    if decode_prior_state_contract_required then
+      count_by
+        (fun result -> result.session_stage_prior_state_contract_bound)
+        decode_feedback_results
+    else 0
   in
   let decode_prior_state_contract_mismatch_count =
     count_by
       (fun result -> result.session_stage_prior_state_contract_mismatch)
       decode_feedback_results
   in
-  let decode_prior_state_contract_required =
-    List.length decode_results > 1
-  in
   let decode_prior_state_contract_bound =
     not decode_prior_state_contract_required
-    || List.for_all
-         (fun result ->
-            result.session_stage_prior_state_contract_bound)
-         decode_feedback_results
+    || (List.length decode_feedback_results
+        >= decode_prior_state_contract_required_count
+        && List.for_all
+             (fun result ->
+                result.session_stage_prior_state_contract_bound)
+             decode_feedback_results)
   in
   let decode_prior_state_contract_summary =
     contract_summary_json
@@ -4345,11 +4448,16 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
   let committed_state_supported =
     Abi.committed_state_supported first_session_abi_root
   in
+  let committed_state_transport_required =
+    if token_generation_mode bundle.lifecycle_mode then expected_decode_count > 0
+    else decode_results <> []
+  in
   let committed_state_transport_bound =
-    decode_results <> []
-    && List.for_all
-         (fun result -> result.session_stage_committed_state_transport_bound)
-         decode_results
+    (not committed_state_transport_required)
+    || (decode_results <> []
+        && List.for_all
+             (fun result -> result.session_stage_committed_state_transport_bound)
+             decode_results)
   in
   let next_runtime_blocker =
     if execution_contract_mismatch then "graph_execution_contract_mismatch"
@@ -4357,39 +4465,48 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     else if prior_state_contract_mismatch then
       "decode_loop_prior_state_contract_mismatch"
     else if advance_session_error then "advance_session_error"
-    else if Option.is_some finalize_session_error then
-      "finalize_session_error"
+    else if Option.is_some finalize_session_error then "finalize_session_error"
     else if graph_execution_contract_required
             && not graph_execution_contract_bound then
       "graph_execution_contract_not_bound"
-    else if not committed_state_transport_bound then
+    else if
+      committed_state_transport_required
+      && not committed_state_transport_bound
+    then
       "committed_target_state_payload_transport_not_bound"
-    else if not decode_token_contract_bound then
+    else if
+      decode_token_contract_required
+      && not decode_token_contract_bound
+    then
       "decode_loop_token_contract_not_bound"
-    else if not decode_prior_state_contract_bound then
+    else if
+      decode_prior_state_contract_required
+      && not decode_prior_state_contract_bound
+    then
       "decode_loop_prior_state_contract_not_bound"
     else "none"
   in
   let missing_runtime_capabilities =
     remaining_session_runtime_capabilities
-        ~decode_token_contract_bound
-        ~decode_prior_state_contract_required
-        ~decode_prior_state_contract_bound
-        ~graph_execution_contract_required
-        ~graph_execution_contract_bound
-        ~committed_state_transport_bound
-    in
-    let status =
-      if execution_contract_mismatch then "execution_contract_mismatch"
-      else if output_contract_mismatch then "output_contract_mismatch"
-      else if prior_state_contract_mismatch then
-        "prior_state_contract_mismatch"
-      else if advance_session_error then "advance_session_error"
-      else if Option.is_some finalize_session_error then
-        "finalize_session_error"
-      else if reference_mismatch then "reference_mismatch"
+      ~decode_token_contract_required
+      ~decode_token_contract_bound
+      ~decode_prior_state_contract_required
+      ~decode_prior_state_contract_bound
+      ~graph_execution_contract_required
+      ~graph_execution_contract_bound
+      ~committed_state_transport_required
+      ~committed_state_transport_bound
+  in
+  let status =
+    if execution_contract_mismatch then "execution_contract_mismatch"
+    else if output_contract_mismatch then "output_contract_mismatch"
+    else if prior_state_contract_mismatch then "prior_state_contract_mismatch"
+    else if advance_session_error then "advance_session_error"
+    else if Option.is_some finalize_session_error then "finalize_session_error"
+    else if reference_mismatch then "reference_mismatch"
     else if not (String.equal next_runtime_blocker "none") then
       "runtime_incomplete"
+    else if graph_slice_mode bundle.lifecycle_mode then "graph_slice_accepted"
     else "accepted"
   in
   let last_transition_output_root =
@@ -4431,6 +4548,8 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
   let graph_executed_opcodes = graph_executed_opcodes_json results in
   let runtime_semantics =
     session_runtime_semantics
+      ~lifecycle_mode:bundle.lifecycle_mode
+      ~graph_slice_kind:bundle.graph_slice_kind
       ~transition_count:(List.length bundle.transitions)
       ~runtime_readiness_status:"resident_session_candidate"
       ~next_runtime_blocker
@@ -4592,6 +4711,8 @@ let run_inference_session_file ~timing_mode path =
     in
     let runtime_semantics =
       session_runtime_semantics
+        ~lifecycle_mode:bundle.lifecycle_mode
+        ~graph_slice_kind:bundle.graph_slice_kind
         ~transition_count
         ~runtime_readiness_status:"admission_rejected"
         ~next_runtime_blocker:"program_admission_rejected"
@@ -4757,6 +4878,8 @@ let run_inference_session_file ~timing_mode path =
     in
     let runtime_semantics =
       session_runtime_semantics
+        ~lifecycle_mode:bundle.lifecycle_mode
+        ~graph_slice_kind:bundle.graph_slice_kind
         ~transition_count
         ~runtime_readiness_status:
           preflight.continuation_runtime_readiness_status
@@ -4876,11 +4999,13 @@ let run_inference_session_file ~timing_mode path =
       in
       let missing_runtime_capabilities =
         remaining_session_runtime_capabilities
+          ~decode_token_contract_required:false
           ~decode_token_contract_bound:false
           ~decode_prior_state_contract_required:false
           ~decode_prior_state_contract_bound:false
           ~graph_execution_contract_required:true
           ~graph_execution_contract_bound:false
+          ~committed_state_transport_required:false
           ~committed_state_transport_bound:false
       in
       let decode_transition_count =
@@ -4917,6 +5042,8 @@ let run_inference_session_file ~timing_mode path =
       in
       let runtime_semantics =
         session_runtime_semantics
+          ~lifecycle_mode:bundle.lifecycle_mode
+          ~graph_slice_kind:bundle.graph_slice_kind
           ~transition_count
           ~runtime_readiness_status:"rejected"
           ~next_runtime_blocker
@@ -5073,6 +5200,8 @@ let run_inference_session_file ~timing_mode path =
     in
     let runtime_semantics =
       session_runtime_semantics
+        ~lifecycle_mode:bundle.lifecycle_mode
+        ~graph_slice_kind:bundle.graph_slice_kind
         ~transition_count
         ~runtime_readiness_status:"partial_single_transition"
         ~next_runtime_blocker:
