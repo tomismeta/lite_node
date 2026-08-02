@@ -166,6 +166,30 @@ let check_p0_catalog_exports_transcendental_dependencies () =
          (string_value "transcendental_dependency_catalog_root" fields)
          (Profile.transcendental_dependency_catalog_root (`Assoc catalog)));
     let entries = list_value "entries" catalog in
+    let host_gate = assoc_value "host_native_math_gate" catalog in
+    check
+      "host native math gate rejected"
+      (String.equal (string_value "status" host_gate) "rejected");
+    check
+      "host native math gate blocks consensus"
+      (String.equal
+         (string_value "consensus_admission_status" host_gate)
+         "blocked");
+    check
+      "host native math gate next action"
+      (String.equal
+         (string_value "next_action" host_gate)
+         "implement_protocol_owned_transcendental_replacements");
+    check
+      "host native math gate softmax"
+      (List.mem
+         (`String "SOFTMAX_FP")
+         (list_value "blocked_opcodes" host_gate));
+    check
+      "host native math gate host exp"
+      (List.mem
+         (`String "host_transcendental_exp")
+         (list_value "validator_admission_blockers" host_gate));
     let entry opcode =
       match List.find_map (dependency_entry opcode) entries with
       | Some fields -> fields

@@ -1647,6 +1647,53 @@ let dependency_count entries =
     0
     entries
 
+let entry_string_field name = function
+  | `Assoc fields -> string_field name fields
+  | _ -> None
+
+let entry_string_list_field name = function
+  | `Assoc fields -> string_list_field name fields
+  | _ -> []
+
+let host_native_dependency_gate_json entries =
+  let blocked_opcodes =
+    entries
+    |> List.filter_map (fun entry ->
+      match entry_string_field "opcode" entry,
+            entry_string_field "consensus_admission_status" entry with
+      | Some opcode, Some "blocked" -> Some opcode
+      | _ -> None)
+    |> List.sort_uniq String.compare
+  in
+  let blockers =
+    entries
+    |> List.concat_map (entry_string_list_field "consensus_blocker_codes")
+    |> List.sort_uniq String.compare
+  in
+  let validator_blockers =
+    entries
+    |> List.filter_map (entry_string_field "validator_admission_blocker")
+    |> List.sort_uniq String.compare
+  in
+  let ready = blocked_opcodes = [] && blockers = [] in
+  `Assoc [
+    "diagnostic_only", `Bool true;
+    "status", `String (if ready then "accepted" else "rejected");
+    "consensus_admission_status",
+    `String (if ready then "not_blocked" else "blocked");
+    "blocked_opcode_count", `Int (List.length blocked_opcodes);
+    "blocked_opcodes",
+    `List (List.map (fun opcode -> `String opcode) blocked_opcodes);
+    "consensus_blocker_codes",
+    `List (List.map (fun blocker -> `String blocker) blockers);
+    "validator_admission_blockers",
+    `List (List.map (fun blocker -> `String blocker) validator_blockers);
+    "next_action",
+    `String
+      (if ready then "continue_validator_readiness"
+       else "implement_protocol_owned_transcendental_replacements");
+  ]
+
 let transcendental_dependency_catalog_json ~opcodes =
   let entries =
     opcodes
@@ -1658,6 +1705,7 @@ let transcendental_dependency_catalog_json ~opcodes =
     "diagnostic_only", `Bool true;
     "authority", `String "none";
     "source", `String "litenode_runtime_profile";
+    "host_native_math_gate", host_native_dependency_gate_json entries;
     "entry_count", `Int (List.length entries);
     "dependency_count", `Int (dependency_count entries);
     "entries", `List entries;
