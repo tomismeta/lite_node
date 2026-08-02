@@ -22,10 +22,35 @@ let softmax_exp_replacement_plan ~case_name ~outputs =
     "current_profile", `String "host-fp-exp-local-candidate";
     "current_classification", `String "host_transcendental_portability_gap";
     "status", `String "required_before_consensus";
+    "consensus_admission_status", `String "blocked";
+    "validator_admission_blocker", `String "host_transcendental_exp";
+    "punitive_math_status", `String "required_before_consensus";
     "consensus_action",
     `String "qualified_protocol_owned_exp_required_before_consensus";
     "preferred_replacement",
     `String "protocol-owned software exp over finite nonpositive binary64 inputs";
+    "formal_explanation",
+    `Assoc [
+      "status", `String "formally_explained";
+      "claim",
+      `String
+        "SOFTMAX_FP is locally executable but not consensus-admissible while shifted-score exponentials use host-native exp.";
+      "evidence",
+      `List [
+        `String
+          "The wide-1024-stable-tail fixture completes VM execution and differs by one output f64 bit on the known local host.";
+        `String
+          "All non-exp steps are already ordered by the VM contract: max selection, score subtraction, exponential accumulation, division, and output encoding.";
+        `String
+          "The remaining unconstrained step is exp over finite nonpositive shifted scores.";
+      ];
+      "non_resolution",
+      `List [
+        `String "do not rebaseline expected bytes to a local host exp result";
+        `String "do not treat single-platform agreement as validator readiness";
+        `String "do not promote host-fp-exp-local-candidate to consensus-safe";
+      ];
+    ];
     "blocked_surface",
     `List [
       `String "native host exp";

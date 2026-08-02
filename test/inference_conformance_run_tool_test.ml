@@ -3249,10 +3249,39 @@ let check_p0_plus_softmax_gap_reports_diagnostic_replacement_plan () =
          (string_value "status" plan_fields)
          "required_before_consensus");
     check
+      "Softmax gap plan consensus admission"
+      (String.equal
+         (string_value "consensus_admission_status" plan_fields)
+         "blocked");
+    check
+      "Softmax gap plan validator blocker"
+      (String.equal
+         (string_value "validator_admission_blocker" plan_fields)
+         "host_transcendental_exp");
+    check
+      "Softmax gap plan punitive math status"
+      (String.equal
+         (string_value "punitive_math_status" plan_fields)
+         "required_before_consensus");
+    check
       "Softmax gap plan consensus action"
       (String.equal
          (string_value "consensus_action" plan_fields)
          "qualified_protocol_owned_exp_required_before_consensus");
+    let explanation = assoc_json "formal_explanation" plan_fields in
+    check
+      "Softmax gap formal explanation status"
+      (String.equal
+         (string_value "status" explanation)
+         "formally_explained");
+    check
+      "Softmax gap formal explanation evidence"
+      (List.length (list_value "evidence" explanation) = 3);
+    check
+      "Softmax gap formal explanation non-resolution"
+      (List.mem
+         (`String "do not promote host-fp-exp-local-candidate to consensus-safe")
+         (list_value "non_resolution" explanation));
     check
       "Softmax gap plan replacement"
       (String.equal
