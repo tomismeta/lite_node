@@ -139,6 +139,11 @@ type session_bundle = {
   transitions : session_transition list;
 }
 
+let execution_contract_requires_graph_execution = function
+  | Some (Graph_real _) -> true
+  | None
+  | Some Lifecycle_only -> false
+
 type batch_cache = {
   owner_bytes : (string, string) Hashtbl.t;
   pins_by_ranges_root_and_limit : (string, Store.pin_set) Hashtbl.t;
@@ -165,6 +170,7 @@ type session_stage_result = {
   session_stage_output_payload : string option;
   session_stage_output_root : string option;
   session_stage_selected_index : string option;
+  session_stage_graph_execution_required : bool;
   session_stage_graph_execution_bound : bool;
   session_stage_executed_graph_opcodes : string list;
   session_stage_execution_contract_mismatch : bool;
@@ -2566,6 +2572,8 @@ let run_prepared_session_transition
       session_stage_output_payload = None;
       session_stage_output_root = None;
       session_stage_selected_index = None;
+      session_stage_graph_execution_required =
+        execution_contract_requires_graph_execution transition.execution_contract;
       session_stage_graph_execution_bound =
         preflight_execution_contract.graph_execution_bound;
       session_stage_executed_graph_opcodes =
@@ -2689,6 +2697,8 @@ let run_prepared_session_transition
         session_stage_output_payload = None;
         session_stage_output_root = None;
         session_stage_selected_index = None;
+        session_stage_graph_execution_required =
+          execution_contract_requires_graph_execution transition.execution_contract;
         session_stage_graph_execution_bound =
           preflight_execution_contract.graph_execution_bound;
         session_stage_executed_graph_opcodes =
@@ -2833,6 +2843,8 @@ let run_prepared_session_transition
     session_stage_output_payload = Some output_payload;
     session_stage_output_root = Some output_root;
     session_stage_selected_index = output_contract.selected_index;
+    session_stage_graph_execution_required =
+      execution_contract_requires_graph_execution transition.execution_contract;
     session_stage_graph_execution_bound =
       execution_contract.graph_execution_bound;
     session_stage_executed_graph_opcodes =
@@ -2921,10 +2933,7 @@ let valid_phase_sequence phases =
   | _ -> false
 
 let transition_requires_graph_execution transition =
-  match transition.execution_contract with
-  | Some (Graph_real _) -> true
-  | None
-  | Some Lifecycle_only -> false
+  execution_contract_requires_graph_execution transition.execution_contract
 
 let string_list_contains value values =
   List.exists (String.equal value) values
@@ -4174,36 +4183,43 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     let graph_execution_contract_results =
       List.filter
         (fun result ->
-           result.session_stage_graph_execution_bound
+           result.session_stage_graph_execution_required
+           || result.session_stage_graph_execution_bound
            || result.session_stage_execution_contract_mismatch)
         results
     in
+    let graph_execution_contract_required_results =
+      List.filter
+        (fun result -> result.session_stage_graph_execution_required)
+        graph_execution_contract_results
+    in
     let graph_execution_contract_required =
-      graph_execution_contract_results <> []
+      graph_execution_contract_required_results <> []
     in
     let graph_execution_contract_required_count =
-      List.length graph_execution_contract_results
+      List.length graph_execution_contract_required_results
     in
     let graph_execution_contract_bound_count =
       count_by
         (fun result -> result.session_stage_graph_execution_bound)
-        graph_execution_contract_results
+        graph_execution_contract_required_results
     in
     let graph_execution_contract_mismatch_count =
       count_by
         (fun result -> result.session_stage_execution_contract_mismatch)
-        graph_execution_contract_results
+        graph_execution_contract_required_results
     in
     let graph_execution_contract_bound =
       not graph_execution_contract_required
       || List.for_all
            (fun result -> result.session_stage_graph_execution_bound)
-           graph_execution_contract_results
+           graph_execution_contract_required_results
     in
     let graph_execution_contract_status =
       if execution_contract_mismatch then "mismatch"
       else if graph_execution_contract_bound && graph_execution_contract_required
       then "bound"
+      else if graph_execution_contract_required then "not_bound"
       else "not_required"
     in
     let graph_execution_contract_summary =
@@ -4303,6 +4319,9 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     else if advance_session_error then "advance_session_error"
     else if Option.is_some finalize_session_error then
       "finalize_session_error"
+    else if graph_execution_contract_required
+            && not graph_execution_contract_bound then
+      "graph_execution_contract_not_bound"
     else if not committed_state_transport_bound then
       "committed_target_state_payload_transport_not_bound"
     else if not decode_token_contract_bound then

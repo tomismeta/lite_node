@@ -377,6 +377,22 @@ let missing_range_load_code =
     VM.STOP;
   |]
 
+let graph_real_missing_range_code =
+  [|
+    VM.JDEST Abi.advance_label;
+    VM.LDI (5, VM.VString (hex_root 'f'));
+    VM.FLOAD (6, 5);
+    VM.LDI (0, VM.VInt (Z.of_int 20));
+    VM.LDI (1, VM.VString "\000\000\000\000\000\000\240\063");
+    VM.LDI (2, VM.VInt Z.zero);
+    VM.LDI (3, VM.VInt Z.one);
+    VM.LOAD_F64_LE_FP (0, 1, 2, 3);
+    VM.SILU_FP (0, 3);
+    VM.LDI (0, VM.VInt (Z.of_int 20));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+  |]
+
 let dead_branch_graph_real_code =
   [|
     VM.JDEST Abi.advance_label;
@@ -3266,6 +3282,75 @@ let check_session_bundle_reports_advance_session_error () =
      | _ -> failwith "expected one failed resident transition")
   | _ -> failwith "report must be an object"
 
+let check_graph_real_advance_error_reports_unbound_contract () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~session_abi_root:Abi.v2_root
+      ~code:graph_real_missing_range_code
+      ~execution_contract_for_index:(fun index ->
+        if index = 0 then
+          Some (graph_real_contract ~min_program_instructions:4 ())
+        else Some lifecycle_only_contract)
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "graph advance-error bundle exits nonzero" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check_session_hash report;
+    check
+      "graph advance-error status"
+      (String.equal
+         (string_json "status" fields)
+         "advance_session_error");
+    check
+      "graph advance-error blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "advance_session_error");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "graph advance-error contract not bound"
+      (String.equal
+         (string_json "graph_execution_contract_status" semantics)
+         "not_bound");
+    check_graph_execution_summary
+      semantics
+      ~required:1
+      ~bound:0
+      ~mismatched:0;
+    check
+      "graph advance-error missing graph contract capability"
+      (List.exists
+         (( = ) (`String "graph_execution_contract"))
+         (list_json "missing_runtime_capabilities" semantics));
+    check_graph_executed_opcodes semantics [];
+    check_top_level_graph_executed_opcodes fields [];
+    check_first_transition_issue
+      semantics
+      ~transition_id:"token-000"
+      ~phase:"prefill"
+      ~status:"advance_session_error"
+      ~reason:"advance_session_error";
+    (match list_json "transitions" fields with
+     | [`Assoc first] ->
+       let contract = assoc_json "execution_contract" first in
+       check
+         "graph advance-error contract planned"
+         (String.equal (string_json "status" contract) "planned");
+       check
+         "graph advance-error static opcode present"
+         (List.exists
+            (( = ) (`String "SILU_FP"))
+            (list_json "inference_opcodes" contract));
+       check
+         "graph advance-error runtime opcodes unchecked"
+         (assoc_value "executed_inference_opcodes" contract = `Null)
+     | _ -> failwith "expected one failed graph resident transition")
+  | _ -> failwith "report must be an object"
+
 let check_session_bundle_reports_finalize_session_error () =
   with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
   let bundle_path =
@@ -3563,6 +3648,7 @@ let () =
   check_session_bundle_reports_admission_policy_rejection ();
   check_session_bundle_reports_open_session_error ();
   check_session_bundle_reports_advance_session_error ();
+  check_graph_real_advance_error_reports_unbound_contract ();
   check_session_bundle_reports_finalize_session_error ();
   check_session_bundle_reports_top_level_claim_mismatch ();
   check_session_bundle_reports_identity_mismatch ();
