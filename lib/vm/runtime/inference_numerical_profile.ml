@@ -1543,6 +1543,42 @@ let host_native_blockers ~opcode =
     | _ -> false)
   |> List.sort_uniq String.compare
 
+let host_native_admission_blocker blockers =
+  if List.exists (String.equal "host_fp_exp") blockers then
+    "host_transcendental_exp"
+  else if List.exists (String.equal "host_fp_log1p") blockers then
+    "host_transcendental_log1p"
+  else if List.exists (String.equal "host_fp_trig") blockers
+          || List.exists (String.equal "host_fp_exponentiation") blockers then
+    "host_transcendental_rotary"
+  else
+    "host_transcendental_math"
+
+let host_native_formal_explanation ~opcode dependencies replacements =
+  `Assoc [
+    "status", `String "formally_explained";
+    "claim",
+    `String
+      (opcode
+       ^ " is locally executable but not consensus-admissible while it depends on host-native transcendental math.");
+    "evidence",
+    `List [
+      `String
+        "The VM profile can order inputs, reductions, output encoding, and atomic writeback, but host transcendental calls are outside the protocol arithmetic profile.";
+      `String
+        ("Native dependencies: " ^ String.concat "," dependencies);
+      `String
+        ("Required protocol-owned replacements: "
+         ^ String.concat "," replacements);
+    ];
+    "non_resolution",
+    `List [
+      `String "do not rebaseline expected bytes to a local host math result";
+      `String "do not treat single-platform agreement as validator readiness";
+      `String "do not promote host-fp-local candidate profiles to consensus-safe";
+    ];
+  ]
+
 let transcendental_dependency_entry ~opcode =
   let host_native_blockers = host_native_blockers ~opcode in
   match native_dependency_details ~opcode, host_native_blockers with
@@ -1581,6 +1617,20 @@ let transcendental_dependency_entry ~opcode =
         `List (List.map (fun value -> `String value) replacements);
         "required_punitive_vectors",
         `List (List.map (fun value -> `String value) punitive_vectors);
+        "consensus_admission_status", `String "blocked";
+        "validator_admission_blocker",
+        `String (host_native_admission_blocker host_native_blockers);
+        "punitive_math_status", `String "required_before_consensus";
+        "formal_explanation",
+        host_native_formal_explanation ~opcode dependencies replacements;
+        "acceptance_gates",
+        `List [
+          `String "protocol_owned_replacement_implemented";
+          `String "new_numerical_profile_root_bound";
+          `String "new_vm_semantics_root_bound";
+          `String "punitive_vectors_pass";
+          `String "cross_platform_matrix_matches";
+        ];
         "consensus_action",
         `String
           "qualified_protocol_owned_replacement_required_before_validator_admission";

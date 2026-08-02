@@ -190,6 +190,32 @@ let check_p0_catalog_exports_transcendental_dependencies () =
       (String.equal
          (string_value "consensus_action" softmax)
          "qualified_protocol_owned_replacement_required_before_validator_admission");
+    check
+      "softmax consensus admission blocked"
+      (String.equal
+         (string_value "consensus_admission_status" softmax)
+         "blocked");
+    check
+      "softmax validator blocker"
+      (String.equal
+         (string_value "validator_admission_blocker" softmax)
+         "host_transcendental_exp");
+    check
+      "softmax punitive status"
+      (String.equal
+         (string_value "punitive_math_status" softmax)
+         "required_before_consensus");
+    let softmax_explanation = assoc_value "formal_explanation" softmax in
+    check
+      "softmax explanation status"
+      (String.equal
+         (string_value "status" softmax_explanation)
+         "formally_explained");
+    check
+      "softmax acceptance gates"
+      (List.mem
+         (`String "cross_platform_matrix_matches")
+         (list_value "acceptance_gates" softmax));
     let gated_delta = entry "GATED_DELTA_RULE_FP" in
     check
       "gated delta local only"
@@ -198,7 +224,12 @@ let check_p0_catalog_exports_transcendental_dependencies () =
       "gated delta native exp"
       (List.mem
          "native_exp_nonpositive"
-         (string_list_value "dependencies" gated_delta))
+         (string_list_value "dependencies" gated_delta));
+    check
+      "gated delta validator blocker"
+      (String.equal
+         (string_value "validator_admission_blocker" gated_delta)
+         "host_transcendental_exp")
   | _ -> failwith "catalog output must be an object"
 
 let int_value name fields =
