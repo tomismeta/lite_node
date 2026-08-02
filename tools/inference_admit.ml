@@ -3746,6 +3746,8 @@ let session_report_payload
     ~output_prefix_root
     ~last_transition_output_payload
     ~last_transition_output_root
+    ~last_committed_target_state_root
+    ~last_committed_target_state_payload
     ~unsupported_opcodes
     ~missing_capabilities
     ~policy_violations
@@ -3771,6 +3773,12 @@ let session_report_payload
     nullable_string_json (Option.map sha256 last_transition_output_payload);
     "last_transition_output_root",
     nullable_string_json last_transition_output_root;
+    "last_committed_target_state_root",
+    nullable_string_json last_committed_target_state_root;
+    "last_committed_target_state_payload_sha256",
+    nullable_string_json (Option.map sha256 last_committed_target_state_payload);
+    "last_committed_target_state_payload_bytes",
+    nullable_int_json (Option.map String.length last_committed_target_state_payload);
     "unsupported_opcodes", unique_json_strings unsupported_opcodes;
     "missing_capabilities", unique_json_strings missing_capabilities;
     "policy_violations", `List policy_violations;
@@ -3874,6 +3882,8 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
       ~output_prefix_root:None
       ~last_transition_output_payload:None
       ~last_transition_output_root:None
+      ~last_committed_target_state_root:None
+      ~last_committed_target_state_payload:None
       ~unsupported_opcodes:[]
       ~missing_capabilities:[]
       ~policy_violations:[]
@@ -3900,6 +3910,9 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
       "last_transition_output_payload", `Null;
       "last_transition_output_payload_sha256", `Null;
       "last_transition_output_root", `Null;
+      "last_committed_target_state_root", `Null;
+      "last_committed_target_state_payload_sha256", `Null;
+      "last_committed_target_state_payload_bytes", `Null;
       "unsupported_opcodes", `List [];
       "missing_capabilities", `List [];
       "policy_violations", `List [];
@@ -4263,6 +4276,17 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     |> List.filter_map (fun result -> result.session_stage_output_payload)
     |> last_string
   in
+  let last_state_session =
+    match finalized with
+    | Some session -> session
+    | None -> final_advanced
+  in
+  let last_committed_target_state_root =
+    Session.committed_target_state_root last_state_session
+  in
+  let last_committed_target_state_payload =
+    Session.committed_target_state_payload last_state_session
+  in
   let transition_root_chain_summary =
     transition_root_chain_summary_json results
   in
@@ -4310,6 +4334,8 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       ~output_prefix_root:(Option.map Session.output_prefix_root finalized)
       ~last_transition_output_payload
       ~last_transition_output_root
+      ~last_committed_target_state_root
+      ~last_committed_target_state_payload
       ~unsupported_opcodes:unsupported
       ~missing_capabilities:missing
       ~policy_violations:violations
@@ -4345,6 +4371,14 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
         (Option.map sha256 last_transition_output_payload);
       "last_transition_output_root",
       nullable_string_json last_transition_output_root;
+      "last_committed_target_state_root",
+      nullable_string_json last_committed_target_state_root;
+      "last_committed_target_state_payload_sha256",
+      nullable_string_json
+        (Option.map sha256 last_committed_target_state_payload);
+      "last_committed_target_state_payload_bytes",
+      nullable_int_json
+        (Option.map String.length last_committed_target_state_payload);
       "unsupported_opcodes", unique_json_strings unsupported;
       "missing_capabilities", unique_json_strings missing;
       "policy_violations", `List violations;
@@ -4427,6 +4461,8 @@ let run_inference_session_file ~timing_mode path =
         ~output_prefix_root:None
         ~last_transition_output_payload:None
         ~last_transition_output_root:None
+        ~last_committed_target_state_root:None
+        ~last_committed_target_state_payload:None
         ~unsupported_opcodes:preflight.admission_unsupported_opcodes
         ~missing_capabilities:preflight.admission_missing_capabilities
         ~policy_violations:preflight.admission_policy_violations
@@ -4452,6 +4488,9 @@ let run_inference_session_file ~timing_mode path =
         "last_transition_output_payload", `Null;
         "last_transition_output_payload_sha256", `Null;
         "last_transition_output_root", `Null;
+        "last_committed_target_state_root", `Null;
+        "last_committed_target_state_payload_sha256", `Null;
+        "last_committed_target_state_payload_bytes", `Null;
         "unsupported_opcodes",
         unique_json_strings preflight.admission_unsupported_opcodes;
         "missing_capabilities",
@@ -4557,6 +4596,8 @@ let run_inference_session_file ~timing_mode path =
         ~output_prefix_root:None
         ~last_transition_output_payload:None
         ~last_transition_output_root:None
+        ~last_committed_target_state_root:None
+        ~last_committed_target_state_payload:None
         ~unsupported_opcodes:preflight.continuation_unsupported_opcodes
         ~missing_capabilities:preflight.continuation_missing_capabilities
         ~policy_violations:preflight.continuation_policy_violations
@@ -4581,6 +4622,9 @@ let run_inference_session_file ~timing_mode path =
         "last_transition_output_payload", `Null;
         "last_transition_output_payload_sha256", `Null;
         "last_transition_output_root", `Null;
+        "last_committed_target_state_root", `Null;
+        "last_committed_target_state_payload_sha256", `Null;
+        "last_committed_target_state_payload_bytes", `Null;
         "next_runtime_blocker",
         `String preflight.continuation_next_runtime_blocker;
         "unsupported_opcodes",
@@ -4674,6 +4718,8 @@ let run_inference_session_file ~timing_mode path =
           ~output_prefix_root:None
           ~last_transition_output_payload:None
           ~last_transition_output_root:None
+          ~last_committed_target_state_root:None
+          ~last_committed_target_state_payload:None
           ~unsupported_opcodes:[]
           ~missing_capabilities:[]
           ~policy_violations:[]
@@ -4699,6 +4745,9 @@ let run_inference_session_file ~timing_mode path =
           "last_transition_output_payload", `Null;
           "last_transition_output_payload_sha256", `Null;
           "last_transition_output_root", `Null;
+          "last_committed_target_state_root", `Null;
+          "last_committed_target_state_payload_sha256", `Null;
+          "last_committed_target_state_payload_bytes", `Null;
           "unsupported_opcodes", `List [];
           "missing_capabilities", `List [];
           "policy_violations", `List [];
@@ -4789,6 +4838,8 @@ let run_inference_session_file ~timing_mode path =
         ~output_prefix_root:None
         ~last_transition_output_payload:(Some result.stage_output_payload)
         ~last_transition_output_root:(Some result.stage_output_root)
+        ~last_committed_target_state_root:None
+        ~last_committed_target_state_payload:None
         ~unsupported_opcodes:result.stage_unsupported_opcodes
         ~missing_capabilities:result.stage_missing_capabilities
         ~policy_violations:result.stage_policy_violations
@@ -4816,6 +4867,9 @@ let run_inference_session_file ~timing_mode path =
         "last_transition_output_payload_sha256",
         `String (sha256 result.stage_output_payload);
         "last_transition_output_root", `String result.stage_output_root;
+        "last_committed_target_state_root", `Null;
+        "last_committed_target_state_payload_sha256", `Null;
+        "last_committed_target_state_payload_bytes", `Null;
         "unsupported_opcodes",
         unique_json_strings result.stage_unsupported_opcodes;
         "missing_capabilities",

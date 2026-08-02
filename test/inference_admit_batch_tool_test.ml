@@ -1117,6 +1117,12 @@ let check_session_hash report =
         assoc_value "last_transition_output_payload_sha256" fields;
         "last_transition_output_root",
         assoc_value "last_transition_output_root" fields;
+        "last_committed_target_state_root",
+        assoc_value "last_committed_target_state_root" fields;
+        "last_committed_target_state_payload_sha256",
+        assoc_value "last_committed_target_state_payload_sha256" fields;
+        "last_committed_target_state_payload_bytes",
+        assoc_value "last_committed_target_state_payload_bytes" fields;
         "unsupported_opcodes", assoc_value "unsupported_opcodes" fields;
         "missing_capabilities", assoc_value "missing_capabilities" fields;
         "policy_violations", assoc_value "policy_violations" fields;
@@ -1201,6 +1207,21 @@ let check_session_bundle_single_transition () =
          fields
          ~payload_field:"last_transition_output_payload"
          ~sha_field:"last_transition_output_payload_sha256");
+    check
+      "single committed-state root null"
+      (assoc_value "last_committed_target_state_root" fields = `Null);
+    check
+      "single committed-state payload sha null"
+      (assoc_value
+         "last_committed_target_state_payload_sha256"
+         fields
+       = `Null);
+    check
+      "single committed-state payload bytes null"
+      (assoc_value
+         "last_committed_target_state_payload_bytes"
+         fields
+       = `Null);
     check "single opened root null" (assoc_value "opened_session_root" fields = `Null);
     check "single final root null" (assoc_value "final_session_root" fields = `Null);
     check
@@ -2293,6 +2314,24 @@ let check_session_bundle_binds_committed_state_transport () =
       ~required:0
       ~bound:0
       ~mismatched:0;
+    check
+      "top-level committed-state root"
+      (String.equal
+         (string_json "last_committed_target_state_root" fields)
+         committed_state_payload_root);
+    check
+      "top-level committed-state payload sha"
+      (String.equal
+         (string_json
+            "last_committed_target_state_payload_sha256"
+            fields)
+         committed_state_payload_root);
+    check
+      "top-level committed-state payload bytes"
+      (int_json
+         "last_committed_target_state_payload_bytes"
+         fields
+       = String.length committed_state_payload);
     check_session_hash report;
     (match list_json "transitions" fields with
      | [`Assoc first; `Assoc second] ->
