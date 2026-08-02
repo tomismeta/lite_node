@@ -924,7 +924,10 @@ let check_session_runtime_semantics
     (int_json "bound" graph_summary = 0);
   check
     "session graph contracts not mismatched"
-    (int_json "mismatched" graph_summary = 0)
+    (int_json "mismatched" graph_summary = 0);
+  check
+    "session graph executed opcodes empty"
+    (list_json "graph_executed_opcodes" semantics = [])
 
 let check_contract_summary
     field
@@ -964,6 +967,21 @@ let check_decode_selected_indices semantics expected =
   check
     "decode selected indices"
     (list_json "decode_selected_indices" semantics = expected_json)
+
+let check_graph_executed_opcodes semantics expected =
+  let expected_json =
+    List.map
+      (fun (transition_id, opcodes) ->
+         `Assoc [
+           "transition_id", `String transition_id;
+           "executed_inference_opcodes",
+           `List (List.map (fun opcode -> `String opcode) opcodes);
+         ])
+      expected
+  in
+  check
+    "graph executed opcodes"
+    (list_json "graph_executed_opcodes" semantics = expected_json)
 
 let check_decode_prior_state_summary =
   check_contract_summary
@@ -1936,6 +1954,13 @@ let check_session_bundle_accepts_graph_real_feedback_loop () =
       ~required:3
       ~bound:3
       ~mismatched:0;
+    check_graph_executed_opcodes
+      semantics
+      [
+        "token-000", ["SILU_FP"];
+        "token-001", ["SILU_FP"];
+        "token-002", ["SILU_FP"];
+      ];
     check
       "graph feedback token contract bound"
       (String.equal

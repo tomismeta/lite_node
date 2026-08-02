@@ -166,6 +166,7 @@ type session_stage_result = {
   session_stage_output_root : string option;
   session_stage_selected_index : string option;
   session_stage_graph_execution_bound : bool;
+  session_stage_executed_graph_opcodes : string list;
   session_stage_execution_contract_mismatch : bool;
   session_stage_prior_state_contract_bound : bool;
   session_stage_prior_state_contract_mismatch : bool;
@@ -1709,6 +1710,7 @@ let executed_graph_opcode_names graph_opcodes opcode_profile =
 type execution_contract_check = {
   execution_contract_json : Yojson.Safe.t;
   graph_execution_bound : bool;
+  executed_graph_opcodes : string list;
   execution_contract_mismatch : bool;
 }
 
@@ -1756,6 +1758,8 @@ let execution_contract_check
           ]
            @ evidence);
       graph_execution_bound = false;
+      executed_graph_opcodes =
+        Option.value ~default:[] executed_graph_opcodes;
       execution_contract_mismatch = false;
     }
   | Some Lifecycle_only ->
@@ -1769,6 +1773,8 @@ let execution_contract_check
           ]
            @ evidence);
       graph_execution_bound = false;
+      executed_graph_opcodes =
+        Option.value ~default:[] executed_graph_opcodes;
       execution_contract_mismatch = false;
     }
   | Some (Graph_real { min_program_instructions }) ->
@@ -1791,6 +1797,8 @@ let execution_contract_check
              @ declared
              @ evidence);
         graph_execution_bound = false;
+        executed_graph_opcodes =
+          Option.value ~default:[] executed_graph_opcodes;
         execution_contract_mismatch = true;
       }
     in
@@ -1816,6 +1824,8 @@ let execution_contract_check
                  @ declared
                  @ evidence);
             graph_execution_bound = false;
+            executed_graph_opcodes =
+              Option.value ~default:[] executed_graph_opcodes;
             execution_contract_mismatch = false;
           }
         | Some [] -> mismatch "no_inference_opcode_executed"
@@ -1830,6 +1840,8 @@ let execution_contract_check
                  @ declared
                  @ evidence);
             graph_execution_bound = true;
+            executed_graph_opcodes =
+              Option.value ~default:[] executed_graph_opcodes;
             execution_contract_mismatch = false;
           }))
 
@@ -2556,6 +2568,8 @@ let run_prepared_session_transition
       session_stage_selected_index = None;
       session_stage_graph_execution_bound =
         preflight_execution_contract.graph_execution_bound;
+      session_stage_executed_graph_opcodes =
+        preflight_execution_contract.executed_graph_opcodes;
       session_stage_execution_contract_mismatch =
         preflight_execution_contract.execution_contract_mismatch;
       session_stage_prior_state_contract_bound =
@@ -2722,6 +2736,8 @@ let run_prepared_session_transition
     session_stage_selected_index = output_contract.selected_index;
     session_stage_graph_execution_bound =
       execution_contract.graph_execution_bound;
+    session_stage_executed_graph_opcodes =
+      execution_contract.executed_graph_opcodes;
     session_stage_execution_contract_mismatch =
       execution_contract.execution_contract_mismatch;
     session_stage_prior_state_contract_bound =
@@ -3478,6 +3494,18 @@ let decode_selected_indices_json results =
                ]))
   |> fun values -> `List values
 
+let graph_executed_opcodes_json results =
+  results
+  |> List.filter (fun result -> result.session_stage_graph_execution_bound)
+  |> List.map
+       (fun result ->
+          `Assoc [
+            "transition_id", `String result.session_stage_transition_id;
+            "executed_inference_opcodes",
+            list_json result.session_stage_executed_graph_opcodes;
+          ])
+  |> fun values -> `List values
+
 let independent_batch_runtime_semantics =
   `Assoc [
     "diagnostic_only", `Bool true;
@@ -3515,6 +3543,7 @@ let session_runtime_semantics
     ~decode_prior_state_contract_summary
     ~graph_execution_contract_status
     ~graph_execution_contract_summary
+    ~graph_executed_opcodes
     ~transition_root_chain_summary
     ~first_transition_issue
     ~missing_runtime_capabilities
@@ -3573,6 +3602,7 @@ let session_runtime_semantics
     `String graph_execution_contract_status;
     "graph_execution_contract_summary",
     graph_execution_contract_summary;
+    "graph_executed_opcodes", graph_executed_opcodes;
     "transition_root_chain_summary", transition_root_chain_summary;
     "first_transition_issue", first_transition_issue;
     "missing_runtime_capabilities",
@@ -3987,6 +4017,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     first_transition_issue_json ~status ~next_runtime_blocker results
   in
   let decode_selected_indices = decode_selected_indices_json results in
+  let graph_executed_opcodes = graph_executed_opcodes_json results in
   let runtime_semantics =
     session_runtime_semantics
       ~transition_count:(List.length bundle.transitions)
@@ -3999,6 +4030,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       ~decode_prior_state_contract_summary
       ~graph_execution_contract_status
       ~graph_execution_contract_summary
+      ~graph_executed_opcodes
       ~transition_root_chain_summary
       ~first_transition_issue
       ~missing_runtime_capabilities
@@ -4105,6 +4137,7 @@ let run_inference_session_file ~timing_mode path =
              ~required_count:graph_execution_contract_required_count
              ~bound_count:0
              ~mismatch_count:0)
+        ~graph_executed_opcodes:(`List [])
         ~transition_root_chain_summary:
           (empty_transition_root_chain_summary_json ~transition_count)
         ~first_transition_issue:preflight.admission_first_transition_issue
@@ -4231,6 +4264,7 @@ let run_inference_session_file ~timing_mode path =
                preflight.continuation_graph_execution_contract_bound_count
              ~mismatch_count:
                preflight.continuation_graph_execution_contract_mismatch_count)
+        ~graph_executed_opcodes:(`List [])
         ~transition_root_chain_summary:
           (empty_transition_root_chain_summary_json ~transition_count)
         ~first_transition_issue:
@@ -4340,6 +4374,7 @@ let run_inference_session_file ~timing_mode path =
                ~required_count:1
                ~bound_count:0
                ~mismatch_count:1)
+          ~graph_executed_opcodes:(`List [])
           ~transition_root_chain_summary:
             (empty_transition_root_chain_summary_json ~transition_count)
           ~first_transition_issue:
@@ -4453,6 +4488,7 @@ let run_inference_session_file ~timing_mode path =
              ~required_count:0
                ~bound_count:0
                ~mismatch_count:0)
+          ~graph_executed_opcodes:(`List [])
           ~transition_root_chain_summary:
             (empty_transition_root_chain_summary_json ~transition_count)
           ~first_transition_issue:`Null

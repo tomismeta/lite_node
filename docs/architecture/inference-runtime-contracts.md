@@ -285,6 +285,9 @@ completeness, or tokenization. `runtime_semantics` also reports a diagnostic
 so callers can audit session-level graph-real claims without re-walking every
 transition. Decode token and prior-state contracts use the same summary shape
 under `decode_token_contract_summary` and `decode_prior_state_contract_summary`;
+`graph_executed_opcodes` lists matched graph-real transition ids with the
+runtime-observed generic inference compute opcodes; transport opcodes such as
+range loading are not graph compute evidence.
 `decode_selected_indices` is a diagnostic list derived only from matched decode
 selected-index output contracts; the per-transition contract objects remain the
 detailed authority. A
