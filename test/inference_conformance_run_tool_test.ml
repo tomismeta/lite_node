@@ -844,6 +844,56 @@ let producer_repair_hints report =
   | `Assoc fields -> list_value "producer_repair_hints" fields
   | _ -> failwith "report must be object"
 
+let producer_repair_manifest report =
+  match report with
+  | `Assoc fields -> assoc_json "producer_repair_manifest" fields
+  | _ -> failwith "report must be object"
+
+let check_producer_repair_manifest report ~status ~hint_count
+    ~repair_count ~affected_opcodes =
+  let manifest = producer_repair_manifest report in
+  check
+    "producer repair manifest schema"
+    (String.equal
+       (string_value "schema" manifest)
+       "octra.inference.producer-repair-manifest.v1");
+  check
+    "producer repair manifest diagnostic"
+    (bool_value "diagnostic_only" manifest);
+  check
+    "producer repair manifest authority"
+    (String.equal
+       (string_value "authority" manifest)
+       "litenode-conformance-runner");
+  check
+    "producer repair manifest scope"
+    (String.equal
+       (string_value "scope" manifest)
+       "template_producer_repair_hints");
+  check
+    "producer repair manifest status"
+    (String.equal (string_value "status" manifest) status);
+  check
+    "producer repair manifest requirement"
+    (bool_value "producer_repair_required" manifest = (hint_count > 0));
+  check
+    "producer repair manifest corpus root bound"
+    (match assoc_value "corpus_root" manifest with
+     | `String root -> String.length root = 64
+     | _ -> false);
+  check
+    "producer repair manifest hint count"
+    (int_value "hint_count" manifest = hint_count);
+  check
+    "producer repair manifest repair count"
+    (int_value "repair_count" manifest = repair_count);
+  check
+    "producer repair manifest affected opcodes"
+    (string_list "affected_opcodes" manifest = affected_opcodes);
+  check
+    "producer repair manifest mirrors hints"
+    (list_value "hints" manifest = producer_repair_hints report)
+
 let first_repair_hint report =
   match producer_repair_hints report with
   | [`Assoc fields] -> fields
@@ -1167,6 +1217,12 @@ let check_good_template_reports_bound_abi () =
     check
       "good report has no producer repair hints"
       (producer_repair_hints report = []);
+    check_producer_repair_manifest
+      report
+      ~status:"no_hints"
+      ~hint_count:0
+      ~repair_count:0
+      ~affected_opcodes:[];
     check_transcendental_dependency_catalog
       report
       ~entry_count:0
@@ -1398,6 +1454,12 @@ let check_require_failure_cases_rejects_missing_q1_case () =
             (string_value "next_blocker" readiness)
             "q1_failure_case_missing_nonfinite_fp16_scale");
        let repairs = first_repair_hint report |> repair_fields in
+       check_producer_repair_manifest
+         report
+         ~status:"hints_available"
+         ~hint_count:1
+         ~repair_count:1
+         ~affected_opcodes:["LINEAR_Q1_G128_FP"];
        let missing_case =
          repair_for_field
            "expected_failure_atomicity_behavior[nonfinite_fp16_scale]"
@@ -3031,6 +3093,12 @@ let check_p0_plus_rejected_results_empty_when_accepted () =
       check
         "P0-plus accepted repair hints empty"
         (list_value "producer_repair_hints" fields = []);
+      check_producer_repair_manifest
+        report
+        ~status:"no_hints"
+        ~hint_count:0
+        ~repair_count:0
+        ~affected_opcodes:[];
       check_transcendental_dependency_catalog
         report
         ~entry_count:1
@@ -3071,6 +3139,12 @@ let check_p0_plus_rejected_results_report_outputs () =
       check
         "P0-plus mixed repair hints empty"
         (list_value "producer_repair_hints" fields = []);
+      check_producer_repair_manifest
+        report
+        ~status:"no_hints"
+        ~hint_count:0
+        ~repair_count:0
+        ~affected_opcodes:[];
       check
         "P0-plus generic mismatch replacement plans empty"
         (list_value "deterministic_replacement_plans" fields = []);

@@ -949,6 +949,46 @@ let producer_repair_hint = function
 let producer_repair_hints results =
   results |> List.filter_map producer_repair_hint
 
+let producer_repair_manifest ?corpus_root hints =
+  let hint_count = List.length hints in
+  let repair_count =
+    List.fold_left
+      (fun count hint ->
+         match hint with
+         | `Assoc fields ->
+           count
+           +
+           (match field "repairs" fields with
+            | Some (`List repairs) -> List.length repairs
+            | _ -> 0)
+         | _ -> count)
+      0
+      hints
+  in
+  let affected_opcodes =
+    hints
+    |> List.filter_map (function
+      | `Assoc fields -> opt_string_field "opcode" fields
+      | _ -> None)
+    |> List.sort_uniq String.compare
+  in
+  `Assoc [
+    "schema", `String "octra.inference.producer-repair-manifest.v1";
+    "diagnostic_only", `Bool true;
+    "authority", `String "litenode-conformance-runner";
+    "scope", `String "template_producer_repair_hints";
+    "status", `String (if hint_count = 0 then "no_hints" else "hints_available");
+    "producer_repair_required", `Bool (hint_count > 0);
+    "corpus_root",
+    (match corpus_root with
+     | Some root -> `String root
+     | None -> `Null);
+    "hint_count", `Int hint_count;
+    "repair_count", `Int repair_count;
+    "affected_opcodes", `List (List.map (fun opcode -> `String opcode) affected_opcodes);
+    "hints", `List hints;
+  ]
+
 type executable_abi_counts = {
   executable_abi_matched : int;
   executable_abi_mismatch : int;
@@ -4188,6 +4228,22 @@ let template_corpus_root root_dir entries =
   |> List.sort compare
   |> fun values -> sha256 (Yojson.Safe.to_string (`List values))
 
+let p0_plus_fixture_corpus_entry root_dir entry =
+  let manifest_path = string_field "manifest" entry in
+  let full_manifest_path = Filename.concat root_dir manifest_path in
+  let raw = read_file full_manifest_path in
+  ignore (read_json full_manifest_path);
+  `Assoc [
+    "manifest", `String manifest_path;
+    "sha256", `String (sha256 raw);
+  ]
+
+let p0_plus_fixture_corpus_root root_dir entries =
+  entries
+  |> List.map (p0_plus_fixture_corpus_entry root_dir)
+  |> List.sort compare
+  |> fun values -> sha256 (Yojson.Safe.to_string (`List values))
+
 let run_p0_plus_pack path =
   (match !cross_platform_matrix with
    | Some _ -> fail "--cross-platform-matrix is supported only with --template-index"
@@ -4210,6 +4266,7 @@ let run_p0_plus_pack path =
       | _ -> fail "P0-plus fixture entries must be objects")
   in
   let results = List.map (execute_p0_plus_fixture root_dir) entries in
+  let fixture_corpus_root = Some (p0_plus_fixture_corpus_root root_dir entries) in
   let fixture_count = List.length results in
   let execution_accepted = List.for_all fst results in
   let execution_status =
@@ -4304,6 +4361,7 @@ let run_p0_plus_pack path =
       ~required_failure_case_contract_blockers:[]
       status_counts
   in
+  let repair_hints = producer_repair_hints (List.map snd results) in
   let accepted =
     execution_accepted
     && profile_roots_required_passes ~root_binding_counts
@@ -4345,8 +4403,9 @@ let run_p0_plus_pack path =
     Profile.profile_catalog_root_json profile_gates;
     "profile_root_binding_catalog",
     Profile.profile_root_binding_catalog_json (List.map snd results);
-    "producer_repair_hints",
-    `List (producer_repair_hints (List.map snd results));
+    "producer_repair_hints", `List repair_hints;
+    "producer_repair_manifest",
+    producer_repair_manifest ?corpus_root:fixture_corpus_root repair_hints;
     "consensus_blocker_catalog",
     Profile.consensus_blocker_catalog_json profile_gates;
     "consensus_blocker_class_counts",
@@ -4613,6 +4672,7 @@ let run_index path =
       ~required_failure_case_contract_blockers
       status_counts
   in
+  let repair_hints = producer_repair_hints (List.map snd results) in
   let accepted =
     accepted
     && required_gate_passes
@@ -4660,8 +4720,9 @@ let run_index path =
     Profile.profile_catalog_root_json profile_gates;
     "profile_root_binding_catalog",
     Profile.profile_root_binding_catalog_json (List.map snd results);
-    "producer_repair_hints",
-    `List (producer_repair_hints (List.map snd results));
+    "producer_repair_hints", `List repair_hints;
+    "producer_repair_manifest",
+    producer_repair_manifest ?corpus_root:template_corpus_root repair_hints;
     "consensus_blocker_catalog",
     Profile.consensus_blocker_catalog_json profile_gates;
     "consensus_blocker_class_counts",
