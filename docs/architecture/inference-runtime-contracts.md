@@ -283,7 +283,9 @@ not prove model-family semantics, tensor-layout correctness, full-model
 completeness, or tokenization. `runtime_semantics` also reports a diagnostic
 `graph_execution_contract_summary` with required, bound, and mismatched counts
 so callers can audit session-level graph-real claims without re-walking every
-transition.
+transition. Decode token and prior-state contracts use the same summary shape
+under `decode_token_contract_summary` and `decode_prior_state_contract_summary`;
+the per-transition contract objects remain the detailed authority.
 
 ## Canonical Session
 

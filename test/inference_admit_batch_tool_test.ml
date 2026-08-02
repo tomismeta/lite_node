@@ -846,6 +846,12 @@ let check_runtime_semantics report =
 
 let check_session_runtime_semantics
     ?(next_runtime_blocker = "session_continuation_state_carry_not_supported")
+    ?(decode_token_required = 1)
+    ?(decode_token_bound = 0)
+    ?(decode_token_mismatched = 0)
+    ?(decode_prior_required = 0)
+    ?(decode_prior_bound = 0)
+    ?(decode_prior_mismatched = 0)
     semantics =
   check
     "session runtime diagnostic"
@@ -877,9 +883,29 @@ let check_session_runtime_semantics
     (String.equal
        (string_json "next_runtime_blocker" semantics)
        next_runtime_blocker);
-  let graph_summary =
-    assoc_json "graph_execution_contract_summary" semantics
+  let token_summary = assoc_json "decode_token_contract_summary" semantics in
+  check
+    "session decode token contracts required"
+    (int_json "required" token_summary = decode_token_required);
+  check
+    "session decode token contracts bound"
+    (int_json "bound" token_summary = decode_token_bound);
+  check
+    "session decode token contracts mismatched"
+    (int_json "mismatched" token_summary = decode_token_mismatched);
+  let prior_summary =
+    assoc_json "decode_prior_state_contract_summary" semantics
   in
+  check
+    "session decode prior contracts required"
+    (int_json "required" prior_summary = decode_prior_required);
+  check
+    "session decode prior contracts bound"
+    (int_json "bound" prior_summary = decode_prior_bound);
+  check
+    "session decode prior contracts mismatched"
+    (int_json "mismatched" prior_summary = decode_prior_mismatched);
+  let graph_summary = assoc_json "graph_execution_contract_summary" semantics in
   check
     "session graph contracts not required"
     (int_json "required" graph_summary = 0);
@@ -890,23 +916,40 @@ let check_session_runtime_semantics
     "session graph contracts not mismatched"
     (int_json "mismatched" graph_summary = 0)
 
-let check_graph_execution_summary
+let check_contract_summary
+    field
+    label
     semantics
     ~required
     ~bound
     ~mismatched =
-  let summary =
-    assoc_json "graph_execution_contract_summary" semantics
+  let summary = assoc_json field semantics in
+  let check_int suffix actual expected =
+    check
+      (Printf.sprintf
+         "%s %s: expected %d actual %d"
+         label
+         suffix
+         expected
+         actual)
+      (actual = expected)
   in
-  check
-    "graph execution required count"
-    (int_json "required" summary = required);
-  check
-    "graph execution bound count"
-    (int_json "bound" summary = bound);
-  check
-    "graph execution mismatched count"
-    (int_json "mismatched" summary = mismatched)
+  check_int "required count" (int_json "required" summary) required;
+  check_int "bound count" (int_json "bound" summary) bound;
+  check_int "mismatched count" (int_json "mismatched" summary) mismatched
+
+let check_decode_token_summary =
+  check_contract_summary "decode_token_contract_summary" "decode token"
+
+let check_decode_prior_state_summary =
+  check_contract_summary
+    "decode_prior_state_contract_summary"
+    "decode prior-state"
+
+let check_graph_execution_summary =
+  check_contract_summary
+    "graph_execution_contract_summary"
+    "graph execution"
 
 let check_batch_hash report =
   match report with
@@ -1810,11 +1853,21 @@ let check_session_bundle_accepts_graph_real_feedback_loop () =
       (String.equal
          (string_json "decode_token_contract_status" semantics)
          "bound");
+    check_decode_token_summary
+      semantics
+      ~required:2
+      ~bound:2
+      ~mismatched:0;
     check
       "graph feedback prior contract bound"
       (String.equal
          (string_json "decode_prior_state_contract_status" semantics)
          "bound");
+    check_decode_prior_state_summary
+      semantics
+      ~required:1
+      ~bound:1
+      ~mismatched:0;
     check
       "graph feedback missing capabilities clear"
       (list_json "missing_runtime_capabilities" semantics = []);
@@ -1900,6 +1953,16 @@ let check_session_bundle_binds_decode_token_contract () =
       (String.equal
          (string_json "decode_token_contract_status" semantics)
          "bound");
+    check_decode_token_summary
+      semantics
+      ~required:1
+      ~bound:1
+      ~mismatched:0;
+    check_decode_prior_state_summary
+      semantics
+      ~required:0
+      ~bound:0
+      ~mismatched:0;
     check
       "token contract clears decode blocker"
       (list_json "missing_runtime_capabilities" semantics
@@ -1993,6 +2056,16 @@ let check_session_bundle_binds_committed_state_transport () =
       (String.equal
          (string_json "decode_token_contract_status" semantics)
          "bound");
+    check_decode_token_summary
+      semantics
+      ~required:1
+      ~bound:1
+      ~mismatched:0;
+    check_decode_prior_state_summary
+      semantics
+      ~required:0
+      ~bound:0
+      ~mismatched:0;
     check_session_hash report;
     (match list_json "transitions" fields with
      | [`Assoc first; `Assoc second] ->
@@ -2093,11 +2166,21 @@ let check_session_bundle_binds_decode_prior_state_contract () =
       (String.equal
          (string_json "decode_token_contract_status" semantics)
          "bound");
+    check_decode_token_summary
+      semantics
+      ~required:2
+      ~bound:2
+      ~mismatched:0;
     check
       "feedback contract bound"
       (String.equal
          (string_json "decode_prior_state_contract_status" semantics)
          "bound");
+    check_decode_prior_state_summary
+      semantics
+      ~required:1
+      ~bound:1
+      ~mismatched:0;
     check
       "feedback missing capabilities clear"
       (list_json "missing_runtime_capabilities" semantics = []);
@@ -2195,6 +2278,16 @@ let check_session_bundle_rejects_decode_prior_state_contract_mismatch () =
       (String.equal
          (string_json "decode_prior_state_contract_status" semantics)
          "mismatch");
+    check_decode_token_summary
+      semantics
+      ~required:2
+      ~bound:1
+      ~mismatched:0;
+    check_decode_prior_state_summary
+      semantics
+      ~required:1
+      ~bound:0
+      ~mismatched:1;
     check_session_hash report;
     (match list_json "transitions" fields with
      | [_; _; `Assoc second_decode] ->
@@ -2338,6 +2431,16 @@ let check_session_bundle_rejects_decode_token_contract_mismatch () =
       (String.equal
          (string_json "decode_token_contract_status" semantics)
          "mismatch");
+    check_decode_token_summary
+      semantics
+      ~required:1
+      ~bound:0
+      ~mismatched:1;
+    check_decode_prior_state_summary
+      semantics
+      ~required:0
+      ~bound:0
+      ~mismatched:0;
     check_session_hash report;
     (match list_json "transitions" fields with
      | [_; `Assoc second] ->

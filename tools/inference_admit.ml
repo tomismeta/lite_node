@@ -3200,7 +3200,7 @@ let count_by predicate values =
     0
     values
 
-let graph_execution_contract_summary_json
+let contract_summary_json
     ~required_count
     ~bound_count
     ~mismatch_count =
@@ -3209,6 +3209,8 @@ let graph_execution_contract_summary_json
     "bound", `Int bound_count;
     "mismatched", `Int mismatch_count;
   ]
+
+let graph_execution_contract_summary_json = contract_summary_json
 
 let independent_batch_runtime_semantics =
   `Assoc [
@@ -3241,7 +3243,9 @@ let session_runtime_semantics
     ~runtime_readiness_status
     ~next_runtime_blocker
     ~decode_token_contract_status
+    ~decode_token_contract_summary
     ~decode_prior_state_contract_status
+    ~decode_prior_state_contract_summary
     ~graph_execution_contract_status
     ~graph_execution_contract_summary
     ~missing_runtime_capabilities
@@ -3291,8 +3295,10 @@ let session_runtime_semantics
     "runtime_readiness_status", `String runtime_readiness_status;
     "next_runtime_blocker", `String next_runtime_blocker;
     "decode_token_contract_status", `String decode_token_contract_status;
+    "decode_token_contract_summary", decode_token_contract_summary;
     "decode_prior_state_contract_status",
     `String decode_prior_state_contract_status;
+    "decode_prior_state_contract_summary", decode_prior_state_contract_summary;
     "graph_execution_contract_status",
     `String graph_execution_contract_status;
     "graph_execution_contract_summary",
@@ -3519,11 +3525,30 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
         (fun result -> String.equal result.session_stage_phase "decode")
       results
   in
+  let decode_token_contract_required_count =
+    List.length decode_results
+  in
+  let decode_token_contract_bound_count =
+    count_by
+      (fun result -> result.session_stage_decode_token_contract_bound)
+      decode_results
+  in
+  let decode_token_contract_mismatch_count =
+    count_by
+      (fun result -> result.session_stage_output_contract_mismatch)
+      decode_results
+  in
   let decode_token_contract_bound =
     decode_results <> []
     && List.for_all
          (fun result -> result.session_stage_decode_token_contract_bound)
          decode_results
+  in
+  let decode_token_contract_summary =
+    contract_summary_json
+      ~required_count:decode_token_contract_required_count
+      ~bound_count:decode_token_contract_bound_count
+      ~mismatch_count:decode_token_contract_mismatch_count
   in
   let decode_token_contract_status =
     if output_contract_mismatch then "mismatch"
@@ -3531,6 +3556,19 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     else "not_bound"
   in
   let decode_feedback_results = list_tail decode_results in
+  let decode_prior_state_contract_required_count =
+    max 0 (List.length decode_results - 1)
+  in
+  let decode_prior_state_contract_bound_count =
+    count_by
+      (fun result -> result.session_stage_prior_state_contract_bound)
+      decode_feedback_results
+  in
+  let decode_prior_state_contract_mismatch_count =
+    count_by
+      (fun result -> result.session_stage_prior_state_contract_mismatch)
+      decode_feedback_results
+  in
   let decode_prior_state_contract_required =
     List.length decode_results > 1
   in
@@ -3540,6 +3578,12 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
          (fun result ->
             result.session_stage_prior_state_contract_bound)
          decode_feedback_results
+  in
+  let decode_prior_state_contract_summary =
+    contract_summary_json
+      ~required_count:decode_prior_state_contract_required_count
+      ~bound_count:decode_prior_state_contract_bound_count
+      ~mismatch_count:decode_prior_state_contract_mismatch_count
   in
   let decode_prior_state_contract_status =
     if prior_state_contract_mismatch then "mismatch"
@@ -3607,7 +3651,9 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       ~runtime_readiness_status:"resident_session_candidate"
         ~next_runtime_blocker
         ~decode_token_contract_status
+        ~decode_token_contract_summary
         ~decode_prior_state_contract_status
+        ~decode_prior_state_contract_summary
         ~graph_execution_contract_status
         ~graph_execution_contract_summary
         ~missing_runtime_capabilities
@@ -3706,6 +3752,23 @@ let run_inference_session_file ~timing_mode path =
       then "mismatch"
       else "not_required"
     in
+    let decode_transition_count =
+      count_by
+        (fun transition -> String.equal transition.phase "decode")
+        bundle.transitions
+    in
+    let decode_token_contract_summary =
+      contract_summary_json
+        ~required_count:decode_transition_count
+        ~bound_count:0
+        ~mismatch_count:0
+    in
+    let decode_prior_state_contract_summary =
+      contract_summary_json
+        ~required_count:(max 0 (decode_transition_count - 1))
+        ~bound_count:0
+        ~mismatch_count:0
+    in
     let runtime_semantics =
       session_runtime_semantics
         ~transition_count
@@ -3713,8 +3776,10 @@ let run_inference_session_file ~timing_mode path =
           preflight.continuation_runtime_readiness_status
         ~next_runtime_blocker:preflight.continuation_next_runtime_blocker
           ~decode_token_contract_status:"not_bound"
+          ~decode_token_contract_summary
           ~decode_prior_state_contract_status:
             (if bundle.decode_steps <= 1 then "not_required" else "not_bound")
+          ~decode_prior_state_contract_summary
           ~graph_execution_contract_status
           ~graph_execution_contract_summary:
             (graph_execution_contract_summary_json
@@ -3802,13 +3867,26 @@ let run_inference_session_file ~timing_mode path =
           ~graph_execution_contract_bound:false
           ~committed_state_transport_bound:false
       in
+      let decode_transition_count =
+        if String.equal transition.phase "decode" then 1 else 0
+      in
       let runtime_semantics =
         session_runtime_semantics
           ~transition_count
           ~runtime_readiness_status:"rejected"
           ~next_runtime_blocker
           ~decode_token_contract_status:"not_bound"
+          ~decode_token_contract_summary:
+            (contract_summary_json
+               ~required_count:decode_transition_count
+               ~bound_count:0
+               ~mismatch_count:0)
           ~decode_prior_state_contract_status:"not_required"
+          ~decode_prior_state_contract_summary:
+            (contract_summary_json
+               ~required_count:0
+               ~bound_count:0
+               ~mismatch_count:0)
           ~graph_execution_contract_status:"mismatch"
           ~graph_execution_contract_summary:
             (graph_execution_contract_summary_json
@@ -3888,6 +3966,16 @@ let run_inference_session_file ~timing_mode path =
       else if output_contract.decode_token_contract_bound then "bound"
       else "not_bound"
     in
+    let decode_transition_count =
+      if String.equal transition.phase "decode" then 1 else 0
+    in
+    let decode_token_contract_summary =
+      contract_summary_json
+        ~required_count:decode_transition_count
+        ~bound_count:
+          (if output_contract.decode_token_contract_bound then 1 else 0)
+        ~mismatch_count:(if output_contract_mismatch then 1 else 0)
+    in
     let runtime_semantics =
       session_runtime_semantics
         ~transition_count
@@ -3895,7 +3983,13 @@ let run_inference_session_file ~timing_mode path =
         ~next_runtime_blocker:
           "session_continuation_state_carry_not_supported"
           ~decode_token_contract_status
+          ~decode_token_contract_summary
           ~decode_prior_state_contract_status:"not_required"
+          ~decode_prior_state_contract_summary:
+            (contract_summary_json
+               ~required_count:0
+               ~bound_count:0
+               ~mismatch_count:0)
           ~graph_execution_contract_status:"not_required"
           ~graph_execution_contract_summary:
             (graph_execution_contract_summary_json
