@@ -158,6 +158,9 @@ type session_stage_result = {
   session_stage_json : Yojson.Safe.t;
   session_stage_transition_id : string;
   session_stage_phase : string;
+  session_stage_advanced_session_root : string option;
+  session_stage_advance_receipt_root : string option;
+  session_stage_output_prefix_root : string option;
   session_stage_output_payload : string option;
   session_stage_output_root : string option;
   session_stage_selected_index : string option;
@@ -2542,6 +2545,9 @@ let run_prepared_session_transition
       session_stage_json = transition_json;
       session_stage_transition_id = transition.transition_id;
       session_stage_phase = transition.phase;
+      session_stage_advanced_session_root = None;
+      session_stage_advance_receipt_root = None;
+      session_stage_output_prefix_root = None;
       session_stage_output_payload = None;
       session_stage_output_root = None;
       session_stage_selected_index = None;
@@ -2703,6 +2709,10 @@ let run_prepared_session_transition
     session_stage_json = transition_json;
     session_stage_transition_id = transition.transition_id;
     session_stage_phase = transition.phase;
+    session_stage_advanced_session_root = Some (Session.root advanced);
+    session_stage_advance_receipt_root = Some (Receipt.root advance_receipt);
+    session_stage_output_prefix_root =
+      Some (Session.output_prefix_root advanced);
     session_stage_output_payload = Some output_payload;
     session_stage_output_root = Some output_root;
     session_stage_selected_index = output_contract.selected_index;
@@ -3212,6 +3222,53 @@ let contract_summary_json
 
 let graph_execution_contract_summary_json = contract_summary_json
 
+let transition_root_chain_summary_json results =
+  let root_complete result =
+    Option.is_some result.session_stage_advanced_session_root
+    && Option.is_some result.session_stage_advance_receipt_root
+    && Option.is_some result.session_stage_output_prefix_root
+  in
+  let transition_count = List.length results in
+  let advanced_session_root_count =
+    count_by
+      (fun result -> Option.is_some result.session_stage_advanced_session_root)
+      results
+  in
+  let advance_receipt_root_count =
+    count_by
+      (fun result -> Option.is_some result.session_stage_advance_receipt_root)
+      results
+  in
+  let output_prefix_root_count =
+    count_by
+      (fun result -> Option.is_some result.session_stage_output_prefix_root)
+      results
+  in
+  let incomplete_transition_ids =
+    results
+    |> List.filter (fun result -> not (root_complete result))
+    |> List.map (fun result -> result.session_stage_transition_id)
+  in
+  `Assoc [
+    "transition_count", `Int transition_count;
+    "complete_transitions",
+    `Int (transition_count - List.length incomplete_transition_ids);
+    "advanced_session_roots", `Int advanced_session_root_count;
+    "advance_receipt_roots", `Int advance_receipt_root_count;
+    "output_prefix_roots", `Int output_prefix_root_count;
+    "incomplete_transition_ids", list_json incomplete_transition_ids;
+  ]
+
+let empty_transition_root_chain_summary_json ~transition_count =
+  `Assoc [
+    "transition_count", `Int transition_count;
+    "complete_transitions", `Int 0;
+    "advanced_session_roots", `Int 0;
+    "advance_receipt_roots", `Int 0;
+    "output_prefix_roots", `Int 0;
+    "incomplete_transition_ids", `List [];
+  ]
+
 let independent_batch_runtime_semantics =
   `Assoc [
     "diagnostic_only", `Bool true;
@@ -3248,6 +3305,7 @@ let session_runtime_semantics
     ~decode_prior_state_contract_summary
     ~graph_execution_contract_status
     ~graph_execution_contract_summary
+    ~transition_root_chain_summary
     ~missing_runtime_capabilities
     ~committed_state_supported
     ~committed_state_transport_bound
@@ -3303,6 +3361,7 @@ let session_runtime_semantics
     `String graph_execution_contract_status;
     "graph_execution_contract_summary",
     graph_execution_contract_summary;
+    "transition_root_chain_summary", transition_root_chain_summary;
     "missing_runtime_capabilities",
     missing_runtime_capabilities;
   ]
@@ -3645,6 +3704,9 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     |> List.filter_map (fun result -> result.session_stage_output_payload)
     |> last_string
   in
+  let transition_root_chain_summary =
+    transition_root_chain_summary_json results
+  in
   let runtime_semantics =
     session_runtime_semantics
       ~transition_count:(List.length bundle.transitions)
@@ -3656,6 +3718,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
         ~decode_prior_state_contract_summary
         ~graph_execution_contract_status
         ~graph_execution_contract_summary
+        ~transition_root_chain_summary
         ~missing_runtime_capabilities
       ~committed_state_supported
       ~committed_state_transport_bound
@@ -3789,6 +3852,8 @@ let run_inference_session_file ~timing_mode path =
                  preflight.continuation_graph_execution_contract_bound_count
                ~mismatch_count:
                  preflight.continuation_graph_execution_contract_mismatch_count)
+          ~transition_root_chain_summary:
+            (empty_transition_root_chain_summary_json ~transition_count)
           ~missing_runtime_capabilities:missing_resident_runtime_capabilities
           ~committed_state_supported:false
         ~committed_state_transport_bound:false
@@ -3893,6 +3958,8 @@ let run_inference_session_file ~timing_mode path =
                ~required_count:1
                ~bound_count:0
                ~mismatch_count:1)
+          ~transition_root_chain_summary:
+            (empty_transition_root_chain_summary_json ~transition_count)
           ~missing_runtime_capabilities
           ~committed_state_supported:false
           ~committed_state_transport_bound:false
@@ -3996,6 +4063,8 @@ let run_inference_session_file ~timing_mode path =
                ~required_count:0
                ~bound_count:0
                ~mismatch_count:0)
+          ~transition_root_chain_summary:
+            (empty_transition_root_chain_summary_json ~transition_count)
           ~missing_runtime_capabilities:missing_resident_runtime_capabilities
         ~committed_state_supported:false
         ~committed_state_transport_bound:false

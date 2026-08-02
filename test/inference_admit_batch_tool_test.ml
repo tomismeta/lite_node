@@ -951,6 +951,37 @@ let check_graph_execution_summary =
     "graph_execution_contract_summary"
     "graph execution"
 
+let check_transition_root_chain_summary
+    semantics
+    ~transition_count
+    ~complete_transitions
+    ~advanced_session_roots
+    ~advance_receipt_roots
+    ~output_prefix_roots
+    ~incomplete_transition_ids =
+  let summary =
+    assoc_json "transition_root_chain_summary" semantics
+  in
+  check
+    "transition root chain count"
+    (int_json "transition_count" summary = transition_count);
+  check
+    "transition root chain complete count"
+    (int_json "complete_transitions" summary = complete_transitions);
+  check
+    "transition root chain session roots"
+    (int_json "advanced_session_roots" summary = advanced_session_roots);
+  check
+    "transition root chain receipt roots"
+    (int_json "advance_receipt_roots" summary = advance_receipt_roots);
+  check
+    "transition root chain output prefix roots"
+    (int_json "output_prefix_roots" summary = output_prefix_roots);
+  check
+    "transition root chain incomplete ids"
+    (list_json "incomplete_transition_ids" summary
+     = List.map (fun value -> `String value) incomplete_transition_ids)
+
 let check_batch_hash report =
   match report with
   | `Assoc fields ->
@@ -1868,6 +1899,14 @@ let check_session_bundle_accepts_graph_real_feedback_loop () =
       ~required:1
       ~bound:1
       ~mismatched:0;
+    check_transition_root_chain_summary
+      semantics
+      ~transition_count:3
+      ~complete_transitions:3
+      ~advanced_session_roots:3
+      ~advance_receipt_roots:3
+      ~output_prefix_roots:3
+      ~incomplete_transition_ids:[];
     check
       "graph feedback missing capabilities clear"
       (list_json "missing_runtime_capabilities" semantics = []);
@@ -2181,6 +2220,14 @@ let check_session_bundle_binds_decode_prior_state_contract () =
       ~required:1
       ~bound:1
       ~mismatched:0;
+    check_transition_root_chain_summary
+      semantics
+      ~transition_count:3
+      ~complete_transitions:3
+      ~advanced_session_roots:3
+      ~advance_receipt_roots:3
+      ~output_prefix_roots:3
+      ~incomplete_transition_ids:[];
     check
       "feedback missing capabilities clear"
       (list_json "missing_runtime_capabilities" semantics = []);
@@ -2288,6 +2335,14 @@ let check_session_bundle_rejects_decode_prior_state_contract_mismatch () =
       ~required:1
       ~bound:0
       ~mismatched:1;
+    check_transition_root_chain_summary
+      semantics
+      ~transition_count:3
+      ~complete_transitions:2
+      ~advanced_session_roots:2
+      ~advance_receipt_roots:2
+      ~output_prefix_roots:2
+      ~incomplete_transition_ids:["token-002"];
     check_session_hash report;
     (match list_json "transitions" fields with
      | [_; _; `Assoc second_decode] ->

@@ -285,7 +285,10 @@ completeness, or tokenization. `runtime_semantics` also reports a diagnostic
 so callers can audit session-level graph-real claims without re-walking every
 transition. Decode token and prior-state contracts use the same summary shape
 under `decode_token_contract_summary` and `decode_prior_state_contract_summary`;
-the per-transition contract objects remain the detailed authority.
+the per-transition contract objects remain the detailed authority. A
+`transition_root_chain_summary` reports how many transitions produced advanced
+session roots, advance receipt roots, and output-prefix roots, plus any
+incomplete transition ids.
 
 ## Canonical Session
 
