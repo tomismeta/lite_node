@@ -263,6 +263,23 @@ candidate but keeps `decode_loop_token_contract` in
 This is an execution boundary, not a model-format contract. Token sequences,
 logits, tensor layouts, and sampling behavior remain target-owned.
 
+Session bundles may also declare a transition-level `execution_contract`:
+
+```json
+{"kind":"graph_real","min_program_instructions":4}
+```
+
+`lifecycle_only` is the explicit shell contract: the transition proves resident
+session binding but does not claim graph execution. `graph_real` requires the
+admitted program to contain generic inference compute opcode evidence, run with
+opcode timing, show at least one generic inference compute opcode in the
+executed opcode profile, and meet any declared minimum instruction count. Static
+opcode presence is preflight evidence only. A preflight mismatch rejects before
+session advance; a runtime evidence mismatch is reported after the transition
+runs. This keeps lifecycle-only prefill from being overclaimed as Bonsai graph
+work. The contract is intentionally generic. It does not prove model-family
+semantics, tensor-layout correctness, full-model completeness, or tokenization.
+
 ## Canonical Session
 
 A canonical session contains only logical progress:

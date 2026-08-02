@@ -116,9 +116,16 @@ type prior_state_contract =
       offset : int;
     }
 
+type execution_contract =
+  | Lifecycle_only
+  | Graph_real of {
+      min_program_instructions : int option;
+    }
+
 type session_transition = {
   transition_id : string;
   phase : string;
+  execution_contract : execution_contract option;
   output_contract : output_contract option;
   prior_state_contract : prior_state_contract option;
   stage : batch_stage;
@@ -154,6 +161,8 @@ type session_stage_result = {
   session_stage_output_payload : string option;
   session_stage_output_root : string option;
   session_stage_selected_index : string option;
+  session_stage_graph_execution_bound : bool;
+  session_stage_execution_contract_mismatch : bool;
   session_stage_prior_state_contract_bound : bool;
   session_stage_prior_state_contract_mismatch : bool;
   session_stage_committed_state_transport_bound : bool;
@@ -896,6 +905,10 @@ let nullable_string_json = function
   | None -> `Null
   | Some value -> `String value
 
+let nullable_int_json = function
+  | None -> `Null
+  | Some value -> `Int value
+
 let violation_json = function
   | Inference_opcode_policy.Missing_capability { detail; capability } ->
     `Assoc [
@@ -1093,6 +1106,52 @@ let parse_prior_state_contract = function
         | Ok kind, Ok _, Ok _ ->
           Error ("unsupported prior_state_contract kind: " ^ kind)))
   | _ -> Error "prior_state_contract must be an object"
+
+let parse_execution_contract = function
+  | `Assoc fields ->
+    (match
+       check_known fields ["kind"; "min_program_instructions"]
+     with
+     | Error error -> Error error
+     | Ok () ->
+       (match string_field "kind" fields with
+        | Error error -> Error error
+        | Ok "lifecycle_only" ->
+          (match optional_field "min_program_instructions" fields with
+           | Ok None
+           | Ok (Some `Null) -> Ok Lifecycle_only
+           | Ok (Some _) ->
+             Error
+               "lifecycle_only execution_contract must not declare min_program_instructions"
+           | Error error -> Error error)
+        | Ok "graph_real" ->
+          let min_program_instructions =
+            match optional_field "min_program_instructions" fields with
+            | Ok None
+            | Ok (Some `Null) -> Ok None
+            | Ok (Some (`Int value)) when value >= 0 -> Ok (Some value)
+            | Ok (Some (`Int _)) ->
+              Error "min_program_instructions must be non-negative"
+            | Ok (Some _) ->
+              Error "field must be an int: min_program_instructions"
+            | Error error -> Error error
+          in
+          (match min_program_instructions with
+           | Error error -> Error error
+           | Ok min_program_instructions ->
+             Ok (Graph_real { min_program_instructions }))
+        | Ok kind -> Error ("unsupported execution_contract kind: " ^ kind)))
+  | _ -> Error "execution_contract must be an object"
+
+let optional_execution_contract fields =
+  match optional_field "execution_contract" fields with
+  | Ok None -> Ok None
+  | Ok (Some `Null) -> Ok None
+  | Ok (Some value) ->
+    (match parse_execution_contract value with
+     | Ok contract -> Ok (Some contract)
+     | Error error -> Error error)
+  | Error error -> Error error
 
 let optional_output_contract fields =
   match optional_field "output_contract" fields with
@@ -1361,6 +1420,7 @@ let parse_session_transition ~bundle_base ~top_support = function
          [
            "transition_id";
            "phase";
+           "execution_contract";
            "output_contract";
            "prior_state_contract";
            "stage";
@@ -1371,12 +1431,14 @@ let parse_session_transition ~bundle_base ~top_support = function
        (match
           string_field "transition_id" fields,
           string_field "phase" fields,
+          optional_execution_contract fields,
           optional_output_contract fields,
           optional_prior_state_contract fields,
           field "stage" fields
         with
         | Ok transition_id,
           Ok phase,
+          Ok execution_contract,
           Ok output_contract,
           Ok prior_state_contract,
           Ok stage_json ->
@@ -1401,15 +1463,17 @@ let parse_session_transition ~bundle_base ~top_support = function
                Ok {
                  transition_id;
                  phase;
+                 execution_contract;
                  output_contract;
                  prior_state_contract;
                  stage;
                })
-        | Error error, _, _, _, _
-        | _, Error error, _, _, _
-        | _, _, Error error, _, _
-        | _, _, _, Error error, _
-        | _, _, _, _, Error error -> Error error))
+        | Error error, _, _, _, _, _
+        | _, Error error, _, _, _, _
+        | _, _, Error error, _, _, _
+        | _, _, _, Error error, _, _
+        | _, _, _, _, Error error, _
+        | _, _, _, _, _, Error error -> Error error))
   | _ -> Error "session transition must be an object"
 
 let parse_session_bundle_json session_path (json : Yojson.Safe.t) =
@@ -1570,6 +1634,196 @@ let prior_state_contract_declared_json = function
       "offset", `Int offset;
       "encoding", `String "u64le";
     ]
+
+let execution_contract_declared_json = function
+  | None -> `Null
+  | Some Lifecycle_only ->
+    `Assoc ["kind", `String "lifecycle_only"]
+  | Some (Graph_real { min_program_instructions }) ->
+    `Assoc [
+      "kind", `String "graph_real";
+      "min_program_instructions",
+      nullable_int_json min_program_instructions;
+    ]
+
+let graph_opcode_name instr =
+  match instr with
+  | Contract_vm.LINEAR_Q1_G128_FP _
+  | Contract_vm.SIGMOID_FP _
+  | Contract_vm.SOFTPLUS_FP _
+  | Contract_vm.CAUSAL_DEPTHWISE_CONV1D_FP _
+  | Contract_vm.GATED_DELTA_RULE_FP _
+  | Contract_vm.MATMUL_FP _
+  | Contract_vm.RMSNORM_FP _
+  | Contract_vm.RMSNORM_FP_EPS _
+  | Contract_vm.L2NORM_FP _
+  | Contract_vm.SILU_FP _
+  | Contract_vm.ELEMWISE_MUL_FP _
+  | Contract_vm.RESIDUAL_ADD_FP _
+  | Contract_vm.ROPE_APPLY_FP _
+  | Contract_vm.ROPE_APPLY_INDEXED_FP _
+  | Contract_vm.VECDOT_FP _
+  | Contract_vm.ARGMAX_FP _
+  | Contract_vm.ATTENTION_SCORES_FP _
+  | Contract_vm.SOFTMAX_FP _
+  | Contract_vm.ATTENTION_WEIGHTED_SUM_FP _
+  | Contract_vm.ATTENTION_KV_FP _
+  | Contract_vm.EXP_Q16 _
+  | Contract_vm.SOFTMAX_Q16_INPLACE _
+  | Contract_vm.LAYERNORM_Q16_INPLACE _
+  | Contract_vm.RMSNORM_Q16_INPLACE _
+  | Contract_vm.SILU_Q16_INPLACE _
+  | Contract_vm.ROPE_APPLY_Q16 _
+  | Contract_vm.ATTENTION_KV_Q16 _
+  | Contract_vm.VECDOT_Q16 _
+  | Contract_vm.ELEMWISE_MUL_Q16 _
+  | Contract_vm.RESIDUAL_ADD_Q16 _
+  | Contract_vm.APPEND_VEC_Q16 _
+  | Contract_vm.ARGMAX_Q16 _ ->
+    Some (Opcode_policy.opcode_name instr)
+  | _ -> None
+
+let graph_opcode_names code =
+  code
+  |> Array.to_list
+  |> List.filter_map graph_opcode_name
+  |> unique_strings
+
+let executed_graph_opcode_names graph_opcodes opcode_profile =
+  opcode_profile
+  |> List.filter_map
+       (fun (entry : Contract_vm.opcode_profile) ->
+         if List.exists (String.equal entry.opcode) graph_opcodes then
+           Some entry.opcode
+         else None)
+  |> unique_strings
+
+type execution_contract_check = {
+  execution_contract_json : Yojson.Safe.t;
+  graph_execution_bound : bool;
+  execution_contract_mismatch : bool;
+}
+
+let execution_contract_check
+    ?(require_runtime_evidence = false)
+    ?opcode_profile
+    transition
+    prepared =
+  let code = Admission.code prepared.prepared_admitted in
+  let program_instructions = Array.length code in
+  let graph_opcodes = graph_opcode_names code in
+  let executed_graph_opcodes =
+    Option.map
+      (executed_graph_opcode_names graph_opcodes)
+      opcode_profile
+  in
+  let program_effects =
+    Admission.effects prepared.prepared_admitted
+    |> Octra_vm.Program_effects.names
+  in
+  let policy_violations =
+    List.map violation_json prepared.prepared_violations
+  in
+  let evidence =
+    [
+      "program_instructions", `Int program_instructions;
+      "inference_opcodes", list_json graph_opcodes;
+      "executed_inference_opcodes",
+      (match executed_graph_opcodes with
+       | None -> `Null
+       | Some names -> list_json names);
+      "opcode_timing_checked", `Bool (opcode_profile <> None);
+      "program_effects", list_json program_effects;
+      "policy_violations", `List policy_violations;
+    ]
+  in
+  match transition.execution_contract with
+  | None ->
+    {
+      execution_contract_json =
+        `Assoc
+          ([
+            "status", `String "not_declared";
+            "kind", `Null;
+          ]
+           @ evidence);
+      graph_execution_bound = false;
+      execution_contract_mismatch = false;
+    }
+  | Some Lifecycle_only ->
+    {
+      execution_contract_json =
+        `Assoc
+          ([
+            "status", `String "matched";
+            "kind", `String "lifecycle_only";
+            "graph_real", `Bool false;
+          ]
+           @ evidence);
+      graph_execution_bound = false;
+      execution_contract_mismatch = false;
+    }
+  | Some (Graph_real { min_program_instructions }) ->
+    let declared =
+      [
+        "kind", `String "graph_real";
+        "min_program_instructions",
+        nullable_int_json min_program_instructions;
+      ]
+    in
+    let mismatch reason =
+      {
+        execution_contract_json =
+          `Assoc
+            ([
+              "status", `String "mismatch";
+              "reason", `String reason;
+              "graph_real", `Bool false;
+            ]
+             @ declared
+             @ evidence);
+        graph_execution_bound = false;
+        execution_contract_mismatch = true;
+      }
+    in
+    (match min_program_instructions with
+     | Some minimum when program_instructions < minimum ->
+       mismatch "program_instruction_count_below_minimum"
+     | _ when prepared.prepared_violations <> [] ->
+       mismatch "policy_violations_present"
+     | _ when graph_opcodes = [] ->
+       mismatch "missing_inference_opcode"
+     | _ ->
+       (match executed_graph_opcodes with
+        | None when require_runtime_evidence ->
+          mismatch "opcode_timing_required"
+        | None ->
+          {
+            execution_contract_json =
+              `Assoc
+                ([
+                  "status", `String "planned";
+                  "graph_real", `Bool false;
+                ]
+                 @ declared
+                 @ evidence);
+            graph_execution_bound = false;
+            execution_contract_mismatch = false;
+          }
+        | Some [] -> mismatch "no_inference_opcode_executed"
+        | Some _ ->
+          {
+            execution_contract_json =
+              `Assoc
+                ([
+                  "status", `String "matched";
+                  "graph_real", `Bool true;
+                ]
+                 @ declared
+                 @ evidence);
+            graph_execution_bound = true;
+            execution_contract_mismatch = false;
+          }))
 
 let string_starts_with ~prefix value =
   let prefix_length = String.length prefix in
@@ -2206,7 +2460,13 @@ let run_prepared_session_transition
       transition
       prior_committed_target_state_payload
   in
-  if prior_state_contract.prior_state_contract_mismatch then
+  let preflight_execution_contract =
+    execution_contract_check transition prepared
+  in
+  if
+    prior_state_contract.prior_state_contract_mismatch
+    || preflight_execution_contract.execution_contract_mismatch
+  then
     let unsupported =
       unsupported_opcode_names prepared.prepared_violations
     in
@@ -2217,11 +2477,16 @@ let run_prepared_session_transition
       List.map violation_json prepared.prepared_violations
     in
     let transition_json =
+      let status =
+        if preflight_execution_contract.execution_contract_mismatch then
+          "execution_contract_mismatch"
+        else "prior_state_contract_mismatch"
+      in
       `Assoc [
         "transition_id", `String transition.transition_id;
         "phase", `String transition.phase;
         "stage_id", `String transition.stage.stage_id;
-        "status", `String "prior_state_contract_mismatch";
+        "status", `String status;
         "session_status", `String "not_run";
         "reference_status", `String "unchecked";
         "program_root", `String prepared.prepared_program_root;
@@ -2247,6 +2512,8 @@ let run_prepared_session_transition
         `Bool committed_state_transport_bound;
         "advanced_session_root", `Null;
         "advance_receipt_root", `Null;
+        "execution_contract",
+        preflight_execution_contract.execution_contract_json;
         "output_contract",
         `Assoc [
           "status", `String "not_run";
@@ -2275,8 +2542,14 @@ let run_prepared_session_transition
       session_stage_output_payload = None;
       session_stage_output_root = None;
       session_stage_selected_index = None;
-      session_stage_prior_state_contract_bound = false;
-      session_stage_prior_state_contract_mismatch = true;
+      session_stage_graph_execution_bound =
+        preflight_execution_contract.graph_execution_bound;
+      session_stage_execution_contract_mismatch =
+        preflight_execution_contract.execution_contract_mismatch;
+      session_stage_prior_state_contract_bound =
+        prior_state_contract.prior_state_contract_bound;
+      session_stage_prior_state_contract_mismatch =
+        prior_state_contract.prior_state_contract_mismatch;
       session_stage_committed_state_transport_bound =
         committed_state_transport_bound;
       session_stage_output_contract_mismatch = false;
@@ -2310,6 +2583,19 @@ let run_prepared_session_transition
        | Error error -> fail (Session.error_message error)
        | Ok (advanced, receipt) -> advanced, receipt, [], [])
   in
+  let opcode_profile_for_contract =
+    match timer.mode with
+    | Timing_opcode -> Some opcode_profile
+    | Timing_none
+    | Timing_stage -> None
+  in
+  let execution_contract =
+    execution_contract_check
+      ~require_runtime_evidence:true
+      ?opcode_profile:opcode_profile_for_contract
+      transition
+      prepared
+  in
   timing_mark timer "advance_session";
   let output_payload =
     match Session.output_payload advanced with
@@ -2335,6 +2621,8 @@ let run_prepared_session_transition
   let stage_status =
     if output_contract.output_contract_mismatch then
       "output_contract_mismatch"
+    else if execution_contract.execution_contract_mismatch then
+      "execution_contract_mismatch"
     else if prior_state_contract.prior_state_contract_mismatch then
       "prior_state_contract_mismatch"
     else if reference_mismatch then "reference_mismatch"
@@ -2377,6 +2665,8 @@ let run_prepared_session_transition
         `Bool committed_state_transport_bound;
         "advanced_session_root", `String (Session.root advanced);
         "advance_receipt_root", `String (Receipt.root advance_receipt);
+        "execution_contract",
+        execution_contract.execution_contract_json;
         "output_contract", output_contract.output_contract_json;
         "prior_state_contract",
         prior_state_contract.prior_state_contract_json;
@@ -2413,6 +2703,10 @@ let run_prepared_session_transition
     session_stage_output_payload = Some output_payload;
     session_stage_output_root = Some output_root;
     session_stage_selected_index = output_contract.selected_index;
+    session_stage_graph_execution_bound =
+      execution_contract.graph_execution_bound;
+    session_stage_execution_contract_mismatch =
+      execution_contract.execution_contract_mismatch;
     session_stage_prior_state_contract_bound =
       prior_state_contract.prior_state_contract_bound;
     session_stage_prior_state_contract_mismatch =
@@ -2494,14 +2788,27 @@ let valid_phase_sequence phases =
     List.for_all (String.equal "decode") rest
   | _ -> false
 
+let transition_requires_graph_execution transition =
+  match transition.execution_contract with
+  | Some (Graph_real _) -> true
+  | None
+  | Some Lifecycle_only -> false
+
+let string_list_contains value values =
+  List.exists (String.equal value) values
+
 let preflight_declaration_blockers
     ~decode_steps_match
-    ~phase_sequence_valid =
+    ~phase_sequence_valid
+    ~execution_contracts_match =
   []
   |> add_if (not decode_steps_match) "decode_steps_mismatch"
   |> add_if
        (not phase_sequence_valid)
        "prefill_decode_phase_sequence_mismatch"
+  |> add_if
+       (not execution_contracts_match)
+       "graph_execution_contract_mismatch"
   |> List.rev
 
 let continuation_runtime_status
@@ -2570,6 +2877,9 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
              transition.stage
              prepared.prepared_stage
          in
+         let execution_contract =
+           execution_contract_check transition prepared.prepared_stage
+         in
          let transition_json =
            match result.transition_preflight_json with
            | `Assoc fields ->
@@ -2580,6 +2890,8 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
                  "phase", `String transition.phase;
                  "output_contract",
                  output_contract_declared_json transition.output_contract;
+                 "execution_contract",
+                 execution_contract.execution_contract_json;
                  "prior_state_contract",
                  prior_state_contract_declared_json
                    transition.prior_state_contract;
@@ -2587,37 +2899,37 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
                 @ fields)
            | value -> value
          in
-         transition, result, transition_json)
+         transition, result, execution_contract, transition_json)
       prepared_transitions
   in
   let target_roots =
     List.map
-      (fun (_, result, _) -> result.transition_target_root)
+      (fun (_, result, _, _) -> result.transition_target_root)
       preflight
   in
   let request_roots =
     List.map
-      (fun (_, result, _) -> result.transition_request_root)
+      (fun (_, result, _, _) -> result.transition_request_root)
       preflight
   in
   let model_ranges_roots =
     List.map
-      (fun (_, result, _) -> result.transition_model_ranges_root)
+      (fun (_, result, _, _) -> result.transition_model_ranges_root)
       preflight
   in
   let model_deployment_roots =
     List.map
-      (fun (_, result, _) -> result.transition_model_deployment_root)
+      (fun (_, result, _, _) -> result.transition_model_deployment_root)
       preflight
   in
   let session_abi_roots =
     List.map
-      (fun (_, result, _) -> result.transition_session_abi_root)
+      (fun (_, result, _, _) -> result.transition_session_abi_root)
       preflight
   in
   let phases =
     List.map
-      (fun (transition, _, _) -> transition.phase)
+      (fun (transition, _, _, _) -> transition.phase)
       preflight
   in
   let decode_transitions =
@@ -2629,21 +2941,27 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
   in
   let unsupported =
     List.concat_map
-      (fun (_, result, _) -> result.transition_unsupported_opcodes)
+      (fun (_, result, _, _) -> result.transition_unsupported_opcodes)
       preflight
   in
   let missing =
     List.concat_map
-      (fun (_, result, _) -> result.transition_missing_capabilities)
+      (fun (_, result, _, _) -> result.transition_missing_capabilities)
       preflight
   in
   let policy_violations =
     List.concat_map
-      (fun (_, result, _) -> result.transition_policy_violations)
+      (fun (_, result, _, _) -> result.transition_policy_violations)
+      preflight
+  in
+  let execution_contracts_match =
+    List.for_all
+      (fun (_, _, execution_contract, _) ->
+         not execution_contract.execution_contract_mismatch)
       preflight
   in
   let transition_plan =
-    List.map (fun (_, _, json) -> json) preflight
+    List.map (fun (_, _, _, json) -> json) preflight
   in
   let target_root_uniform = all_same_string target_roots in
   let request_root_uniform = all_same_string request_roots in
@@ -2688,6 +3006,7 @@ let continuation_preflight_for_prepared bundle prepared_transitions =
     preflight_declaration_blockers
       ~decode_steps_match
       ~phase_sequence_valid
+      ~execution_contracts_match
   in
   let runtime_readiness_status, next_runtime_blocker =
     continuation_runtime_status
@@ -2805,19 +3124,36 @@ let remaining_session_runtime_capabilities
     ~decode_token_contract_bound
     ~decode_prior_state_contract_required
     ~decode_prior_state_contract_bound
+    ~graph_execution_contract_required
+    ~graph_execution_contract_bound
     ~committed_state_transport_bound =
+  let committed_state =
+    if committed_state_transport_bound then []
+    else [`String "committed_target_state_payload_transport"]
+  in
+  let decode_token =
+    if decode_token_contract_bound then []
+    else [`String "decode_loop_token_contract"]
+  in
+  let decode_prior_state =
+    if
+      decode_prior_state_contract_required
+      && not decode_prior_state_contract_bound
+    then [`String "decode_loop_prior_state_contract"]
+    else []
+  in
+  let graph_execution =
+    if
+      graph_execution_contract_required
+      && not graph_execution_contract_bound
+    then [`String "graph_execution_contract"]
+    else []
+  in
   `List
-    ((if committed_state_transport_bound then []
-      else [`String "committed_target_state_payload_transport"])
-     @
-     (if decode_token_contract_bound then []
-      else [`String "decode_loop_token_contract"])
-     @
-     if
-       decode_prior_state_contract_required
-       && not decode_prior_state_contract_bound
-     then [`String "decode_loop_prior_state_contract"]
-     else [])
+    (committed_state
+     @ decode_token
+     @ decode_prior_state
+     @ graph_execution)
 
 let independent_batch_runtime_semantics =
   `Assoc [
@@ -2851,6 +3187,7 @@ let session_runtime_semantics
     ~next_runtime_blocker
     ~decode_token_contract_status
     ~decode_prior_state_contract_status
+    ~graph_execution_contract_status
     ~missing_runtime_capabilities
     ~committed_state_supported
     ~committed_state_transport_bound
@@ -2900,6 +3237,8 @@ let session_runtime_semantics
     "decode_token_contract_status", `String decode_token_contract_status;
     "decode_prior_state_contract_status",
     `String decode_prior_state_contract_status;
+    "graph_execution_contract_status",
+    `String graph_execution_contract_status;
     "missing_runtime_capabilities",
     missing_runtime_capabilities;
   ]
@@ -2916,6 +3255,8 @@ let transition_report_json ?output_contract transition stage_json =
       [
         "transition_id", `String transition.transition_id;
         "phase", `String transition.phase;
+        "execution_contract",
+        execution_contract_declared_json transition.execution_contract;
         "prior_state_contract",
         prior_state_contract_declared_json transition.prior_state_contract;
       ]
@@ -3015,7 +3356,10 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
         else previous_decode_selected_index
       in
       let results = result :: results in
-      if result.session_stage_prior_state_contract_mismatch then
+      if
+        result.session_stage_prior_state_contract_mismatch
+        || result.session_stage_execution_contract_mismatch
+      then
         advanced, results, previous_decode_selected_index
       else
         run_loop advanced results previous_decode_selected_index rest
@@ -3061,14 +3405,41 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       (fun result -> result.session_stage_output_contract_mismatch)
       results
   in
-  let prior_state_contract_mismatch =
-    List.exists
-      (fun result -> result.session_stage_prior_state_contract_mismatch)
-      results
-  in
-  let decode_results =
-    List.filter
-      (fun result -> String.equal result.session_stage_phase "decode")
+    let prior_state_contract_mismatch =
+      List.exists
+        (fun result -> result.session_stage_prior_state_contract_mismatch)
+        results
+    in
+    let execution_contract_mismatch =
+      List.exists
+        (fun result -> result.session_stage_execution_contract_mismatch)
+        results
+    in
+    let graph_execution_contract_results =
+      List.filter
+        (fun result ->
+           result.session_stage_graph_execution_bound
+           || result.session_stage_execution_contract_mismatch)
+        results
+    in
+    let graph_execution_contract_required =
+      graph_execution_contract_results <> []
+    in
+    let graph_execution_contract_bound =
+      not graph_execution_contract_required
+      || List.for_all
+           (fun result -> result.session_stage_graph_execution_bound)
+           graph_execution_contract_results
+    in
+    let graph_execution_contract_status =
+      if execution_contract_mismatch then "mismatch"
+      else if graph_execution_contract_bound && graph_execution_contract_required
+      then "bound"
+      else "not_required"
+    in
+    let decode_results =
+      List.filter
+        (fun result -> String.equal result.session_stage_phase "decode")
       results
   in
   let decode_token_contract_bound =
@@ -3111,10 +3482,11 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
          (fun result -> result.session_stage_committed_state_transport_bound)
          decode_results
   in
-  let next_runtime_blocker =
-    if output_contract_mismatch then "decode_loop_token_contract_mismatch"
-    else if prior_state_contract_mismatch then
-      "decode_loop_prior_state_contract_mismatch"
+    let next_runtime_blocker =
+      if execution_contract_mismatch then "graph_execution_contract_mismatch"
+      else if output_contract_mismatch then "decode_loop_token_contract_mismatch"
+      else if prior_state_contract_mismatch then
+        "decode_loop_prior_state_contract_mismatch"
     else if not committed_state_transport_bound then
       "committed_target_state_payload_transport_not_bound"
     else if not decode_token_contract_bound then
@@ -3125,15 +3497,18 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
   in
   let missing_runtime_capabilities =
     remaining_session_runtime_capabilities
-      ~decode_token_contract_bound
-      ~decode_prior_state_contract_required
-      ~decode_prior_state_contract_bound
-      ~committed_state_transport_bound
-  in
-  let status =
-    if output_contract_mismatch then "output_contract_mismatch"
-    else if prior_state_contract_mismatch then
-      "prior_state_contract_mismatch"
+        ~decode_token_contract_bound
+        ~decode_prior_state_contract_required
+        ~decode_prior_state_contract_bound
+        ~graph_execution_contract_required
+        ~graph_execution_contract_bound
+        ~committed_state_transport_bound
+    in
+    let status =
+      if execution_contract_mismatch then "execution_contract_mismatch"
+      else if output_contract_mismatch then "output_contract_mismatch"
+      else if prior_state_contract_mismatch then
+        "prior_state_contract_mismatch"
     else if reference_mismatch then "reference_mismatch"
     else if not (String.equal next_runtime_blocker "none") then
       "runtime_incomplete"
@@ -3153,10 +3528,11 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     session_runtime_semantics
       ~transition_count:(List.length bundle.transitions)
       ~runtime_readiness_status:"resident_session_candidate"
-      ~next_runtime_blocker
-      ~decode_token_contract_status
-      ~decode_prior_state_contract_status
-      ~missing_runtime_capabilities
+        ~next_runtime_blocker
+        ~decode_token_contract_status
+        ~decode_prior_state_contract_status
+        ~graph_execution_contract_status
+        ~missing_runtime_capabilities
       ~committed_state_supported
       ~committed_state_transport_bound
       ~continuation_supported:true
@@ -3244,17 +3620,26 @@ let run_inference_session_file ~timing_mode path =
         ~prepared_transitions
         bundle
     else begin
+    let graph_execution_contract_status =
+      if
+        string_list_contains
+          "graph_execution_contract_mismatch"
+          preflight.continuation_declaration_blockers
+      then "mismatch"
+      else "not_required"
+    in
     let runtime_semantics =
       session_runtime_semantics
         ~transition_count
         ~runtime_readiness_status:
           preflight.continuation_runtime_readiness_status
         ~next_runtime_blocker:preflight.continuation_next_runtime_blocker
-        ~decode_token_contract_status:"not_bound"
-        ~decode_prior_state_contract_status:
-          (if bundle.decode_steps <= 1 then "not_required" else "not_bound")
-        ~missing_runtime_capabilities:missing_resident_runtime_capabilities
-        ~committed_state_supported:false
+          ~decode_token_contract_status:"not_bound"
+          ~decode_prior_state_contract_status:
+            (if bundle.decode_steps <= 1 then "not_required" else "not_bound")
+          ~graph_execution_contract_status
+          ~missing_runtime_capabilities:missing_resident_runtime_capabilities
+          ~committed_state_supported:false
         ~committed_state_transport_bound:false
         ~continuation_supported:false
     in
@@ -3318,6 +3703,80 @@ let run_inference_session_file ~timing_mode path =
       | [transition] -> transition
       | _ -> assert false
     in
+    if transition_requires_graph_execution transition then begin
+      let next_runtime_blocker =
+        "graph_execution_contract_requires_resident_session"
+      in
+      let missing_runtime_capabilities =
+        remaining_session_runtime_capabilities
+          ~decode_token_contract_bound:false
+          ~decode_prior_state_contract_required:false
+          ~decode_prior_state_contract_bound:false
+          ~graph_execution_contract_required:true
+          ~graph_execution_contract_bound:false
+          ~committed_state_transport_bound:false
+      in
+      let runtime_semantics =
+        session_runtime_semantics
+          ~transition_count
+          ~runtime_readiness_status:"rejected"
+          ~next_runtime_blocker
+          ~decode_token_contract_status:"not_bound"
+          ~decode_prior_state_contract_status:"not_required"
+          ~graph_execution_contract_status:"mismatch"
+          ~missing_runtime_capabilities
+          ~committed_state_supported:false
+          ~committed_state_transport_bound:false
+          ~continuation_supported:false
+      in
+      let status = "rejected" in
+      let payload =
+        session_report_payload
+          ~continuation_preflight:None
+          ~status
+          ~transition_count
+          ~decode_steps:bundle.decode_steps
+          ~runtime_semantics
+          ~next_runtime_blocker
+          ~opened_session_root:None
+          ~final_session_root:None
+          ~final_receipt_root:None
+          ~output_prefix_root:None
+          ~last_transition_output_payload:None
+          ~last_transition_output_root:None
+          ~unsupported_opcodes:[]
+          ~missing_capabilities:[]
+          ~policy_violations:[]
+          ~transitions:[]
+      in
+      let report =
+        `Assoc [
+          "status", `String status;
+          "schema", `String "octra.inference.session.report";
+          "session_path", `String bundle.session_path;
+          "resident_session_lifecycle_root",
+          `String Abi.resident_lifecycle_root;
+          "transition_count", `Int transition_count;
+          "decode_steps", `Int bundle.decode_steps;
+          "session_report_sha256", `String (session_report_sha256 payload);
+          "runtime_semantics", runtime_semantics;
+          "next_runtime_blocker", `String next_runtime_blocker;
+          "opened_session_root", `Null;
+          "final_session_root", `Null;
+          "final_receipt_root", `Null;
+          "output_prefix_root", `Null;
+          "last_transition_output_payload", `Null;
+          "last_transition_output_payload_sha256", `Null;
+          "last_transition_output_root", `Null;
+          "unsupported_opcodes", `List [];
+          "missing_capabilities", `List [];
+          "policy_violations", `List [];
+          "transitions", `List [];
+        ]
+      in
+      print_endline (Yojson.Safe.pretty_to_string report);
+      1
+    end else
     let result =
       run_batch_stage ~cache ~timing_mode transition.stage
     in
@@ -3344,9 +3803,10 @@ let run_inference_session_file ~timing_mode path =
         ~runtime_readiness_status:"partial_single_transition"
         ~next_runtime_blocker:
           "session_continuation_state_carry_not_supported"
-        ~decode_token_contract_status
-        ~decode_prior_state_contract_status:"not_required"
-        ~missing_runtime_capabilities:missing_resident_runtime_capabilities
+          ~decode_token_contract_status
+          ~decode_prior_state_contract_status:"not_required"
+          ~graph_execution_contract_status:"not_required"
+          ~missing_runtime_capabilities:missing_resident_runtime_capabilities
         ~committed_state_supported:false
         ~committed_state_transport_bound:false
         ~continuation_supported:false

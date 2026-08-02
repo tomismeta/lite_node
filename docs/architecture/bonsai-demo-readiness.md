@@ -225,6 +225,14 @@ payload and its SHA-256 next to `output_root`; a decode transition may declare a
 selected index without tokenizer or model-family knowledge. If the target
 program uses `ARGMAX_FP`, opcode evidence provides the
 ARGMAX provenance.
+Session transitions may now also declare an `execution_contract`. A
+`lifecycle_only` transition is allowed to prove only the product session shell.
+A `graph_real` transition must first pass generic inference compute opcode
+preflight, then run with opcode timing and show that at least one generic
+inference compute opcode executed. Any declared minimum instruction count must
+also pass. This prevents a lifecycle-only Bonsai-bound bundle from being
+overclaimed as actual graph execution while keeping LiteNode free of Bonsai,
+Qwen, tokenizer, or tensor-name knowledge.
 For more than one decode transition, the session bundle can bind a
 `previous_selected_index_u64le` `prior_state_contract` on each later decode.
 That contract is intentionally narrow: it proves the prior committed

@@ -241,6 +241,29 @@ let resident_lifecycle_json =
         ];
       ];
     ];
+    "execution_contracts",
+    `Assoc [
+      "lifecycle_only",
+      `Assoc [
+        "authority", `String "transition-lifecycle-only";
+        "binding",
+        `String
+          "transition may bind resident lifecycle/request/deployment roots without claiming graph execution";
+      ];
+      "graph_real",
+      `Assoc [
+        "authority", `String "executed-generic-vm-inference-compute-evidence";
+        "binding",
+        `String
+          "transition must contain at least one admitted inference compute opcode, run with opcode timing, report at least one executed inference compute opcode, and may require a minimum instruction count";
+        "not_bound_by_this_contract",
+        `List [
+          `String "model-family-semantics";
+          `String "full-model-completeness";
+          `String "tensor-layout-semantics";
+        ];
+      ];
+    ];
     "prior_state_contracts",
     `Assoc [
       "previous_selected_index_u64le",

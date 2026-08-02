@@ -225,6 +225,13 @@ canonical output payload and payload digest next to `output_root`, and a
 target-owned decode transition can declare a `selected_index` `output_contract`
 to expose a root-bound VM-emitted one-cell token output. When the decode program
 uses `ARGMAX_FP`, opcode evidence supplies the ARGMAX provenance.
+Each transition can also declare an `execution_contract`. `lifecycle_only`
+means the transition only claims resident lifecycle/request/deployment binding.
+`graph_real` requires generic inference compute opcode preflight and opcode-timing
+evidence that at least one generic inference compute opcode executed, plus an
+optional minimum instruction count, before LiteNode will call the transition
+graph-real. This is deliberately model-neutral: it does not prove Bonsai layer
+semantics, tensor-layout correctness, or full-model completeness.
 For multi-decode loops, a later decode may also declare a
 `previous_selected_index_u64le` `prior_state_contract`; LiteNode checks that
 the immediately preceding decode's VM-emitted selected index is present in the

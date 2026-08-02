@@ -191,15 +191,18 @@ d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
    committed-state ABI root now adds resident payload transport: prior payload
    bytes are hash-checked and rebound, `FSTORE` is
    gated by `session.committed-state`, retained payload bytes count against
-   `max_session_bytes`, and the session identity remains root-only. The next
-   resident-session step adds `previous_selected_index_u64le` prior-state
-   inclusion for multi-decode loops: before a later decode runs, LiteNode can
+   `max_session_bytes`, and the session identity remains root-only. Resident
+   transitions can now declare transition-level execution contracts and
+   `previous_selected_index_u64le` prior-state inclusion. `graph_real` is
+   matched only when opcode-timing evidence shows that a generic inference
+   compute opcode executed; static opcode presence is preflight evidence only.
+   It is not model-family semantics. Before a later decode runs, LiteNode can
    verify that the immediately previous decode's selected index is present in
    the prior committed target-state payload. This remains a byte/root contract,
-   not tokenizer semantics or proof of program consumption. The next product
-   step is to validate a producer-emitted committed-state session bundle against
-   the Bonsai prompt-token path and decide what, if any, state must become
-   durable beyond the local resident harness.
+   not tokenizer semantics or proof of program consumption.
+   The next product step is to validate a producer-emitted committed-state
+   session bundle against the Bonsai prompt-token path and decide what, if any,
+   state must become durable beyond the local resident harness.
 6. Re-run one Bonsai prompt-to-token proof under the target-owned session shape.
 7. Re-run recurrent-heavy and logits-tail performance gates against that shape.
 8. Only then prepare the mergeable branch by reducing evidence-only scaffolding

@@ -345,6 +345,20 @@ let committed_state_feedback_code =
     VM.STOP;
   |]
 
+let graph_real_code =
+  [|
+    VM.JDEST Abi.advance_label;
+    VM.LDI (0, VM.VInt (Z.of_int 20));
+    VM.LDI (1, VM.VString "\000\000\000\000\000\000\240\063");
+    VM.LDI (2, VM.VInt Z.zero);
+    VM.LDI (3, VM.VInt Z.one);
+    VM.LOAD_F64_LE_FP (0, 1, 2, 3);
+    VM.SILU_FP (0, 3);
+    VM.LDI (0, VM.VInt (Z.of_int 20));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+  |]
+
 let selected_index_contract ?(output_base = 10) () =
   `Assoc [
     "kind", `String "selected_index";
@@ -358,6 +372,17 @@ let selected_index_feedback_contract ?(offset = 0) source_transition_id =
     "source_transition_id", `String source_transition_id;
     "offset", `Int offset;
   ]
+
+let graph_real_contract ?min_program_instructions () =
+  let min_fields =
+    match min_program_instructions with
+    | None -> []
+    | Some value -> ["min_program_instructions", `Int value]
+  in
+  `Assoc (["kind", `String "graph_real"] @ min_fields)
+
+let lifecycle_only_contract =
+  `Assoc ["kind", `String "lifecycle_only"]
 
 let write_batch_fixture
     ?(session_abi_root = Abi.v1_root)
@@ -383,8 +408,11 @@ let write_batch_fixture
   let max_output_bytes = if continuation then 512 else 64 in
   let max_scratch_bytes = if continuation then 2048 else 128 in
   let capability = Req.{ name = "storage.authenticated-range"; root = hex_root 'd' } in
+  let strict_fp_capability =
+    Req.{ name = "tensor.strict-fp"; root = hex_root '7' }
+  in
   let capabilities =
-    [capability]
+    [capability; strict_fp_capability]
     @
     if committed_state then
       [Req.{ name = "session.committed-state"; root = hex_root '6' }]
@@ -536,6 +564,7 @@ let write_session_bundle_fixture
     ?session_abi_root
     ?code
     ?phase_for_index
+    ?execution_contract_for_index
     ?output_contract_for_index
     ?prior_state_contract_for_index
     ?request_root
@@ -578,6 +607,14 @@ let write_session_bundle_fixture
               | None -> []
               | Some value -> ["output_contract", value])
          in
+         let execution_contract_fields =
+           match execution_contract_for_index with
+           | None -> []
+           | Some execution_contract ->
+             (match execution_contract index with
+              | None -> []
+              | Some value -> ["execution_contract", value])
+         in
          let prior_state_contract_fields =
            match prior_state_contract_for_index with
            | None -> []
@@ -598,6 +635,7 @@ let write_session_bundle_fixture
                   else if index = 0 then "prefill"
                   else "decode");
            ]
+            @ execution_contract_fields
             @ output_contract_fields
             @ prior_state_contract_fields
             @ [
@@ -635,17 +673,21 @@ let write_session_bundle_fixture
         ]));
   bundle_path
 
-let run_session_bundle_raw bundle_path =
+let run_session_bundle_raw ?(timing_mode = Some "opcode") bundle_path =
+  let timing_fields =
+    match timing_mode with
+    | None -> []
+    | Some mode -> ["--timing-mode"; mode]
+  in
   let command =
     String.concat
       " "
-      [
+      ([
         Filename.quote (tool_path ());
         "--run-inference-session";
         Filename.quote bundle_path;
-        "--timing-mode";
-        "opcode";
       ]
+       @ timing_fields)
   in
   let input = Unix.open_process_in command in
   let raw = read_all input in
@@ -1335,19 +1377,206 @@ let check_session_bundle_accepts_v2_multi_transition () =
          (String.equal
             last_transition_output_payload
             (string_json "output_payload" second));
+         check
+           "outputs differ across progress"
+           (not
+              (String.equal
+                 (string_json "output_root" first)
+                 (string_json "output_root" second)));
+         check
+           "payloads differ across progress"
+           (not
+              (String.equal
+                 (string_json "output_payload" first)
+                 (string_json "output_payload" second)))
+       | _ -> failwith "expected two resident transitions")
+    | _ -> failwith "report must be an object"
+
+let check_session_bundle_binds_graph_execution_contract () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~session_abi_root:Abi.v2_root
+      ~code:graph_real_code
+      ~execution_contract_for_index:(fun index ->
+        if index = 0 then
+          Some (graph_real_contract ~min_program_instructions:4 ())
+        else Some lifecycle_only_contract)
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "graph-contract bundle exits incomplete" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check
+      "graph-contract bundle incomplete"
+      (String.equal (string_json "status" fields) "runtime_incomplete");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "graph contract bound"
+      (String.equal
+         (string_json "graph_execution_contract_status" semantics)
+         "bound");
+    check_session_hash report;
+    (match list_json "transitions" fields with
+     | [`Assoc first; `Assoc second] ->
+       let first_contract = assoc_json "execution_contract" first in
        check
-         "outputs differ across progress"
-         (not
-            (String.equal
-               (string_json "output_root" first)
-               (string_json "output_root" second)));
+         "first graph contract matched"
+         (String.equal (string_json "status" first_contract) "matched");
+       check "first graph real" (bool_json "graph_real" first_contract);
        check
-         "payloads differ across progress"
-         (not
-            (String.equal
-               (string_json "output_payload" first)
-               (string_json "output_payload" second)))
+         "first graph opcode"
+         (List.exists
+            (( = ) (`String "SILU_FP"))
+            (list_json "inference_opcodes" first_contract));
+       check
+         "first executed graph opcode"
+         (List.exists
+            (( = ) (`String "SILU_FP"))
+            (list_json "executed_inference_opcodes" first_contract));
+       let second_contract = assoc_json "execution_contract" second in
+       check
+         "second lifecycle contract matched"
+         (String.equal (string_json "status" second_contract) "matched");
+       check
+         "second lifecycle-only"
+         (not (bool_json "graph_real" second_contract))
      | _ -> failwith "expected two resident transitions")
+  | _ -> failwith "report must be an object"
+
+let check_session_bundle_rejects_graph_execution_overclaim () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~session_abi_root:Abi.v2_root
+      ~code:continuation_code
+      ~execution_contract_for_index:(fun _ ->
+        Some (graph_real_contract ~min_program_instructions:4 ()))
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "graph overclaim exits nonzero" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check
+      "graph overclaim rejected"
+      (String.equal (string_json "status" fields) "rejected");
+    check
+      "graph overclaim blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "graph_execution_contract_mismatch");
+    check "graph overclaim no executed transitions" (list_json "transitions" fields = []);
+    check_session_hash report;
+    let preflight = assoc_json "continuation_preflight" fields in
+    check
+      "graph overclaim declaration rejected"
+      (String.equal
+         (string_json "runtime_readiness_status" preflight)
+         "declaration_rejected");
+    check
+      "graph overclaim preflight blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" preflight)
+         "graph_execution_contract_mismatch");
+    (match list_json "transition_plan" preflight with
+     | `Assoc first :: _ ->
+       let contract = assoc_json "execution_contract" first in
+       check
+         "graph overclaim contract mismatch"
+         (String.equal (string_json "status" contract) "mismatch");
+       check
+         "graph overclaim reason"
+         (String.equal
+            (string_json "reason" contract)
+            "missing_inference_opcode")
+     | _ -> failwith "expected preflight transitions")
+  | _ -> failwith "report must be an object"
+
+let check_single_transition_rejects_graph_execution_contract () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~session_abi_root:Abi.v2_root
+      ~code:graph_real_code
+      ~execution_contract_for_index:(fun _ ->
+        Some (graph_real_contract ~min_program_instructions:4 ()))
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "single graph contract exits nonzero" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check
+      "single graph contract rejected"
+      (String.equal (string_json "status" fields) "rejected");
+    check
+      "single graph contract blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "graph_execution_contract_requires_resident_session");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "single graph contract semantics mismatch"
+      (String.equal
+         (string_json "graph_execution_contract_status" semantics)
+         "mismatch");
+    check
+      "single graph contract no execution"
+      (list_json "transitions" fields = []);
+    check_session_hash report
+  | _ -> failwith "report must be an object"
+
+let check_graph_execution_contract_requires_opcode_timing () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~session_abi_root:Abi.v2_root
+      ~code:graph_real_code
+      ~execution_contract_for_index:(fun index ->
+        if index = 0 then
+          Some (graph_real_contract ~min_program_instructions:4 ())
+        else Some lifecycle_only_contract)
+      ~transition_count:2
+      dir
+  in
+  let code, raw = run_session_bundle_raw ~timing_mode:None bundle_path in
+  let report = Yojson.Safe.from_string raw in
+  check "graph contract without timing exits nonzero" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check
+      "graph contract without timing mismatches"
+      (String.equal
+         (string_json "status" fields)
+         "execution_contract_mismatch");
+    check
+      "graph contract timing blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "graph_execution_contract_mismatch");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "graph contract timing semantics mismatch"
+      (String.equal
+         (string_json "graph_execution_contract_status" semantics)
+         "mismatch");
+    (match list_json "transitions" fields with
+     | `Assoc first :: _ ->
+       let contract = assoc_json "execution_contract" first in
+       check
+         "graph contract timing status"
+         (String.equal (string_json "status" contract) "mismatch");
+       check
+         "graph contract timing reason"
+         (String.equal
+            (string_json "reason" contract)
+            "opcode_timing_required")
+     | _ -> failwith "expected resident transitions");
+    check_session_hash report
   | _ -> failwith "report must be an object"
 
 let check_session_bundle_binds_decode_token_contract () =
@@ -2030,7 +2259,25 @@ let check_session_bundle_requires_schema_and_decode_steps () =
     write_session_bundle_fixture ~decode_steps:None dir
   in
   let missing_decode_code, _ = run_session_bundle_raw missing_decode in
-  check "missing decode steps rejected" (missing_decode_code = 1)
+  check "missing decode steps rejected" (missing_decode_code = 1);
+  remove_tree dir;
+  Unix.mkdir dir 0o700;
+  let lifecycle_with_graph_field =
+    write_session_bundle_fixture
+      ~execution_contract_for_index:(fun _ ->
+        Some
+          (`Assoc [
+            "kind", `String "lifecycle_only";
+            "min_program_instructions", `Int 1;
+          ]))
+      dir
+  in
+  let lifecycle_with_graph_field_code, _ =
+    run_session_bundle_raw lifecycle_with_graph_field
+  in
+  check
+    "lifecycle contract rejects graph field"
+    (lifecycle_with_graph_field_code = 1)
 
 let () =
   check_batch_runtime_semantics ();
@@ -2038,6 +2285,10 @@ let () =
   check_session_bundle_hash_binds_decode_steps ();
   check_session_bundle_rejects_multi_transition ();
   check_session_bundle_accepts_v2_multi_transition ();
+  check_session_bundle_binds_graph_execution_contract ();
+  check_session_bundle_rejects_graph_execution_overclaim ();
+  check_single_transition_rejects_graph_execution_contract ();
+  check_graph_execution_contract_requires_opcode_timing ();
   check_session_bundle_binds_decode_token_contract ();
   check_session_bundle_binds_committed_state_transport ();
   check_session_bundle_binds_decode_prior_state_contract ();
