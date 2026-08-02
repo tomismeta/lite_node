@@ -3792,6 +3792,121 @@ let list_tail = function
   | [] -> []
   | _ :: rest -> rest
 
+let resident_open_session_error_report ~cache ~bundle ~first_plan error =
+  let transition_count = List.length bundle.transitions in
+  let decode_transition_count =
+    count_by
+      (fun transition -> String.equal transition.phase "decode")
+      bundle.transitions
+  in
+  let graph_execution_contract_required_count =
+    count_by transition_requires_graph_execution bundle.transitions
+  in
+  let first_session_abi_root =
+    (Plan.target first_plan).Target.session_abi_root
+  in
+  let committed_state_supported =
+    Abi.committed_state_supported first_session_abi_root
+  in
+  let continuation_supported =
+    Abi.continuation_supported first_session_abi_root
+  in
+  let decode_prior_required = max 0 (decode_transition_count - 1) in
+  let first_transition_issue =
+    `Assoc [
+      "status", `String "open_session_error";
+      "reason", `String "open_session_error";
+      "open_session_error", `String error;
+    ]
+  in
+  let runtime_semantics =
+    session_runtime_semantics
+      ~transition_count
+      ~runtime_readiness_status:"resident_session_candidate"
+      ~next_runtime_blocker:"open_session_error"
+      ~decode_token_contract_status:"not_bound"
+      ~decode_token_contract_summary:
+        (contract_summary_json
+           ~required_count:decode_transition_count
+           ~bound_count:0
+           ~mismatch_count:0)
+      ~decode_selected_indices:(`List [])
+      ~decode_prior_state_contract_status:
+        (if decode_prior_required = 0 then "not_required" else "not_bound")
+      ~decode_prior_state_contract_summary:
+        (contract_summary_json
+           ~required_count:decode_prior_required
+           ~bound_count:0
+           ~mismatch_count:0)
+      ~graph_execution_contract_status:
+        (if graph_execution_contract_required_count = 0 then "not_required"
+         else "not_bound")
+      ~graph_execution_contract_summary:
+        (graph_execution_contract_summary_json
+           ~required_count:graph_execution_contract_required_count
+           ~bound_count:0
+           ~mismatch_count:0)
+      ~graph_executed_opcodes:(`List [])
+      ~transition_root_chain_summary:
+        (empty_transition_root_chain_summary_json ~transition_count)
+      ~first_transition_issue
+      ~missing_runtime_capabilities:(`List [])
+      ~committed_state_supported
+      ~committed_state_transport_bound:false
+      ~continuation_supported
+  in
+  let status = "open_session_error" in
+  let payload =
+    session_report_payload
+      ~continuation_preflight:None
+      ~status
+      ~transition_count
+      ~decode_steps:bundle.decode_steps
+      ~runtime_semantics
+      ~next_runtime_blocker:"open_session_error"
+      ~opened_session_root:None
+      ~final_session_root:None
+      ~final_receipt_root:None
+      ~output_prefix_root:None
+      ~last_transition_output_payload:None
+      ~last_transition_output_root:None
+      ~unsupported_opcodes:[]
+      ~missing_capabilities:[]
+      ~policy_violations:[]
+      ~transitions:[]
+  in
+  let report =
+    `Assoc [
+      "status", `String status;
+      "schema", `String "octra.inference.session.report";
+      "session_path", `String bundle.session_path;
+      "resident_session_lifecycle_root",
+      `String Abi.resident_lifecycle_root;
+      "transition_count", `Int transition_count;
+      "decode_steps", `Int bundle.decode_steps;
+      "session_report_sha256", `String (session_report_sha256 payload);
+      "runtime_semantics", runtime_semantics;
+      "next_runtime_blocker", `String "open_session_error";
+      "open_session_error", `String error;
+      "opened_session_root", `Null;
+      "final_session_root", `Null;
+      "final_receipt_root", `Null;
+      "output_prefix_root", `Null;
+      "last_transition_output_payload", `Null;
+      "last_transition_output_payload_sha256", `Null;
+      "last_transition_output_root", `Null;
+      "unsupported_opcodes", `List [];
+      "missing_capabilities", `List [];
+      "policy_violations", `List [];
+      "owner_cache_entries", `Int (Hashtbl.length cache.owner_bytes);
+      "pin_cache_entries",
+      `Int (Hashtbl.length cache.pins_by_ranges_root_and_limit);
+      "transitions", `List [];
+    ]
+  in
+  print_endline (Yojson.Safe.pretty_to_string report);
+  1
+
 let first_transition_issue_json ~status ~next_runtime_blocker results =
   let issue result reason =
     `Assoc [
@@ -3866,12 +3981,15 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
     | [] -> fail "session bundle has no transitions"
     | first :: _ -> first.prepared_stage.prepared_plan
   in
-  let opened =
-    match Session.open_session ~plan:first_plan with
-    | Error error -> fail (Session.error_message error)
-    | Ok opened -> opened
-  in
-  let rec run_loop session results previous_decode_selected_index = function
+  match Session.open_session ~plan:first_plan with
+  | Error error ->
+    resident_open_session_error_report
+      ~cache
+      ~bundle
+      ~first_plan
+      (Session.error_message error)
+  | Ok opened ->
+    let rec run_loop session results previous_decode_selected_index = function
     | [] -> session, results, previous_decode_selected_index
     | prepared :: rest ->
       let advanced, result =

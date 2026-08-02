@@ -469,6 +469,7 @@ let lifecycle_only_contract =
 
 let write_batch_fixture
     ?(session_abi_root = Abi.v1_root)
+    ?max_session_bytes
     ?code
     dir =
   let stage_dir = Filename.concat dir "stage" in
@@ -490,6 +491,11 @@ let write_batch_fixture
   let committed_state = Abi.committed_state_supported session_abi_root in
   let max_output_bytes = if continuation then 512 else 64 in
   let max_scratch_bytes = if continuation then 2048 else 128 in
+  let max_session_bytes =
+    match max_session_bytes with
+    | None -> 1024
+    | Some value -> value
+  in
   let capability = Req.{ name = "storage.authenticated-range"; root = hex_root 'd' } in
   let strict_fp_capability =
     Req.{ name = "tensor.strict-fp"; root = hex_root '7' }
@@ -505,7 +511,7 @@ let write_batch_fixture
     Req.{
       max_model_bytes = 64;
       max_view_bytes = 64;
-      max_session_bytes = 1024;
+      max_session_bytes;
       max_scratch_bytes;
       max_output_bytes;
       max_advance_effort = 4096;
@@ -645,6 +651,7 @@ let write_session_bundle_fixture
     ?(schema = Some "octra.inference.session.bundle")
     ?(decode_steps = Some 1)
     ?session_abi_root
+    ?max_session_bytes
     ?code
     ?phase_for_index
     ?execution_contract_for_index
@@ -656,7 +663,7 @@ let write_session_bundle_fixture
     ?(transition_count = 1)
     dir =
   let batch_path =
-    write_batch_fixture ?session_abi_root ?code dir
+    write_batch_fixture ?session_abi_root ?max_session_bytes ?code dir
   in
   let stage = stage_json_from_batch batch_path in
   let second_stage =
@@ -2919,6 +2926,82 @@ let check_session_bundle_reports_admission_policy_rejection () =
      | _ -> failwith "expected two admission preflight transitions")
   | _ -> failwith "report must be an object"
 
+let check_session_bundle_reports_open_session_error () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~session_abi_root:Abi.v2_root
+      ~max_session_bytes:1
+      ~code:continuation_token_code
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "open-error bundle exits nonzero" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check_session_hash report;
+    check
+      "open-error status"
+      (String.equal (string_json "status" fields) "open_session_error");
+    check
+      "open-error blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "open_session_error");
+    ignore (string_json "open_session_error" fields);
+    check "open-error opened root null" (assoc_value "opened_session_root" fields = `Null);
+    check "open-error final root null" (assoc_value "final_session_root" fields = `Null);
+    check
+      "open-error final receipt null"
+      (assoc_value "final_receipt_root" fields = `Null);
+    check
+      "open-error output prefix null"
+      (assoc_value "output_prefix_root" fields = `Null);
+    check "open-error no transitions" (list_json "transitions" fields = []);
+    check
+      "open-error unsupported empty"
+      (list_json "unsupported_opcodes" fields = []);
+    check
+      "open-error missing capabilities empty"
+      (list_json "missing_capabilities" fields = []);
+    check
+      "open-error policy violations empty"
+      (list_json "policy_violations" fields = []);
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "open-error readiness"
+      (String.equal
+         (string_json "runtime_readiness_status" semantics)
+         "resident_session_candidate");
+    check
+      "open-error semantic blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" semantics)
+         "open_session_error");
+    check_decode_selected_indices semantics [];
+    check_transition_root_chain_summary
+      semantics
+      ~transition_count:2
+      ~complete_transitions:0
+      ~advanced_session_roots:0
+      ~advance_receipt_roots:0
+      ~output_prefix_roots:0
+      ~incomplete_transition_ids:[];
+    let issue = assoc_json "first_transition_issue" semantics in
+    check
+      "open-error issue status"
+      (String.equal
+         (string_json "status" issue)
+         "open_session_error");
+    check
+      "open-error issue reason"
+      (String.equal
+         (string_json "reason" issue)
+         "open_session_error");
+    ignore (string_json "open_session_error" issue)
+  | _ -> failwith "report must be an object"
+
 let check_session_bundle_reports_advance_session_error () =
   with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
   let bundle_path =
@@ -3205,6 +3288,7 @@ let () =
   check_session_bundle_rejects_decode_token_contract_mismatch ();
   check_session_bundle_rejects_invalid_phase_order ();
   check_session_bundle_reports_admission_policy_rejection ();
+  check_session_bundle_reports_open_session_error ();
   check_session_bundle_reports_advance_session_error ();
   check_session_bundle_reports_top_level_claim_mismatch ();
   check_session_bundle_reports_identity_mismatch ();
