@@ -2318,6 +2318,78 @@ let check_session_bundle_binds_decode_prior_state_contract () =
      | _ -> failwith "expected three feedback transitions")
   | _ -> failwith "report must be an object"
 
+let check_session_bundle_requires_decode_prior_state_contract () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~decode_steps:(Some 2)
+      ~session_abi_root:Abi.committed_state_root
+      ~code:committed_state_feedback_code
+      ~output_contract_for_index:(fun index ->
+        if index > 0 then Some (selected_index_contract ())
+        else None)
+      ~transition_count:3
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "missing feedback-contract exits incomplete" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check
+      "missing feedback-contract status"
+      (String.equal (string_json "status" fields) "runtime_incomplete");
+    check
+      "missing feedback-contract blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "decode_loop_prior_state_contract_not_bound");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "missing feedback contract not bound"
+      (String.equal
+         (string_json "decode_prior_state_contract_status" semantics)
+         "not_bound");
+    check_decode_token_summary
+      semantics
+      ~required:2
+      ~bound:2
+      ~mismatched:0;
+    check_decode_prior_state_summary
+      semantics
+      ~required:1
+      ~bound:0
+      ~mismatched:0;
+    check_transition_root_chain_summary
+      semantics
+      ~transition_count:3
+      ~complete_transitions:3
+      ~advanced_session_roots:3
+      ~advance_receipt_roots:3
+      ~output_prefix_roots:3
+      ~incomplete_transition_ids:[];
+    check_first_transition_issue
+      semantics
+      ~transition_id:"token-002"
+      ~phase:"decode"
+      ~status:"accepted"
+      ~reason:"decode_loop_prior_state_contract_not_bound";
+    check
+      "missing feedback capability"
+      (list_json "missing_runtime_capabilities" semantics
+       = [`String "decode_loop_prior_state_contract"]);
+    check_session_hash report;
+    (match list_json "transitions" fields with
+     | [_; _; `Assoc second_decode] ->
+       check
+         "second decode prior feedback not declared"
+         (String.equal
+            (string_json
+               "status"
+               (assoc_json "prior_state_contract" second_decode))
+            "not_declared")
+     | _ -> failwith "expected three missing-feedback transitions")
+  | _ -> failwith "report must be an object"
+
 let check_session_bundle_rejects_decode_prior_state_contract_mismatch () =
   with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
   let bundle_path =
@@ -2793,6 +2865,7 @@ let () =
   check_session_bundle_binds_decode_token_contract ();
   check_session_bundle_binds_committed_state_transport ();
   check_session_bundle_binds_decode_prior_state_contract ();
+  check_session_bundle_requires_decode_prior_state_contract ();
   check_session_bundle_rejects_decode_prior_state_contract_mismatch ();
   check_session_bundle_rejects_nonadjacent_prior_state_contract ();
   check_session_bundle_rejects_multiple_prefills ();
