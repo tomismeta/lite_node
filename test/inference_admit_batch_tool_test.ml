@@ -359,6 +359,27 @@ let graph_real_code =
     VM.STOP;
   |]
 
+let dead_branch_graph_real_code =
+  [|
+    VM.JDEST Abi.advance_label;
+    VM.LDI (22, VM.VInt Z.one);
+    VM.LDI (23, VM.VInt Z.one);
+    VM.EQ (24, 22, 23);
+    VM.JIF (24, 101);
+    VM.LDI (0, VM.VInt (Z.of_int 20));
+    VM.LDI (1, VM.VString "\000\000\000\000\000\000\240\063");
+    VM.LDI (2, VM.VInt Z.zero);
+    VM.LDI (3, VM.VInt Z.one);
+    VM.LOAD_F64_LE_FP (0, 1, 2, 3);
+    VM.SILU_FP (0, 3);
+    VM.JDEST 101;
+    VM.LDI (2, VM.VInt (Z.of_int 7));
+    VM.MSTORE (10, 2);
+    VM.LDI (0, VM.VInt (Z.of_int 10));
+    VM.LDI (1, VM.VInt Z.one);
+    VM.STOP;
+  |]
+
 let graph_real_feedback_code =
   [|
     VM.JDEST Abi.advance_label;
@@ -1623,6 +1644,64 @@ let check_graph_execution_contract_requires_opcode_timing () =
     check_session_hash report
   | _ -> failwith "report must be an object"
 
+let check_graph_execution_contract_rejects_dead_branch_opcode () =
+  with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
+  let bundle_path =
+    write_session_bundle_fixture
+      ~session_abi_root:Abi.v2_root
+      ~code:dead_branch_graph_real_code
+      ~execution_contract_for_index:(fun index ->
+        if index = 0 then
+          Some (graph_real_contract ~min_program_instructions:4 ())
+        else Some lifecycle_only_contract)
+      ~transition_count:2
+      dir
+  in
+  let code, report = run_session_bundle bundle_path in
+  check "dead graph branch exits nonzero" (code = 1);
+  match report with
+  | `Assoc fields ->
+    check
+      "dead graph branch status"
+      (String.equal
+         (string_json "status" fields)
+         "execution_contract_mismatch");
+    check
+      "dead graph branch blocker"
+      (String.equal
+         (string_json "next_runtime_blocker" fields)
+         "graph_execution_contract_mismatch");
+    let semantics = assoc_json "runtime_semantics" fields in
+    check
+      "dead graph branch graph status"
+      (String.equal
+         (string_json "graph_execution_contract_status" semantics)
+         "mismatch");
+    check_session_hash report;
+    (match list_json "transitions" fields with
+     | `Assoc first :: _ ->
+       check
+         "dead graph branch transition mismatch"
+         (String.equal
+            (string_json "status" first)
+            "execution_contract_mismatch");
+       let contract = assoc_json "execution_contract" first in
+       check
+         "dead graph branch static opcode present"
+         (List.exists
+            (( = ) (`String "SILU_FP"))
+            (list_json "inference_opcodes" contract));
+       check
+         "dead graph branch executed opcode absent"
+         (list_json "executed_inference_opcodes" contract = []);
+       check
+         "dead graph branch reason"
+         (String.equal
+            (string_json "reason" contract)
+            "no_inference_opcode_executed")
+     | _ -> failwith "expected resident transition")
+  | _ -> failwith "report must be an object"
+
 let check_session_bundle_accepts_graph_real_feedback_loop () =
   with_temp_dir "octra-inference-session-bundle-test" @@ fun dir ->
   let bundle_path =
@@ -2445,6 +2524,7 @@ let () =
   check_session_bundle_rejects_graph_execution_overclaim ();
   check_single_transition_rejects_graph_execution_contract ();
   check_graph_execution_contract_requires_opcode_timing ();
+  check_graph_execution_contract_rejects_dead_branch_opcode ();
   check_session_bundle_accepts_graph_real_feedback_loop ();
   check_session_bundle_binds_decode_token_contract ();
   check_session_bundle_binds_committed_state_transport ();

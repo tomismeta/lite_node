@@ -276,9 +276,11 @@ opcode timing, show at least one generic inference compute opcode in the
 executed opcode profile, and meet any declared minimum instruction count. Static
 opcode presence is preflight evidence only. A preflight mismatch rejects before
 session advance; a runtime evidence mismatch is reported after the transition
-runs. This keeps lifecycle-only prefill from being overclaimed as Bonsai graph
-work. The contract is intentionally generic. It does not prove model-family
-semantics, tensor-layout correctness, full-model completeness, or tokenization.
+runs. An inference opcode in an untaken branch remains an overclaim and reports
+`no_inference_opcode_executed`. This keeps lifecycle-only prefill from being
+overclaimed as Bonsai graph work. The contract is intentionally generic. It does
+not prove model-family semantics, tensor-layout correctness, full-model
+completeness, or tokenization.
 
 ## Canonical Session
 
