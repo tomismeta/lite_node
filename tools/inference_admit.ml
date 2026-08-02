@@ -3737,6 +3737,7 @@ let session_report_payload
     ~status
     ~transition_count
     ~decode_steps
+    ~decode_selected_indices
     ~runtime_semantics
     ~next_runtime_blocker
     ~opened_session_root
@@ -3759,6 +3760,7 @@ let session_report_payload
     `String Abi.resident_lifecycle_root;
     "transition_count", `Int transition_count;
     "decode_steps", `Int decode_steps;
+    "decode_selected_indices", decode_selected_indices;
     "runtime_semantics", runtime_semantics;
     "next_runtime_blocker", `String next_runtime_blocker;
     "opened_session_root", nullable_string_json opened_session_root;
@@ -3873,6 +3875,7 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
       ~status
       ~transition_count
       ~decode_steps:bundle.decode_steps
+      ~decode_selected_indices:(`List [])
       ~runtime_semantics
       ~next_runtime_blocker:"open_session_error"
       ~opened_session_root:None
@@ -3898,6 +3901,7 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
       `String Abi.resident_lifecycle_root;
       "transition_count", `Int transition_count;
       "decode_steps", `Int bundle.decode_steps;
+      "decode_selected_indices", `List [];
       "session_report_sha256", `String (session_report_sha256 payload);
       "runtime_semantics", runtime_semantics;
       "next_runtime_blocker", `String "open_session_error";
@@ -4325,6 +4329,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       ~status
       ~transition_count:(List.length bundle.transitions)
       ~decode_steps:bundle.decode_steps
+      ~decode_selected_indices
       ~runtime_semantics
       ~next_runtime_blocker
       ~opened_session_root:(Some (Session.root opened))
@@ -4350,6 +4355,7 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       `String Abi.resident_lifecycle_root;
       "transition_count", `Int (List.length bundle.transitions);
       "decode_steps", `Int bundle.decode_steps;
+      "decode_selected_indices", decode_selected_indices;
       "session_report_sha256", `String (session_report_sha256 payload);
       "runtime_semantics", runtime_semantics;
       "next_runtime_blocker", `String next_runtime_blocker;
@@ -4452,6 +4458,7 @@ let run_inference_session_file ~timing_mode path =
         ~status
         ~transition_count
         ~decode_steps:bundle.decode_steps
+        ~decode_selected_indices:(`List [])
         ~runtime_semantics
         ~next_runtime_blocker:"program_admission_rejected"
         ~opened_session_root:None
@@ -4477,6 +4484,7 @@ let run_inference_session_file ~timing_mode path =
         `String Abi.resident_lifecycle_root;
         "transition_count", `Int transition_count;
         "decode_steps", `Int bundle.decode_steps;
+        "decode_selected_indices", `List [];
         "session_report_sha256", `String (session_report_sha256 payload);
         "runtime_semantics", runtime_semantics;
         "next_runtime_blocker", `String "program_admission_rejected";
@@ -4587,6 +4595,7 @@ let run_inference_session_file ~timing_mode path =
         ~status
         ~transition_count
         ~decode_steps:bundle.decode_steps
+        ~decode_selected_indices:(`List [])
         ~runtime_semantics
         ~next_runtime_blocker:preflight.continuation_next_runtime_blocker
         ~opened_session_root:None
@@ -4612,6 +4621,7 @@ let run_inference_session_file ~timing_mode path =
         `String Abi.resident_lifecycle_root;
         "transition_count", `Int transition_count;
         "decode_steps", `Int bundle.decode_steps;
+        "decode_selected_indices", `List [];
         "session_report_sha256", `String (session_report_sha256 payload);
         "runtime_semantics", runtime_semantics;
         "opened_session_root", `Null;
@@ -4709,6 +4719,7 @@ let run_inference_session_file ~timing_mode path =
           ~status
           ~transition_count
           ~decode_steps:bundle.decode_steps
+          ~decode_selected_indices:(`List [])
           ~runtime_semantics
           ~next_runtime_blocker
           ~opened_session_root:None
@@ -4734,6 +4745,7 @@ let run_inference_session_file ~timing_mode path =
           `String Abi.resident_lifecycle_root;
           "transition_count", `Int transition_count;
           "decode_steps", `Int bundle.decode_steps;
+          "decode_selected_indices", `List [];
           "session_report_sha256", `String (session_report_sha256 payload);
           "runtime_semantics", runtime_semantics;
           "next_runtime_blocker", `String next_runtime_blocker;
@@ -4787,6 +4799,17 @@ let run_inference_session_file ~timing_mode path =
           (if output_contract.decode_token_contract_bound then 1 else 0)
         ~mismatch_count:(if output_contract_mismatch then 1 else 0)
     in
+    let decode_selected_indices =
+      match output_contract.selected_index with
+      | Some selected_index when String.equal transition.phase "decode" ->
+        `List [
+          `Assoc [
+            "transition_id", `String transition.transition_id;
+            "selected_index", `String selected_index;
+          ];
+        ]
+      | _ -> `List []
+    in
     let runtime_semantics =
       session_runtime_semantics
         ~transition_count
@@ -4795,7 +4818,7 @@ let run_inference_session_file ~timing_mode path =
           "session_continuation_state_carry_not_supported"
         ~decode_token_contract_status
         ~decode_token_contract_summary
-        ~decode_selected_indices:(`List [])
+        ~decode_selected_indices
         ~decode_prior_state_contract_status:"not_required"
         ~decode_prior_state_contract_summary:
           (contract_summary_json
@@ -4828,6 +4851,7 @@ let run_inference_session_file ~timing_mode path =
         ~status
         ~transition_count
         ~decode_steps:bundle.decode_steps
+        ~decode_selected_indices
         ~runtime_semantics
         ~next_runtime_blocker:
           "session_continuation_state_carry_not_supported"
@@ -4854,6 +4878,7 @@ let run_inference_session_file ~timing_mode path =
         `String Abi.resident_lifecycle_root;
         "transition_count", `Int transition_count;
         "decode_steps", `Int bundle.decode_steps;
+        "decode_selected_indices", decode_selected_indices;
         "session_report_sha256", `String (session_report_sha256 payload);
         "runtime_semantics", runtime_semantics;
         "next_runtime_blocker",

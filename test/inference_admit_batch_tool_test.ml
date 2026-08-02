@@ -972,8 +972,7 @@ let check_contract_summary
 let check_decode_token_summary =
   check_contract_summary "decode_token_contract_summary" "decode token"
 
-let check_decode_selected_indices semantics expected =
-  let expected_json =
+let decode_selected_indices_json expected =
     List.map
       (fun (transition_id, selected_index) ->
          `Assoc [
@@ -981,7 +980,9 @@ let check_decode_selected_indices semantics expected =
            "selected_index", `String selected_index;
          ])
       expected
-  in
+
+let check_decode_selected_indices semantics expected =
+  let expected_json = decode_selected_indices_json expected in
   check
     "decode selected indices"
     (list_json "decode_selected_indices" semantics = expected_json)
@@ -1103,6 +1104,8 @@ let check_session_hash report =
         assoc_value "resident_session_lifecycle_root" fields;
         "transition_count", `Int (int_json "transition_count" fields);
         "decode_steps", `Int (int_json "decode_steps" fields);
+        "decode_selected_indices",
+        assoc_value "decode_selected_indices" fields;
         "runtime_semantics", assoc_value "runtime_semantics" fields;
         "next_runtime_blocker", assoc_value "next_runtime_blocker" fields;
         "opened_session_root", assoc_value "opened_session_root" fields;
@@ -1199,6 +1202,9 @@ let check_session_bundle_single_transition () =
          "octra.inference.session.report");
     check "session transition count" (int_json "transition_count" fields = 1);
     check "session decode steps" (int_json "decode_steps" fields = 1);
+    check
+      "single top-level selected indices empty"
+      (list_json "decode_selected_indices" fields = []);
     check
       "session last output root"
       (String.length (string_json "last_transition_output_root" fields) = 64);
@@ -2026,6 +2032,14 @@ let check_session_bundle_accepts_graph_real_feedback_loop () =
         "token-001", string_of_int feedback_selected_index;
         "token-002", string_of_int feedback_selected_index;
       ];
+    check
+      "graph feedback top-level selected indices"
+      (list_json "decode_selected_indices" fields
+       = decode_selected_indices_json
+           [
+             "token-001", string_of_int feedback_selected_index;
+             "token-002", string_of_int feedback_selected_index;
+           ]);
     check
       "graph feedback prior contract bound"
       (String.equal
