@@ -988,6 +988,26 @@ let check_contract_summary
 let check_decode_token_summary =
   check_contract_summary "decode_token_contract_summary" "decode token"
 
+let check_top_level_decode_token_contract
+    fields
+    ~status
+    ~required
+    ~bound
+    ~mismatched =
+  let semantics = assoc_json "runtime_semantics" fields in
+  check
+    "top-level decode token status"
+    (String.equal (string_json "decode_token_contract_status" fields) status);
+  check
+    "top-level decode token status mirrors semantics"
+    (assoc_value "decode_token_contract_status" fields
+     = assoc_value "decode_token_contract_status" semantics);
+  check
+    "top-level decode token summary mirrors semantics"
+    (assoc_value "decode_token_contract_summary" fields
+     = assoc_value "decode_token_contract_summary" semantics);
+  check_decode_token_summary fields ~required ~bound ~mismatched
+
 let decode_selected_indices_json expected =
     List.map
       (fun (transition_id, selected_index) ->
@@ -1029,6 +1049,28 @@ let check_decode_prior_state_summary =
   check_contract_summary
     "decode_prior_state_contract_summary"
     "decode prior-state"
+
+let check_top_level_decode_prior_state_contract
+    fields
+    ~status
+    ~required
+    ~bound
+    ~mismatched =
+  let semantics = assoc_json "runtime_semantics" fields in
+  check
+    "top-level decode prior-state status"
+    (String.equal
+       (string_json "decode_prior_state_contract_status" fields)
+       status);
+  check
+    "top-level decode prior-state status mirrors semantics"
+    (assoc_value "decode_prior_state_contract_status" fields
+     = assoc_value "decode_prior_state_contract_status" semantics);
+  check
+    "top-level decode prior-state summary mirrors semantics"
+    (assoc_value "decode_prior_state_contract_summary" fields
+     = assoc_value "decode_prior_state_contract_summary" semantics);
+  check_decode_prior_state_summary fields ~required ~bound ~mismatched
 
 let transition_root_chain_entry_json fields =
   `Assoc [
@@ -1183,8 +1225,16 @@ let check_session_hash report =
         assoc_value "resident_session_lifecycle_root" fields;
         "transition_count", `Int (int_json "transition_count" fields);
         "decode_steps", `Int (int_json "decode_steps" fields);
+        "decode_token_contract_status",
+        assoc_value "decode_token_contract_status" fields;
+        "decode_token_contract_summary",
+        assoc_value "decode_token_contract_summary" fields;
         "decode_selected_indices",
         assoc_value "decode_selected_indices" fields;
+        "decode_prior_state_contract_status",
+        assoc_value "decode_prior_state_contract_status" fields;
+        "decode_prior_state_contract_summary",
+        assoc_value "decode_prior_state_contract_summary" fields;
         "decode_prior_state_contracts",
         assoc_value "decode_prior_state_contracts" fields;
         "transition_root_chain",
@@ -2136,6 +2186,12 @@ let check_session_bundle_accepts_graph_real_feedback_loop () =
       ~required:2
       ~bound:2
       ~mismatched:0;
+    check_top_level_decode_token_contract
+      fields
+      ~status:"bound"
+      ~required:2
+      ~bound:2
+      ~mismatched:0;
     check_decode_selected_indices
       semantics
       [
@@ -2157,6 +2213,12 @@ let check_session_bundle_accepts_graph_real_feedback_loop () =
          "bound");
     check_decode_prior_state_summary
       semantics
+      ~required:1
+      ~bound:1
+      ~mismatched:0;
+    check_top_level_decode_prior_state_contract
+      fields
+      ~status:"bound"
       ~required:1
       ~bound:1
       ~mismatched:0;

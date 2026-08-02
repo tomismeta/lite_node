@@ -3793,7 +3793,11 @@ let session_report_payload
     ~status
     ~transition_count
     ~decode_steps
+    ~decode_token_contract_status
+    ~decode_token_contract_summary
     ~decode_selected_indices
+    ~decode_prior_state_contract_status
+    ~decode_prior_state_contract_summary
     ~decode_prior_state_contracts
     ~transition_root_chain
     ~graph_executed_opcodes
@@ -3822,7 +3826,12 @@ let session_report_payload
     `String Abi.resident_lifecycle_root;
     "transition_count", `Int transition_count;
     "decode_steps", `Int decode_steps;
+    "decode_token_contract_status", `String decode_token_contract_status;
+    "decode_token_contract_summary", decode_token_contract_summary;
     "decode_selected_indices", decode_selected_indices;
+    "decode_prior_state_contract_status",
+    `String decode_prior_state_contract_status;
+    "decode_prior_state_contract_summary", decode_prior_state_contract_summary;
     "decode_prior_state_contracts", decode_prior_state_contracts;
     "transition_root_chain", transition_root_chain;
     "graph_executed_opcodes", graph_executed_opcodes;
@@ -3911,25 +3920,32 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
       ~bound_count:0
       ~mismatch_count:0
   in
+  let decode_token_contract_status = "not_bound" in
+  let decode_token_contract_summary =
+    contract_summary_json
+      ~required_count:decode_transition_count
+      ~bound_count:0
+      ~mismatch_count:0
+  in
+  let decode_prior_state_contract_status =
+    if decode_prior_required = 0 then "not_required" else "not_bound"
+  in
+  let decode_prior_state_contract_summary =
+    contract_summary_json
+      ~required_count:decode_prior_required
+      ~bound_count:0
+      ~mismatch_count:0
+  in
   let runtime_semantics =
     session_runtime_semantics
       ~transition_count
       ~runtime_readiness_status:"resident_session_candidate"
       ~next_runtime_blocker:"open_session_error"
-      ~decode_token_contract_status:"not_bound"
-      ~decode_token_contract_summary:
-        (contract_summary_json
-           ~required_count:decode_transition_count
-           ~bound_count:0
-           ~mismatch_count:0)
+      ~decode_token_contract_status
+      ~decode_token_contract_summary
       ~decode_selected_indices:(`List [])
-      ~decode_prior_state_contract_status:
-        (if decode_prior_required = 0 then "not_required" else "not_bound")
-      ~decode_prior_state_contract_summary:
-        (contract_summary_json
-           ~required_count:decode_prior_required
-           ~bound_count:0
-           ~mismatch_count:0)
+      ~decode_prior_state_contract_status
+      ~decode_prior_state_contract_summary
       ~graph_execution_contract_status
       ~graph_execution_contract_summary
       ~graph_executed_opcodes:(`List [])
@@ -3948,7 +3964,11 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
       ~status
       ~transition_count
       ~decode_steps:bundle.decode_steps
+      ~decode_token_contract_status
+      ~decode_token_contract_summary
       ~decode_selected_indices:(`List [])
+      ~decode_prior_state_contract_status
+      ~decode_prior_state_contract_summary
       ~decode_prior_state_contracts:(`List [])
       ~transition_root_chain:(`List [])
       ~graph_executed_opcodes:(`List [])
@@ -3980,7 +4000,13 @@ let resident_open_session_error_report ~cache ~bundle ~first_plan error =
       `String Abi.resident_lifecycle_root;
       "transition_count", `Int transition_count;
       "decode_steps", `Int bundle.decode_steps;
+      "decode_token_contract_status", `String decode_token_contract_status;
+      "decode_token_contract_summary", decode_token_contract_summary;
       "decode_selected_indices", `List [];
+      "decode_prior_state_contract_status",
+      `String decode_prior_state_contract_status;
+      "decode_prior_state_contract_summary",
+      decode_prior_state_contract_summary;
       "decode_prior_state_contracts", `List [];
       "transition_root_chain", `List [];
       "graph_executed_opcodes", `List [];
@@ -4429,7 +4455,11 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       ~status
       ~transition_count:(List.length bundle.transitions)
       ~decode_steps:bundle.decode_steps
+      ~decode_token_contract_status
+      ~decode_token_contract_summary
       ~decode_selected_indices
+      ~decode_prior_state_contract_status
+      ~decode_prior_state_contract_summary
       ~decode_prior_state_contracts
       ~transition_root_chain
       ~graph_executed_opcodes
@@ -4461,7 +4491,13 @@ let run_resident_inference_session ~cache ~prepared_transitions bundle =
       `String Abi.resident_lifecycle_root;
       "transition_count", `Int (List.length bundle.transitions);
       "decode_steps", `Int bundle.decode_steps;
+      "decode_token_contract_status", `String decode_token_contract_status;
+      "decode_token_contract_summary", decode_token_contract_summary;
       "decode_selected_indices", decode_selected_indices;
+      "decode_prior_state_contract_status",
+      `String decode_prior_state_contract_status;
+      "decode_prior_state_contract_summary",
+      decode_prior_state_contract_summary;
       "decode_prior_state_contracts", decode_prior_state_contracts;
       "transition_root_chain", transition_root_chain;
       "graph_executed_opcodes", graph_executed_opcodes;
@@ -4538,25 +4574,32 @@ let run_inference_session_file ~timing_mode path =
         ~bound_count:0
         ~mismatch_count:0
     in
+    let decode_token_contract_status = "not_bound" in
+    let decode_token_contract_summary =
+      contract_summary_json
+        ~required_count:decode_transition_count
+        ~bound_count:0
+        ~mismatch_count:0
+    in
+    let decode_prior_state_contract_status =
+      if decode_transition_count <= 1 then "not_required" else "not_bound"
+    in
+    let decode_prior_state_contract_summary =
+      contract_summary_json
+        ~required_count:(max 0 (decode_transition_count - 1))
+        ~bound_count:0
+        ~mismatch_count:0
+    in
     let runtime_semantics =
       session_runtime_semantics
         ~transition_count
         ~runtime_readiness_status:"admission_rejected"
         ~next_runtime_blocker:"program_admission_rejected"
-        ~decode_token_contract_status:"not_bound"
-        ~decode_token_contract_summary:
-          (contract_summary_json
-             ~required_count:decode_transition_count
-             ~bound_count:0
-             ~mismatch_count:0)
+        ~decode_token_contract_status
+        ~decode_token_contract_summary
         ~decode_selected_indices:(`List [])
-        ~decode_prior_state_contract_status:
-          (if decode_transition_count <= 1 then "not_required" else "not_bound")
-        ~decode_prior_state_contract_summary:
-          (contract_summary_json
-             ~required_count:(max 0 (decode_transition_count - 1))
-             ~bound_count:0
-             ~mismatch_count:0)
+        ~decode_prior_state_contract_status
+        ~decode_prior_state_contract_summary
         ~graph_execution_contract_status
         ~graph_execution_contract_summary
         ~graph_executed_opcodes:(`List [])
@@ -4575,7 +4618,11 @@ let run_inference_session_file ~timing_mode path =
         ~status
         ~transition_count
         ~decode_steps:bundle.decode_steps
+        ~decode_token_contract_status
+        ~decode_token_contract_summary
         ~decode_selected_indices:(`List [])
+        ~decode_prior_state_contract_status
+        ~decode_prior_state_contract_summary
         ~decode_prior_state_contracts:(`List [])
         ~transition_root_chain:(`List [])
         ~graph_executed_opcodes:(`List [])
@@ -4607,7 +4654,13 @@ let run_inference_session_file ~timing_mode path =
         `String Abi.resident_lifecycle_root;
         "transition_count", `Int transition_count;
         "decode_steps", `Int bundle.decode_steps;
+        "decode_token_contract_status", `String decode_token_contract_status;
+        "decode_token_contract_summary", decode_token_contract_summary;
         "decode_selected_indices", `List [];
+        "decode_prior_state_contract_status",
+        `String decode_prior_state_contract_status;
+        "decode_prior_state_contract_summary",
+        decode_prior_state_contract_summary;
         "decode_prior_state_contracts", `List [];
         "transition_root_chain", `List [];
         "graph_executed_opcodes", `List [];
@@ -4692,11 +4745,15 @@ let run_inference_session_file ~timing_mode path =
         ~bound_count:0
         ~mismatch_count:0
     in
+    let decode_token_contract_status = "not_bound" in
     let decode_prior_state_contract_summary =
       contract_summary_json
         ~required_count:(max 0 (decode_transition_count - 1))
         ~bound_count:0
         ~mismatch_count:0
+    in
+    let decode_prior_state_contract_status =
+      if bundle.decode_steps <= 1 then "not_required" else "not_bound"
     in
     let runtime_semantics =
       session_runtime_semantics
@@ -4704,11 +4761,10 @@ let run_inference_session_file ~timing_mode path =
         ~runtime_readiness_status:
           preflight.continuation_runtime_readiness_status
         ~next_runtime_blocker:preflight.continuation_next_runtime_blocker
-        ~decode_token_contract_status:"not_bound"
+        ~decode_token_contract_status
         ~decode_token_contract_summary
         ~decode_selected_indices:(`List [])
-        ~decode_prior_state_contract_status:
-          (if bundle.decode_steps <= 1 then "not_required" else "not_bound")
+        ~decode_prior_state_contract_status
         ~decode_prior_state_contract_summary
         ~graph_execution_contract_status
         ~graph_execution_contract_summary
@@ -4729,7 +4785,11 @@ let run_inference_session_file ~timing_mode path =
         ~status
         ~transition_count
         ~decode_steps:bundle.decode_steps
+        ~decode_token_contract_status
+        ~decode_token_contract_summary
         ~decode_selected_indices:(`List [])
+        ~decode_prior_state_contract_status
+        ~decode_prior_state_contract_summary
         ~decode_prior_state_contracts:(`List [])
         ~transition_root_chain:(`List [])
         ~graph_executed_opcodes:(`List [])
@@ -4761,7 +4821,13 @@ let run_inference_session_file ~timing_mode path =
         `String Abi.resident_lifecycle_root;
         "transition_count", `Int transition_count;
         "decode_steps", `Int bundle.decode_steps;
+        "decode_token_contract_status", `String decode_token_contract_status;
+        "decode_token_contract_summary", decode_token_contract_summary;
         "decode_selected_indices", `List [];
+        "decode_prior_state_contract_status",
+        `String decode_prior_state_contract_status;
+        "decode_prior_state_contract_summary",
+        decode_prior_state_contract_summary;
         "decode_prior_state_contracts", `List [];
         "transition_root_chain", `List [];
         "graph_executed_opcodes", `List [];
@@ -4835,24 +4901,30 @@ let run_inference_session_file ~timing_mode path =
           ~bound_count:0
           ~mismatch_count:1
       in
+      let decode_token_contract_status = "not_bound" in
+      let decode_token_contract_summary =
+        contract_summary_json
+          ~required_count:decode_transition_count
+          ~bound_count:0
+          ~mismatch_count:0
+      in
+      let decode_prior_state_contract_status = "not_required" in
+      let decode_prior_state_contract_summary =
+        contract_summary_json
+          ~required_count:0
+          ~bound_count:0
+          ~mismatch_count:0
+      in
       let runtime_semantics =
         session_runtime_semantics
           ~transition_count
           ~runtime_readiness_status:"rejected"
           ~next_runtime_blocker
-          ~decode_token_contract_status:"not_bound"
-          ~decode_token_contract_summary:
-            (contract_summary_json
-               ~required_count:decode_transition_count
-               ~bound_count:0
-               ~mismatch_count:0)
+          ~decode_token_contract_status
+          ~decode_token_contract_summary
           ~decode_selected_indices:(`List [])
-          ~decode_prior_state_contract_status:"not_required"
-          ~decode_prior_state_contract_summary:
-            (contract_summary_json
-               ~required_count:0
-               ~bound_count:0
-               ~mismatch_count:0)
+          ~decode_prior_state_contract_status
+          ~decode_prior_state_contract_summary
           ~graph_execution_contract_status
           ~graph_execution_contract_summary
           ~graph_executed_opcodes:(`List [])
@@ -4871,7 +4943,11 @@ let run_inference_session_file ~timing_mode path =
           ~status
           ~transition_count
           ~decode_steps:bundle.decode_steps
+          ~decode_token_contract_status
+          ~decode_token_contract_summary
           ~decode_selected_indices:(`List [])
+          ~decode_prior_state_contract_status
+          ~decode_prior_state_contract_summary
           ~decode_prior_state_contracts:(`List [])
           ~transition_root_chain:(`List [])
           ~graph_executed_opcodes:(`List [])
@@ -4903,7 +4979,13 @@ let run_inference_session_file ~timing_mode path =
           `String Abi.resident_lifecycle_root;
           "transition_count", `Int transition_count;
           "decode_steps", `Int bundle.decode_steps;
+          "decode_token_contract_status", `String decode_token_contract_status;
+          "decode_token_contract_summary", decode_token_contract_summary;
           "decode_selected_indices", `List [];
+          "decode_prior_state_contract_status",
+          `String decode_prior_state_contract_status;
+          "decode_prior_state_contract_summary",
+          decode_prior_state_contract_summary;
           "decode_prior_state_contracts", `List [];
           "transition_root_chain", `List [];
           "graph_executed_opcodes", `List [];
@@ -4982,6 +5064,13 @@ let run_inference_session_file ~timing_mode path =
         ~bound_count:0
         ~mismatch_count:0
     in
+    let decode_prior_state_contract_status = "not_required" in
+    let decode_prior_state_contract_summary =
+      contract_summary_json
+        ~required_count:0
+        ~bound_count:0
+        ~mismatch_count:0
+    in
     let runtime_semantics =
       session_runtime_semantics
         ~transition_count
@@ -4991,12 +5080,8 @@ let run_inference_session_file ~timing_mode path =
         ~decode_token_contract_status
         ~decode_token_contract_summary
         ~decode_selected_indices
-        ~decode_prior_state_contract_status:"not_required"
-        ~decode_prior_state_contract_summary:
-          (contract_summary_json
-             ~required_count:0
-             ~bound_count:0
-             ~mismatch_count:0)
+        ~decode_prior_state_contract_status
+        ~decode_prior_state_contract_summary
         ~graph_execution_contract_status
         ~graph_execution_contract_summary
           ~graph_executed_opcodes:(`List [])
@@ -5019,7 +5104,11 @@ let run_inference_session_file ~timing_mode path =
         ~status
         ~transition_count
         ~decode_steps:bundle.decode_steps
+        ~decode_token_contract_status
+        ~decode_token_contract_summary
         ~decode_selected_indices
+        ~decode_prior_state_contract_status
+        ~decode_prior_state_contract_summary
         ~decode_prior_state_contracts:(`List [])
         ~transition_root_chain:(`List [])
         ~graph_executed_opcodes:(`List [])
@@ -5052,7 +5141,13 @@ let run_inference_session_file ~timing_mode path =
         `String Abi.resident_lifecycle_root;
         "transition_count", `Int transition_count;
         "decode_steps", `Int bundle.decode_steps;
+        "decode_token_contract_status", `String decode_token_contract_status;
+        "decode_token_contract_summary", decode_token_contract_summary;
         "decode_selected_indices", decode_selected_indices;
+        "decode_prior_state_contract_status",
+        `String decode_prior_state_contract_status;
+        "decode_prior_state_contract_summary",
+        decode_prior_state_contract_summary;
         "decode_prior_state_contracts", `List [];
         "transition_root_chain", `List [];
         "graph_executed_opcodes", `List [];
