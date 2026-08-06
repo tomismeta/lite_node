@@ -1,0 +1,33 @@
+{
+  "schema": "octra.litenode.inference_runtime_capability_ladder",
+  "status": "active",
+  "date": "2026-08-06",
+  "claim_boundary": "LiteNode-owned model-neutral capability rungs only. Does not encode producer stage ids, model family names, or devnet consensus claims.",
+  "rail_lock": {
+    "freeze_report_fields": true,
+    "math_mode": "maintenance_for_p0_candidate",
+    "open_focus_rungs": ["C4", "C5", "C6"]
+  },
+  "rungs": [
+    { "id": "C0", "capability": "admission.neutral_packet", "status": "met" },
+    { "id": "C1", "capability": "math.p0_candidate", "status": "met_candidate" },
+    { "id": "C2", "capability": "session.resident_lifecycle", "status": "met_local" },
+    { "id": "C3", "capability": "session.committed_state", "status": "met_local" },
+    { "id": "C4", "capability": "graph.authenticated_ranges", "status": "partial" },
+    { "id": "C5", "capability": "graph.real_compute", "status": "met_local" },
+    { "id": "C6", "capability": "graph.composed_slice", "status": "in_progress" },
+    { "id": "C7", "capability": "session.continuous_prefill", "status": "partial" },
+    { "id": "C8", "capability": "decode.selected_index", "status": "partial" },
+    { "id": "C9", "capability": "decode.prior_state", "status": "partial" },
+    { "id": "C10", "capability": "runtime.resource_isolation", "status": "not_met" },
+    { "id": "C11", "capability": "math.consensus_ready", "status": "not_met" }
+  ],
+  "p0_candidate_ops": [
+    "LINEAR_Q1_G128_FP",
+    "RMSNORM_FP_EPS",
+    "L2NORM_FP",
+    "SOFTMAX_FP",
+    "GATED_DELTA_RULE_FP"
+  ],
+  "producer_stage_doc": "external:octra-inference/docs/specs/spine-stages.md"
+}

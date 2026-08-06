@@ -32,13 +32,20 @@ Baseline: `octra-labs/lite_node` `main` at
   audit of the current VM surface and has no authority over runtime contracts.
 - [`bonsai-demo-readiness.md`](bonsai-demo-readiness.md) records the current
   local demo path and is not a protocol authority.
+- [`inference-runtime-capability-ladder.md`](inference-runtime-capability-ladder.md)
+  owns the ordered, model-neutral runtime capability rungs (admission through
+  continuous session and math promotion). LiteNode does not parse or enforce
+  producer stage ids or model families; a non-normative mapping may mention
+  them. Producer stage claims live only in the external `octra-inference`
+  spine-stages docs.
 
 On conflict, contracts override this document for roots, identity, effort,
 sessions, cancellation, and receipts. The determinism hardening plan overrides
 capability notes for numerical readiness. The capability inventory cannot
-override either document. After Phase 0, roots, canonical advances, effort,
-rollback, and the one-VM boundary are closed unless implementation reveals a
-factual contradiction.
+override either document. The capability ladder cannot override contracts or
+numerical profile roots; it only orders runtime readiness work. After Phase 0,
+roots, canonical advances, effort, rollback, and the one-VM boundary are closed
+unless implementation reveals a factual contradiction.
 
 Bonsai 27B is the first qualification model. It is not part of the VM
 contract.

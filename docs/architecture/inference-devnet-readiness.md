@@ -220,10 +220,24 @@ d69fc419908fa95936a8357aa5f01ca5bcb7bf20 Emit prefill session bundle shape
 - Do not add fused layer/model opcodes before composed primitives and measured
   performance prove they are necessary.
 
+## Spine / Rail Lock (boundary-respecting)
+
+Work is sequenced by the model-neutral capability ladder in
+[`inference-runtime-capability-ladder.md`](inference-runtime-capability-ladder.md).
+Producer stage ids (S1–S5) are **not** LiteNode surface; they live only in
+`octra-inference` spine-stages docs and map onto ladder rungs C4–C8.
+
+**Open runtime focus:** harden C4–C6 (authenticated ranges, graph_real compute,
+composed multi-op programs) under the existing packet schema. Do not expand
+harness report ontology while that focus is open (Rail Lock).
+
+P0 matrix-admitted candidate math (C1) is maintenance-mode: reopen only when a
+path needs a new op or a profile root must change.
+
 ## Current Summary
 
 The inference VM is structurally on the right path and has meaningful local
-execution evidence. The next decisive step is not more demo breadth. It is
-turning the accepted execution surface into a deterministic arithmetic profile
-and a target-owned session lifecycle. Without those two, the branch remains a
-strong local candidate runtime rather than a devnet-ready inference VM.
+execution evidence. Deterministic P0 candidate math is no longer the daily
+steering bottleneck. The next decisive step is composed resident graph
+execution under authenticated ranges (ladder C4–C6), then continuous prefill
+and decode (C7–C8), without growing report surface or model-specific APIs.

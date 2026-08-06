@@ -273,7 +273,14 @@ Session bundles may also declare a transition-level `execution_contract`:
 session binding but does not claim graph execution. `graph_real` requires the
 admitted program to contain generic inference compute opcode evidence, run with
 opcode timing, show at least one generic inference compute opcode in the
-executed opcode profile, and meet any declared minimum instruction count. Static
+executed opcode profile, and meet any declared minimum instruction count.
+
+Ordered runtime readiness for these contracts lives in
+[`inference-runtime-capability-ladder.md`](inference-runtime-capability-ladder.md)
+(rungs C4–C6 for authenticated ranges and composed graph_real). That ladder is
+model-neutral and must not introduce producer stage ids. While C4–C6 is the open
+focus, harness report fields stay frozen unless an existing field cannot name a
+fail-closed rejection (Rail Lock). Static
 opcode presence is preflight evidence only. A preflight mismatch rejects before
 session advance; a runtime evidence mismatch is reported after the transition
 runs. An inference opcode in an untaken branch remains an overclaim and reports
