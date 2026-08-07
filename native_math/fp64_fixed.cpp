@@ -189,7 +189,7 @@ void shr_round_even640_unsigned(const u640 a, int shift, u320 out) {
       int src = i - word;
       uint64_t v = 0;
       if (src >= 0) {
-        v = q[src];
+        v = q[src] << bits;
         if (bits > 0 && src - 1 >= 0) v |= q[src - 1] >> (64 - bits);
       }
       shifted_q[i] = v;
@@ -711,6 +711,7 @@ bool kernel_log1p_fixed(uint64_t bits, u320 out) {
   u320 two_plus_t;
   set_zero(two_plus_t);
   two_plus_t[4] = 2;
+  add320(two_plus_t, t_fixed, two_plus_t);
   /* u = round_even(t_fixed * 2^256 / two_plus_t): numerator is t_fixed
      placed in words 4..8 of a 640-bit value. */
   u320 u;
@@ -789,6 +790,7 @@ bool kernel_ln_fixed(uint64_t bits, u320 out) {
       for (int i = 0; i < 2 * W; ++i) num[i] = 0;
       for (int i = 0; i < W; ++i) num[i + 4] = m_minus_one[i];
       div_round_even640(num, two_plus_t, u);
+    }
     u320 u_squared;
     fixed_mul(u, u, u_squared);
     u320 series;
