@@ -3025,6 +3025,15 @@ let op_softmax registers =
      reg_for "scores" registers,
      reg_for "count" registers)
 
+let op_sigmoid registers =
+  VM.SIGMOID_FP (reg_for "addr" registers, reg_for "count" registers)
+
+let op_softplus registers =
+  VM.SOFTPLUS_FP (reg_for "addr" registers, reg_for "count" registers)
+
+let op_silu registers =
+  VM.SILU_FP (reg_for "addr" registers, reg_for "count" registers)
+
 let op_load_f64 registers =
   VM.LOAD_F64_LE_FP
     (reg_for "dst" registers,
@@ -3068,6 +3077,9 @@ let op_for opcode registers =
   | "RMSNORM_FP_EPS" -> op_rmsnorm registers
   | "L2NORM_FP" -> op_l2norm registers
   | "SOFTMAX_FP" -> op_softmax registers
+  | "SIGMOID_FP" -> op_sigmoid registers
+  | "SOFTPLUS_FP" -> op_softplus registers
+  | "SILU_FP" -> op_silu registers
   | "LOAD_F64_LE_FP" -> op_load_f64 registers
   | "LOAD_F32_LE_FP" -> op_load_f32 registers
   | "ARGMAX_FP" -> op_argmax registers
@@ -3079,6 +3091,9 @@ let opcode_name = function
   | VM.RMSNORM_FP_EPS _ -> "RMSNORM_FP_EPS"
   | VM.L2NORM_FP _ -> "L2NORM_FP"
   | VM.SOFTMAX_FP _ -> "SOFTMAX_FP"
+  | VM.SIGMOID_FP _ -> "SIGMOID_FP"
+  | VM.SOFTPLUS_FP _ -> "SOFTPLUS_FP"
+  | VM.SILU_FP _ -> "SILU_FP"
   | VM.LOAD_F64_LE_FP _ -> "LOAD_F64_LE_FP"
   | VM.LOAD_F32_LE_FP _ -> "LOAD_F32_LE_FP"
   | VM.ARGMAX_FP _ -> "ARGMAX_FP"

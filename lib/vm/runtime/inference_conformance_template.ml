@@ -110,6 +110,21 @@ let requirements = [
     primitives = ["gated_delta_rule_fp"];
     effects = ["memory_read"; "memory_write"];
   };
+  {
+    opcode = "SIGMOID_FP";
+    primitives = ["sigmoid_fp"];
+    effects = ["memory_read"; "memory_write"];
+  };
+  {
+    opcode = "SOFTPLUS_FP";
+    primitives = ["softplus_fp"];
+    effects = ["memory_read"; "memory_write"];
+  };
+  {
+    opcode = "SILU_FP";
+    primitives = ["silu_fp"];
+    effects = ["memory_read"; "memory_write"];
+  };
 ]
 
 let p0_opcodes = List.map (fun requirement -> requirement.opcode) requirements
@@ -360,63 +375,208 @@ let vm_semantics_contract_json ~opcode =
           `String "program effort also includes surrounding VM instructions such as STOP";
         ];
       ])
-  | "SOFTMAX_FP" ->
-    Some
-      (`Assoc [
-        "schema", `String "octra.inference.vm-semantics.v1";
-        "opcode", `String opcode;
-        "bytecode", `String "0x94";
-        "signature", `String "SOFTMAX_FP(dest, scores, count)";
-        "register_roles",
-        `List [
-          `String "dest: output probability base cell";
-          `String "scores: input score base cell";
-          `String "count: number of binary64 score cells";
-        ];
-        "memory_units",
-        `List [
-          `String "scores and dest use one binary64 bit pattern per VM cell";
-          `String "dest may equal scores for exact in-place execution";
-        ];
-        "shape_policy",
-        `List [
-          `String "count must be positive and at most 8192";
-          `String "dest and scores spans must be valid large VM memory spans";
-          `String "dest/scores overlap is rejected unless the spans are exactly the same range";
-        ];
-        "arithmetic_policy",
-        `List [
-          `String "read the full score span before writeback";
-          `String "max_score starts at scores[0]";
-          `String "for index ascending: replace max_score only when compare(scores[index], max_score) is greater than zero";
-          `String "shifted[index] = scores[index] - max_score using deterministic finite binary64 subtraction";
-          `String "every shifted score must compare less than or equal to positive zero";
-          `String "exp(shifted[index]) uses protocol-owned deterministic nonpositive binary64 exp";
-          `String "protocol exp uses Q256 range reduction, round-to-nearest ln(2), 80 Taylor terms, and deterministic ties-to-even binary64 composition";
-          `String "sum_exp starts as positive zero binary64 and accumulates exps in index order";
-          `String "output[index] = exp[index] / sum_exp using deterministic finite binary64 division";
-        ];
-        "read_write_policy",
-        `List [
-          `String "compute every output probability before mutating dest";
-          `String "reject before writeback on missing scores, non-finite values, invalid span, zero/nonpositive sum, arithmetic failure, or effort exhaustion";
-        ];
-        "output_policy",
-        `List [
-          `String "outputs are stored as binary64 bit patterns in dest order";
-          `String "the opcode does not mutate session ABI registers";
-        ];
-        "consensus_note",
-        `String
-          "protocol-owned nonpositive exp is deterministic and consensus_ready on deterministic-fp64-softmax after dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
-        "effort_policy",
-        `List [
-          `String "opcode base effort is 100";
-          `String "dynamic effort is count * 8";
-          `String "program effort also includes surrounding VM instructions such as STOP";
-        ];
-      ])
-  | "GATED_DELTA_RULE_FP" ->
+   | "SOFTMAX_FP" ->
+     Some
+       (`Assoc [
+         "schema", `String "octra.inference.vm-semantics.v1";
+         "opcode", `String opcode;
+         "bytecode", `String "0x94";
+         "signature", `String "SOFTMAX_FP(dest, scores, count)";
+         "register_roles",
+         `List [
+           `String "dest: output probability base cell";
+           `String "scores: input score base cell";
+           `String "count: number of binary64 score cells";
+         ];
+         "memory_units",
+         `List [
+           `String "scores and dest use one binary64 bit pattern per VM cell";
+           `String "dest may equal scores for exact in-place execution";
+         ];
+         "shape_policy",
+         `List [
+           `String "count must be positive and at most 8192";
+           `String "dest and scores spans must be valid large VM memory spans";
+           `String "dest/scores overlap is rejected unless the spans are exactly the same range";
+         ];
+         "arithmetic_policy",
+         `List [
+           `String "read the full score span before writeback";
+           `String "max_score starts at scores[0]";
+           `String "for index ascending: replace max_score only when compare(scores[index], max_score) is greater than zero";
+           `String "shifted[index] = scores[index] - max_score using deterministic finite binary64 subtraction";
+           `String "every shifted score must compare less than or equal to positive zero";
+           `String "exp(shifted[index]) uses protocol-owned deterministic nonpositive binary64 exp";
+           `String "protocol exp uses Q256 range reduction, round-to-nearest ln(2), 80 Taylor terms, and deterministic ties-to-even binary64 composition";
+           `String "sum_exp starts as positive zero binary64 and accumulates exps in index order";
+           `String "output[index] = exp[index] / sum_exp using deterministic finite binary64 division";
+         ];
+         "read_write_policy",
+         `List [
+           `String "compute every output probability before mutating dest";
+           `String "reject before writeback on missing scores, non-finite values, invalid span, zero/nonpositive sum, arithmetic failure, or effort exhaustion";
+         ];
+         "output_policy",
+         `List [
+           `String "outputs are stored as binary64 bit patterns in dest order";
+           `String "the opcode does not mutate session ABI registers";
+         ];
+         "consensus_note",
+         `String
+           "protocol-owned nonpositive exp is deterministic and consensus_ready on deterministic-fp64-softmax after dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
+         "effort_policy",
+         `List [
+           `String "opcode base effort is 100";
+           `String "dynamic effort is count * 8";
+           `String "program effort also includes surrounding VM instructions such as STOP";
+         ];
+       ])
+   | "SIGMOID_FP" ->
+     Some
+       (`Assoc [
+         "schema", `String "octra.inference.vm-semantics.v1";
+         "opcode", `String opcode;
+         "bytecode", `String "0x8B";
+         "signature", `String "SIGMOID_FP(addr, count)";
+         "register_roles",
+         `List [
+           `String "addr: in-place binary64 cell base";
+           `String "count: number of binary64 cells";
+         ];
+         "memory_units",
+         `List [
+           `String "cells use one binary64 bit pattern per VM cell";
+           `String "the operation is fully in-place at addr";
+         ];
+         "shape_policy",
+         `List [
+           `String "count must be positive and the span must be a valid large VM memory span";
+         ];
+         "arithmetic_policy",
+         `List [
+           `String "read the full span before writeback";
+           `String "nonnegative x computes exp(-x) and negative x computes exp(x) on the nonpositive branch";
+           `String "exp uses protocol-owned deterministic Q256 nonpositive exp with 80 Taylor terms";
+           `String "sigmoid(x) = 1 / (1 + exp) for x >= 0 and exp / (1 + exp) for x < 0";
+           `String "one-plus and ratio use deterministic finite binary64 add and division";
+         ];
+         "read_write_policy",
+         `List [
+           `String "compute every output cell before mutating the span";
+           `String "reject before writeback on missing cells, non-finite values, arithmetic failure, or effort exhaustion";
+         ];
+         "output_policy",
+         `List [
+           `String "outputs are stored as binary64 bit patterns in addr order";
+           `String "the opcode does not mutate session ABI registers";
+         ];
+         "consensus_note",
+         `String
+           "protocol-owned exp makes SIGMOID_FP host-libm-free; deterministic-fp64-sigmoid is consensus_candidate pending dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
+         "effort_policy",
+         `List [
+           `String "opcode base effort is 20";
+           `String "dynamic effort is count";
+           `String "program effort also includes surrounding VM instructions such as STOP";
+         ];
+       ])
+   | "SOFTPLUS_FP" ->
+     Some
+       (`Assoc [
+         "schema", `String "octra.inference.vm-semantics.v1";
+         "opcode", `String opcode;
+         "bytecode", `String "0x8C";
+         "signature", `String "SOFTPLUS_FP(addr, count)";
+         "register_roles",
+         `List [
+           `String "addr: in-place binary64 cell base";
+           `String "count: number of binary64 cells";
+         ];
+         "memory_units",
+         `List [
+           `String "cells use one binary64 bit pattern per VM cell";
+           `String "the operation is fully in-place at addr";
+         ];
+         "shape_policy",
+         `List [
+           `String "count must be positive and the span must be a valid large VM memory span";
+         ];
+         "arithmetic_policy",
+         `List [
+           `String "read the full span before writeback";
+           `String "positive x computes softplus(x) = x + log1p(exp(-x)); other x computes log1p(exp(x))";
+           `String "exp uses protocol-owned deterministic Q256 nonpositive exp with 80 Taylor terms";
+           `String "log1p uses the protocol-owned artanh series log(1+t) = 2*sum u^(2k+1)/(2k+1) with u = t/(2+t) in Q256 fixed point";
+           `String "positive-branch addition uses deterministic finite binary64 addition";
+         ];
+         "read_write_policy",
+         `List [
+           `String "compute every output cell before mutating the span";
+           `String "reject before writeback on missing cells, non-finite values, arithmetic failure, or effort exhaustion";
+         ];
+         "output_policy",
+         `List [
+           `String "outputs are stored as binary64 bit patterns in addr order";
+           `String "the opcode does not mutate session ABI registers";
+         ];
+         "consensus_note",
+         `String
+           "protocol-owned exp and artanh-series log1p make SOFTPLUS_FP host-libm-free; deterministic-fp64-softplus is consensus_candidate pending dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
+         "effort_policy",
+         `List [
+           `String "opcode base effort is 20";
+           `String "dynamic effort is count";
+           `String "program effort also includes surrounding VM instructions such as STOP";
+         ];
+       ])
+   | "SILU_FP" ->
+     Some
+       (`Assoc [
+         "schema", `String "octra.inference.vm-semantics.v1";
+         "opcode", `String opcode;
+         "bytecode", `String "0x71";
+         "signature", `String "SILU_FP(addr, count)";
+         "register_roles",
+         `List [
+           `String "addr: in-place binary64 cell base";
+           `String "count: number of binary64 cells";
+         ];
+         "memory_units",
+         `List [
+           `String "cells use one binary64 bit pattern per VM cell";
+           `String "the operation is fully in-place at addr";
+         ];
+         "shape_policy",
+         `List [
+           `String "count must be positive and the span must be a valid large VM memory span";
+         ];
+         "arithmetic_policy",
+         `List [
+           `String "read the full span before writeback";
+           `String "silu(x) = x * sigmoid(x) with the SIGMOID_FP deterministic sign-branch protocol exp";
+           `String "output multiply uses deterministic finite binary64 multiplication";
+         ];
+         "read_write_policy",
+         `List [
+           `String "compute every output cell before mutating the span";
+           `String "reject before writeback on missing cells, non-finite values, arithmetic failure, or effort exhaustion";
+         ];
+         "output_policy",
+         `List [
+           `String "outputs are stored as binary64 bit patterns in addr order";
+           `String "the opcode does not mutate session ABI registers";
+         ];
+         "consensus_note",
+         `String
+           "protocol-owned exp makes SILU_FP host-libm-free; deterministic-fp64-silu is consensus_candidate pending dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
+         "effort_policy",
+         `List [
+           `String "opcode base effort is 20";
+           `String "dynamic effort is count";
+           `String "program effort also includes surrounding VM instructions such as STOP";
+         ];
+       ])
+   | "GATED_DELTA_RULE_FP" ->
     Some
       (`Assoc [
         "schema", `String "octra.inference.vm-semantics.v1";
