@@ -711,29 +711,15 @@ bool kernel_log1p_fixed(uint64_t bits, u320 out) {
   u320 two_plus_t;
   set_zero(two_plus_t);
   two_plus_t[4] = 2;
-  add320(two_plus_t, t_fixed, two_plus_t);
-  /* u = round_even(t_fixed * 2^256 / two_plus_t) */
+  /* u = round_even(t_fixed * 2^256 / two_plus_t): numerator is t_fixed
+     placed in words 4..8 of a 640-bit value. */
   u320 u;
   {
     u640 num;
-    mul320(t_fixed, (u320){0, 0, 0, 0, 1}, num);
-    /* shift t_fixed left 256 via mul with 2^256 */
-    shr_round_even640_unsigned(num, 0, u);  /* placeholder, fixed below */
-  }
-  /* corrected u computation */
-  {
-    u320 shifted;
-    shl320(t_fixed, 256, shifted);  /* t_fixed <= 2^256, 256+256 = 512 >= 320: handles small t */
-    /* t_fixed < 2^256 so t_fixed << 256 fits 512 bits; shl320 caps at 320,
-       which is insufficient for full t; but t < 2^256 and the quotient
-       t/(2+t) < 1/2 so u fits; compute via 640-bit path instead: */
-    u640 num;
     for (int i = 0; i < 2 * W; ++i) num[i] = 0;
-    /* num = t_fixed * 2^256: t_fixed is < 2^256 -> shift into words 4..8 */
     for (int i = 0; i < W; ++i) num[i + 4] = t_fixed[i];
-    /* numerator magnitude may exceed 320 bits; the quotient u < 1 so only
-       the first 320 bits matter; use div_round_even640 with a 640-bit num */
     div_round_even640(num, two_plus_t, u);
+  }
   }
   u320 u_squared;
   fixed_mul(u, u, u_squared);
