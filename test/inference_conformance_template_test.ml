@@ -1098,8 +1098,8 @@ let check_inference_profile_surface_coverage () =
       "RESIDUAL_ADD_FP", "deterministic-fp64-elementwise",
       "consensus_ready",
       "a1d1bc7242bcca11b31395d8313b552eec80e5174651637df0690adec41cd32f";
-      "ROPE_APPLY_INDEXED_FP", "host-fp-trig-local-candidate", "local_only",
-      "a36d7dad881a763dab58fdd62b12a3ba7adddcc021c979d86372583559f0a0f4";
+      "ROPE_APPLY_INDEXED_FP", "deterministic-fp64-rope-indexed", "consensus_candidate",
+      "f959e640ef13a165bcae22eb0d760d0defc4df75f8ae274b46e1882cf56d14ff";
       "ATTENTION_SCORES_FP", "deterministic-fp64-accumulation",
       "consensus_ready",
       "20bfb100d037cb05d3208ed6c35bb36deae747ff2aa9fc1ac78f1078f19b56e5";
@@ -1196,7 +1196,7 @@ let check_inference_profile_surface_coverage () =
         "runtime profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "eb15d4395f254eb9ce54e1c481f3f42d55edd9ff81b92437d37292bd8cde5221");
+	          "6a326c0db40ed4dd9f4b10a7dad7ab619e25d9097b5184323a013d8e79383154");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "runtime readiness worklist count" (List.length rows = 17)
@@ -1239,10 +1239,10 @@ let check_inference_profile_surface_coverage () =
   let counts = Profile.status_counts_of_json_gates gates in
   (match Profile.status_counts_json counts with
    | `Assoc fields ->
-     check "surface local-only count" (int_value "local_only" fields = 1);
+     check "surface local-only count" (int_value "local_only" fields = 0);
      check
        "surface consensus-candidate count"
-       (int_value "consensus_candidate" fields = 0);
+       (int_value "consensus_candidate" fields = 1);
      check "surface consensus-ready count" (int_value "consensus_ready" fields = 16);
      check "surface unknown count" (int_value "unknown" fields = 0)
    | _ -> failwith "surface status counts json must be object");
@@ -1274,7 +1274,7 @@ let check_inference_profile_surface_coverage () =
      | `String root ->
 	       String.equal
 	         root
-		         "eb15d4395f254eb9ce54e1c481f3f42d55edd9ff81b92437d37292bd8cde5221"
+		         "6a326c0db40ed4dd9f4b10a7dad7ab619e25d9097b5184323a013d8e79383154"
      | _ -> false);
   check
     "empty profile catalog root"
@@ -1736,27 +1736,21 @@ let check_rope_indexed_profile_gate () =
   check
     "rope indexed runtime profile"
     (match Profile.current_runtime_profile ~opcode:"ROPE_APPLY_INDEXED_FP" with
-     | Some "host-fp-trig-local-candidate" -> true
+     | Some "deterministic-fp64-rope-indexed" -> true
      | _ -> false);
   let gate = profile_gate "ROPE_APPLY_INDEXED_FP" in
   check
-    "rope indexed trig-local profile"
+    "rope indexed deterministic profile"
     (String.equal
        (string_value "name" gate)
-       "host-fp-trig-local-candidate");
+       "deterministic-fp64-rope-indexed");
   check
-    "rope indexed remains local-only"
-    (String.equal (string_value "consensus_status" gate) "local_only");
-  check_protocol_owned_transcendental_obligation "ROPE_APPLY_INDEXED_FP" gate;
+    "rope indexed is candidate"
+    (String.equal (string_value "consensus_status" gate) "consensus_candidate");
   check
-    "rope indexed requires protocol-owned rotary replacement"
+    "rope indexed local protocol semantics"
     (list_contains_substring
-       "protocol-owned deterministic rotary math"
-       (string_list_value "required_actions" gate));
-  check
-    "rope indexed local trig semantics"
-    (list_contains_substring
-       "native cos and sin"
+       "no native host math"
        (string_list_value "local_semantics" gate));
   check
     "rope indexed position obligation"
@@ -1765,11 +1759,14 @@ let check_rope_indexed_profile_gate () =
        (string_list_value "consensus_obligations" gate));
   let blockers = string_list_value "consensus_blocker_codes" gate in
   check
-    "rope indexed exponentiation blocker"
-    (List.mem "host_fp_exponentiation" blockers);
+    "rope indexed ln blocker"
+    (List.mem "protocol_owned_ln_conformance" blockers);
   check
-    "rope indexed trig blocker"
-    (List.mem "host_fp_trig" blockers);
+    "rope indexed sin/cos blocker"
+    (List.mem "protocol_owned_sin_cos_conformance" blockers);
+  check
+    "rope indexed two-pi blocker"
+    (List.mem "two_pi_reduction_conformance" blockers);
   check
     "rope indexed multiply blocker"
     (List.mem "fp64_multiply_conformance" blockers);
@@ -1782,12 +1779,12 @@ let check_rope_indexed_profile_gate () =
        "rope indexed contract profile"
        (String.equal
           (string_value "profile_name" contract)
-          "host-fp-trig-local-candidate");
+          "deterministic-fp64-rope-indexed");
      check
-       "rope indexed native trig rounding"
+       "rope indexed protocol trig rounding"
        (String.equal
           (string_value "rounding_mode" contract)
-          "host-runtime-native-pow-cos-sin")
+          "deterministic-binary64-roundTiesToEven-with-protocol-trig")
    | _ -> failwith "missing rope indexed profile contract");
   (match
      Profile.validate_for_opcode
@@ -1803,7 +1800,7 @@ let check_rope_indexed_profile_gate () =
        (String.equal profile "host-fp-local-candidate");
      check
        "rope indexed old host profile expected"
-       (String.equal expected "host-fp-trig-local-candidate")
+       (String.equal expected "deterministic-fp64-rope-indexed")
    | Error error -> failwith (Profile.error_message error)
    | Ok _ -> failwith "expected rope indexed old host profile rejection");
   match
@@ -1818,7 +1815,7 @@ let check_rope_indexed_profile_gate () =
     check "rope indexed overclaim profile" (String.equal profile "q16-exact");
     check
       "rope indexed overclaim expected"
-      (String.equal expected "host-fp-trig-local-candidate")
+      (String.equal expected "deterministic-fp64-rope-indexed")
   | Error error -> failwith (Profile.error_message error)
   | Ok _ -> failwith "expected rope indexed profile overclaim rejection"
 

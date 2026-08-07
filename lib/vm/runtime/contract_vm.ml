@@ -3036,12 +3036,13 @@ let exec_one st op =
     (match read_int st rs_addr, read_int st rs_count,
            read_int st rs_head_dim, read_int st rs_rot_dim,
            read_int st rs_positions,
-           read_fp64_reg st rs_base with
+           read_fp64_reg_bits st rs_base with
      | Some addr, Some count, Some head_dim, Some rot_dim,
-       Some positions_addr, Some base
+       Some positions_addr, Some base_bits
        when count > 0 && head_dim > 0 && rot_dim > 0
             && rot_dim <= head_dim && rot_dim land 1 = 0
-            && finite_fp64 base && base > 1.0
+            && Inference_fp64.finite base_bits
+            && Inference_fp64.compare base_bits fp64_one_bits = Some 1
             && count mod head_dim = 0 ->
        let pairs = rot_dim / 2 in
        if not
@@ -3056,39 +3057,74 @@ let exec_one st op =
          else if not (add_dyn_product st [heads; pairs; 8] 1) then
            revert st
          else
-           (match read_fp64_array st.memory.data addr count,
+           (match read_fp64_bits_array st.memory.data addr count,
                   read_position_array st.memory.data positions_addr pairs with
             | Some input_values, Some positions ->
               let output = Array.copy input_values in
               let ok = ref true in
-              let nf = float_of_int rot_dim in
-              for head = 0 to heads - 1 do
-                let base_addr = head * head_dim in
-                for i = 0 to pairs - 1 do
-                  let pf = Int64.to_float positions.(i) in
-                  let theta =
-                    pf
-                    /. (base ** ((2.0 *. float_of_int i) /. nf))
-                  in
-                  let c = cos theta in
-                  let s = sin theta in
-                  let left_index = base_addr + i in
-                  let right_index = base_addr + i + pairs in
-                  let left = Array.unsafe_get input_values left_index in
-                  let right = Array.unsafe_get input_values right_index in
-                  Array.unsafe_set output left_index
-                    (left *. c -. right *. s);
-                  Array.unsafe_set output right_index
-                    (left *. s +. right *. c);
-                  if not (finite_fp64 theta && finite_fp64 c && finite_fp64 s)
-                  then ok := false
-                done
-              done;
-              if not !ok || not (Array.for_all finite_fp64 output) then
+              (match Inference_fp64.ln_positive_fixed base_bits with
+               | Some base_ln_fixed ->
+                 for head = 0 to heads - 1 do
+                   let base_addr = head * head_dim in
+                   for i = 0 to pairs - 1 do
+                     let exponent_ratio =
+                       Z.div
+                         (Z.mul (Z.of_int (2 * i)) base_ln_fixed)
+                         (Z.of_int rot_dim)
+                     in
+                     (match
+                        Inference_fp64.rope_theta_fixed
+                          positions.(i)
+                          base_ln_fixed
+                          exponent_ratio
+                      with
+                      | Some theta_fixed ->
+                        (match Inference_fp64.fixed_to_bits theta_fixed with
+                         | Some theta_bits ->
+                           (match Inference_fp64.sin_cos theta_bits with
+                            | Some s, Some c ->
+                              let left_index = base_addr + i in
+                              let right_index = base_addr + i + pairs in
+                              let left =
+                                Array.unsafe_get input_values left_index
+                              in
+                              let right =
+                                Array.unsafe_get input_values right_index
+                              in
+                              (match
+                                 Inference_fp64.mul left c,
+                                 Inference_fp64.mul right s,
+                                 Inference_fp64.mul left s,
+                                 Inference_fp64.mul right c
+                               with
+                               | Some left_c, Some right_s, Some left_s,
+                                 Some right_c ->
+                                 (match
+                                    Inference_fp64.sub left_c right_s,
+                                    Inference_fp64.add left_s right_c
+                                  with
+                                  | Some out_left, Some out_right ->
+                                    Array.unsafe_set output left_index out_left;
+                                    Array.unsafe_set output right_index out_right;
+                                    if
+                                      not
+                                        (Inference_fp64.finite theta_bits
+                                        && Inference_fp64.finite c
+                                        && Inference_fp64.finite s)
+                                    then ok := false
+                                  | _ -> ok := false)
+                               | _ -> ok := false)
+                            | _ -> ok := false)
+                         | None -> ok := false)
+                      | None -> ok := false)
+                   done
+                 done
+               | None -> ok := false);
+              if not !ok || not (Array.for_all Inference_fp64.finite output) then
                 revert st
               else begin
                 for i = 0 to count - 1 do
-                  mem_set_fp64 st.memory.data (addr + i) output.(i)
+                  mem_set_fp64_bits st.memory.data (addr + i) output.(i)
                 done;
                 true
               end

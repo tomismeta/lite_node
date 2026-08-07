@@ -64,12 +64,6 @@ let catalog_entry_root = function
     Some (string_value "name" fields, string_value "session_abi_root" fields)
   | _ -> None
 
-let string_list_value name fields =
-  list_value name fields
-  |> List.map (function
-    | `String value -> value
-    | _ -> failwith ("json list must contain strings: " ^ name))
-
 let check_p0_catalog_exports_session_abi_authority () =
   let command = tool_path () ^ " --p0" in
   let input = Unix.open_process_in command in
@@ -220,31 +214,16 @@ let check_all_catalog_exports_complete_transcendental_inventory () =
   | `Assoc fields ->
     let catalog = assoc_value "transcendental_dependency_catalog" fields in
     let entries = list_value "entries" catalog in
-    check "entry count" (int_value "entry_count" catalog = 1);
-    check "dependency count" (int_value "dependency_count" catalog = 3);
+    check "entry count" (int_value "entry_count" catalog = 0);
+    check "dependency count" (int_value "dependency_count" catalog = 0);
     check
       "dependency catalog root"
       (String.equal
          (string_value "transcendental_dependency_catalog_root" fields)
          (Profile.transcendental_dependency_catalog_root (`Assoc catalog)));
     check
-      "dependency opcodes"
-      (sorted_dependency_opcodes entries
-       = ["ROPE_APPLY_INDEXED_FP"]);
-    let entry opcode =
-      match List.find_map (dependency_entry opcode) entries with
-      | Some fields -> fields
-      | None -> failwith ("missing dependency entry: " ^ opcode)
-    in
-    let rope_replacements =
-      string_list_value "required_replacements" (entry "ROPE_APPLY_INDEXED_FP")
-    in
-    check
-      "rope rotary angle replacement"
-      (List.mem "protocol_owned_rotary_angle_binary64" rope_replacements);
-    check
-      "rope sin/cos replacement"
-      (List.mem "protocol_owned_sin_cos_binary64" rope_replacements);
+      "dependency opcodes retired"
+      (sorted_dependency_opcodes entries = []);
     List.iter
       (function
         | `Assoc entry_fields ->

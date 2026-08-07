@@ -3066,6 +3066,15 @@ let op_attention_weighted_sum registers =
      reg_for "key_count" registers,
      reg_for "head_dim" registers)
 
+let op_rope_apply_indexed registers =
+  VM.ROPE_APPLY_INDEXED_FP
+    (reg_for "addr" registers,
+     reg_for "count" registers,
+     reg_for "head_dim" registers,
+     reg_for "rot_dim" registers,
+     reg_for "positions" registers,
+     reg_for "base" registers)
+
 let op_causal_depthwise_conv registers =
   VM.CAUSAL_DEPTHWISE_CONV1D_FP
     (reg_for "dst" registers,
@@ -3126,6 +3135,7 @@ let op_for opcode registers =
   | "ATTENTION_SCORES_FP" -> op_attention_scores registers
   | "ATTENTION_WEIGHTED_SUM_FP" -> op_attention_weighted_sum registers
   | "CAUSAL_DEPTHWISE_CONV1D_FP" -> op_causal_depthwise_conv registers
+  | "ROPE_APPLY_INDEXED_FP" -> op_rope_apply_indexed registers
   | "LOAD_F64_LE_FP" -> op_load_f64 registers
   | "LOAD_F32_LE_FP" -> op_load_f32 registers
   | "ARGMAX_FP" -> op_argmax registers
@@ -3145,6 +3155,7 @@ let opcode_name = function
   | VM.ATTENTION_SCORES_FP _ -> "ATTENTION_SCORES_FP"
   | VM.ATTENTION_WEIGHTED_SUM_FP _ -> "ATTENTION_WEIGHTED_SUM_FP"
   | VM.CAUSAL_DEPTHWISE_CONV1D_FP _ -> "CAUSAL_DEPTHWISE_CONV1D_FP"
+  | VM.ROPE_APPLY_INDEXED_FP _ -> "ROPE_APPLY_INDEXED_FP"
   | VM.LOAD_F64_LE_FP _ -> "LOAD_F64_LE_FP"
   | VM.LOAD_F32_LE_FP _ -> "LOAD_F32_LE_FP"
   | VM.ARGMAX_FP _ -> "ARGMAX_FP"
@@ -3864,6 +3875,27 @@ let q1_producer_repair_context_json opcode template values expected_effort =
       "q1_required_owner_bytes", int_or_null (q1_required_owner_bytes values);
     ]
 
+let set_rope_position_cells state base values =
+  List.iteri
+    (fun index value ->
+       Hashtbl.replace
+         state.VM.memory.data
+         (base + index)
+         (VM.VInt (Z.of_int value)))
+    values
+
+let template_int_list_field name fields =
+  list_field name fields
+  |> List.map (function
+    | `Int value -> value
+    | `Intlit value -> int_of_string value
+    | _ -> fail ("template field must be an int list: " ^ name))
+
+let rope_positions_base state registers =
+  match state.VM.regs.(reg_for "positions" registers) with
+  | VM.VInt base when Z.fits_int64 base -> Z.to_int base
+  | _ -> fail "ROPE template positions register must be an integer address"
+
 let execute_template root_dir entry =
   let opcode = string_field "opcode" entry in
   let primitive = opt_string_field "primitive" entry in
@@ -3893,6 +3925,12 @@ let execute_template root_dir entry =
   let state = state () in
   ignore (load_inputs root_dir state template registers);
   set_registers state registers values;
+  (* ROPE reads pair positions from memory cells; the template declares them
+     in parameter_addresses_and_scalar_params.values.pair_positions. *)
+  if String.equal opcode "ROPE_APPLY_INDEXED_FP" then begin
+    let addr = rope_positions_base state registers in
+    set_rope_position_cells state addr (template_int_list_field "pair_positions" values)
+  end;
   let op = op_for opcode registers in
   let abi_declaration_binding =
     Template.abi_declaration_binding_json (`Assoc template)

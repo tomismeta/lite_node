@@ -582,7 +582,10 @@ let blocker_class = function
   | "fp64_sqrt_conformance"
   | "fp64_subtract_conformance"
   | "protocol_owned_exp_conformance"
-  | "protocol_owned_log1p_conformance" ->
+  | "protocol_owned_ln_conformance"
+  | "protocol_owned_log1p_conformance"
+  | "protocol_owned_sin_cos_conformance"
+  | "two_pi_reduction_conformance" ->
     "software_fp64_conformance"
   | "accumulation_order"
   | "kernel_accumulation_order"
@@ -813,15 +816,26 @@ let of_name = function
         "preserve finite-domain gates, rejection policy, effort, and atomic writeback";
       ];
     }
+  | "deterministic-fp64-rope-indexed" as name ->
+    Ok {
+      name;
+      consensus_status = Consensus_candidate;
+      summary =
+        "deterministic finite binary64 indexed rotary profile with protocol-owned ln, exp, and sin/cos (ROPE_APPLY_INDEXED_FP no longer uses host pow/cos/sin)";
+      required_actions = [
+        "bind the numerical profile root in the model or request authority";
+        "preserve protocol-owned fixed-point ln(base), exp range reduction, two-pi reduction, and alternating sin/cos series from dual-platform matrix evidence";
+        "pin position/base interpretation, periodicity, tail preservation, effort, and atomic writeback policy";
+      ];
+    }
   | "host-fp-trig-local-candidate" as name ->
     Ok {
       name;
       consensus_status = Local_only;
       summary =
-        "native trigonometric and exponentiation math accepted only for local inference proof execution";
+        "legacy native trigonometric profile; ROPE_APPLY_INDEXED_FP now binds deterministic-fp64-rope-indexed";
       required_actions = [
-        "replace native pow/cos/sin math with protocol-owned deterministic rotary math before validator admission";
-        "bind deterministic rotary oracle vectors and profile roots";
+        "bind the deterministic rope profile root in the model or request authority";
         "preserve position/base interpretation, finite rejection, effort, and atomic writeback";
       ];
     }
@@ -1046,7 +1060,7 @@ let current_runtime_profile_entries = [
   "L2NORM_FP", "deterministic-fp64-l2norm";
   "ELEMWISE_MUL_FP", "deterministic-fp64-elementwise";
   "RESIDUAL_ADD_FP", "deterministic-fp64-elementwise";
-  "ROPE_APPLY_INDEXED_FP", "host-fp-trig-local-candidate";
+  "ROPE_APPLY_INDEXED_FP", "deterministic-fp64-rope-indexed";
   "ATTENTION_SCORES_FP", "deterministic-fp64-accumulation";
   "SOFTMAX_FP", "deterministic-fp64-softmax";
   "ATTENTION_WEIGHTED_SUM_FP", "deterministic-fp64-accumulation";
@@ -1206,7 +1220,12 @@ let local_semantics ~opcode =
       "input cells are finite binary64 values and are updated in place";
       "base is read as binary64, must be finite, and must be greater than 1.0";
       "position cells must be exact signed integers within the binary64-safe integer range";
-      "theta uses native binary64 exponentiation before native cos and sin";
+      "ln(base) uses the protocol artanh series on the normalized mantissa plus e * ln2";
+      "theta = position * exp(-(2i/rot_dim) * ln(base)) in Q256 fixed point with protocol exp";
+      "theta is range-reduced modulo the protocol two-pi constant in Q256 fixed point";
+      "sin and cos use the alternating Taylor series in Q256 fixed point";
+      "rotation uses deterministic finite binary64 multiply, add, and subtract";
+      "no native host math is used";
       "outputs are written only after the complete finite output vector is computed";
     ]
   | "ATTENTION_SCORES_FP" ->
@@ -1348,7 +1367,8 @@ let consensus_obligations ~opcode =
     ]
   | "ROPE_APPLY_INDEXED_FP" ->
     [
-      "replace native binary64 exponentiation, cos, and sin with protocol-owned deterministic rotary behavior";
+      "bind the deterministic rope profile root before consensus admission";
+      "preserve protocol-owned fixed-point ln, exp, two-pi reduction, and sin/cos series";
       "pin exact position-cell interpretation, base handling, rotary dimension validation, and zero-position behavior";
       "define in-place writeback atomicity, tail preservation, finite rejection, and effort";
       "pass independent cross-platform conformance for indexed rotary edge vectors";
@@ -1481,8 +1501,10 @@ let consensus_blocker_codes ~opcode =
     ]
   | "ROPE_APPLY_INDEXED_FP" ->
     [
-      "host_fp_exponentiation";
-      "host_fp_trig";
+      "protocol_owned_ln_conformance";
+      "protocol_owned_exp_conformance";
+      "protocol_owned_sin_cos_conformance";
+      "two_pi_reduction_conformance";
       "fp64_multiply_conformance";
       "fp64_add_sub_conformance";
       "position_base_policy";
@@ -1577,25 +1599,7 @@ let native_dependency_details ~opcode =
   | "SIGMOID_FP"
   | "SILU_FP"
   | "SOFTPLUS_FP" -> None
-  | "ROPE_APPLY_INDEXED_FP" ->
-    Some
-      ( ["native_pow"; "native_cos"; "native_sin"],
-        [
-          "base ** positive_position_scale";
-          "theta = position / power";
-          "cos(theta)";
-          "sin(theta)";
-        ],
-        [
-          "protocol_owned_rotary_angle_binary64";
-          "protocol_owned_sin_cos_binary64";
-        ],
-        [
-          "zero_position_identity";
-          "large_position_periodicity";
-          "section_boundary_pair_positions";
-          "tail_preservation";
-        ] )
+  | "ROPE_APPLY_INDEXED_FP" -> None
   | _ -> None
 
 let host_native_blockers ~opcode =
@@ -1825,8 +1829,8 @@ let arithmetic_domain ~profile ~opcode =
     "deterministic-binary64-attention-weighted-sum"
   | "deterministic-fp64-accumulation", "CAUSAL_DEPTHWISE_CONV1D_FP" ->
     "deterministic-binary64-causal-depthwise-convolution"
-  | "host-fp-trig-local-candidate", "ROPE_APPLY_INDEXED_FP" ->
-    "deterministic-binary64-indexed-rotary-host-pow-cos-sin"
+  | "deterministic-fp64-rope-indexed", "ROPE_APPLY_INDEXED_FP" ->
+    "deterministic-binary64-indexed-rotary-protocol-ln-exp-two-pi-sin-cos"
   | "host-fp-local-candidate", _ -> "native-binary64-host-floating-point"
   | name, _ -> name
 
@@ -1861,8 +1865,8 @@ let rounding_mode ~profile ~opcode =
     "deterministic-binary64-roundTiesToEven"
   | "deterministic-fp64-accumulation", "CAUSAL_DEPTHWISE_CONV1D_FP" ->
     "deterministic-binary64-roundTiesToEven"
-  | "host-fp-trig-local-candidate", "ROPE_APPLY_INDEXED_FP" ->
-    "host-runtime-native-pow-cos-sin"
+  | "deterministic-fp64-rope-indexed", "ROPE_APPLY_INDEXED_FP" ->
+    "deterministic-binary64-roundTiesToEven-with-protocol-trig"
   | ("q16-exact" | "q32-exact"), _ -> "integer-profile-defined"
   | "soft-fp-exact", _ -> "software-profile-defined"
   | "byte-ingress-exact", _ -> "exact-byte-decode"

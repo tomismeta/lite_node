@@ -150,6 +150,11 @@ let requirements = [
     primitives = ["causal_depthwise_conv1d_fp"];
     effects = ["memory_read"; "memory_write"];
   };
+  {
+    opcode = "ROPE_APPLY_INDEXED_FP";
+    primitives = ["rope_apply_indexed_fp"];
+    effects = ["memory_read"; "memory_write"];
+  };
 ]
 
 let p0_opcodes = List.map (fun requirement -> requirement.opcode) requirements
@@ -931,6 +936,63 @@ let vm_semantics_contract_json ~opcode =
         `List [
           `String "opcode base effort is 100";
           `String "dynamic effort is timesteps * channels * width";
+          `String "program effort also includes surrounding VM instructions such as STOP";
+        ];
+      ])
+  | "ROPE_APPLY_INDEXED_FP" ->
+    Some
+      (`Assoc [
+        "schema", `String "octra.inference.vm-semantics.v1";
+        "opcode", `String opcode;
+        "bytecode", `String "0x96";
+        "signature", `String "ROPE_APPLY_INDEXED_FP(addr, count, head_dim, rot_dim, positions, base)";
+        "register_roles",
+        `List [
+          `String "addr: in-place binary64 cell base";
+          `String "count: number of binary64 cells";
+          `String "head_dim: head dimension in cells";
+          `String "rot_dim: rotary dimension in cells, even and at most head_dim";
+          `String "positions: memory base of the pair-position integer cells";
+          `String "base: binary64 frequency base bits, finite and greater than 1.0";
+        ];
+        "memory_units",
+        `List [
+          `String "cells use one binary64 bit pattern per VM cell";
+          `String "pair-position cells are exact signed integers";
+          `String "the operation is fully in-place at addr";
+        ];
+        "shape_policy",
+        `List [
+          `String "count must be positive and a multiple of head_dim";
+          `String "rot_dim must be positive, even, and at most head_dim";
+          `String "positions span must cover rot_dim / 2 cells and not overlap addr";
+        ];
+        "arithmetic_policy",
+        `List [
+          `String "read the full span before writeback";
+          `String "ln(base) uses the protocol artanh series on the normalized mantissa plus e * ln2 in Q256 fixed point";
+          `String "theta = position * exp(-(2i/rot_dim) * ln(base)) via the protocol Q256 exp on the nonpositive term";
+          `String "theta is range-reduced modulo the protocol two-pi constant in Q256 fixed point";
+          `String "sin and cos use the alternating Taylor series in Q256 fixed point";
+          `String "rotation output[left] = left*cos - right*sin and output[right] = left*sin + right*cos use deterministic finite binary64 multiply/add/subtract";
+        ];
+        "read_write_policy",
+        `List [
+          `String "compute every output cell before mutating the span";
+          `String "reject before writeback on missing cells, non-finite values, invalid positions, arithmetic failure, or effort exhaustion";
+        ];
+        "output_policy",
+        `List [
+          `String "outputs are stored as binary64 bit patterns in addr order";
+          `String "the opcode does not mutate session ABI registers";
+        ];
+        "consensus_note",
+        `String
+          "protocol-owned ln, exp, two-pi reduction, and sin/cos make ROPE_APPLY_INDEXED_FP host-math-free; deterministic-fp64-rope-indexed is consensus_candidate pending dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
+        "effort_policy",
+        `List [
+          `String "opcode base effort is 100";
+          `String "dynamic effort is count + 8 * heads * pairs";
           `String "program effort also includes surrounding VM instructions such as STOP";
         ];
       ])

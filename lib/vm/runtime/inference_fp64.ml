@@ -451,6 +451,158 @@ let exp_nonpositive bits =
             (-(exp_fraction_bits + quotient))
   | _ -> None
 
+(* Q256 fixed-point exp for nonpositive fixed values. Returns the fixed-point
+   result (2^256-scaled) or None on arithmetic failure. *)
+let exp_nonpositive_fixed fixed =
+  if Z.sign fixed = 0 then
+    Some exp_one
+  else if Z.leq fixed exp_min_input then
+    Some Z.zero
+  else
+    let quotient =
+      Z.to_int (Z.div (Z.neg fixed) exp_ln_two)
+    in
+    let remainder =
+      Z.add fixed (Z.mul (Z.of_int quotient) exp_ln_two)
+    in
+    let quotient, remainder =
+      normalize_exp_reduction quotient remainder
+    in
+    let output = exp_reduced_nonpositive remainder in
+    if Z.sign output <= 0 then
+      None
+    else
+      Some (round_signed_shift_right_even output (exp_fraction_bits + quotient))
+
+(* Protocol ln(2) in Q256 fixed point (same constant as the exp core). *)
+let ln_two = exp_ln_two
+
+(* Two pi in Q256 fixed point (checked-in constant). *)
+let two_pi =
+  Z.of_string
+    "727543153783532648560469885555459725306786754656784859917544302235877788932370"
+
+(* ln(base) in Q256 fixed point for finite base > 1: base = m * 2^(e_total)
+   with m in [1,2); ln(base) = e_total * ln2 + log1p(m - 1). *)
+let ln_positive_fixed bits =
+  match decode bits with
+  | Some value when not value.negative && Z.sign value.significand <> 0 ->
+    let m_minus_one_fixed =
+      Z.shift_left
+        (Z.sub value.significand min_normal_significand)
+        (exp_fraction_bits - 52)
+    in
+    let e_total = value.exponent + 52 in
+    let log_m =
+      if Z.sign m_minus_one_fixed = 0 then
+        Z.zero
+      else
+        let t_fixed = m_minus_one_fixed in
+        let two_plus_t =
+          Z.add (Z.shift_left Z.one (exp_fraction_bits + 1)) t_fixed
+        in
+        let u =
+          round_signed_ratio_even
+            (Z.shift_left t_fixed exp_fraction_bits)
+            two_plus_t
+        in
+        let u_squared = fixed_mul u u in
+        let rec loop term denominator sum =
+          if Z.sign term = 0 then
+            sum
+          else
+            let sum = Z.add sum term in
+            let next_denominator = denominator + 2 in
+            if next_denominator > (2 * exp_taylor_terms) + 1 then
+              sum
+            else
+              let next_term =
+                fixed_div_int
+                  (fixed_mul
+                     (Z.mul term (Z.of_int denominator))
+                     u_squared)
+                  next_denominator
+              in
+              loop next_term next_denominator sum
+        in
+        Z.shift_left (loop u 1 Z.zero) 1
+    in
+    Some (Z.add (Z.mul (Z.of_int e_total) ln_two) log_m)
+  | _ -> None
+
+(* Deterministic sin/cos in Q256 fixed point for a fixed-point angle in
+   [0, 2*pi): alternating Taylor series with the factorial recurrence, all
+   integer arithmetic. Returns (sin_fixed, cos_fixed). *)
+let sin_cos_fixed angle_fixed =
+  let angle_squared = fixed_mul angle_fixed angle_fixed in
+  let rec loop k sin_term cos_term sin_sum cos_sum =
+    if k > 100 || (Z.sign sin_term = 0 && Z.sign cos_term = 0) then
+      sin_sum, cos_sum
+    else
+      let sin_sum = Z.add sin_sum sin_term in
+      let cos_sum = Z.add cos_sum cos_term in
+      let sin_denominator = ((2 * k) + 2) * ((2 * k) + 3) in
+      let cos_denominator = ((2 * k) + 1) * ((2 * k) + 2) in
+      let sin_next =
+        fixed_div_int (fixed_mul sin_term angle_squared) sin_denominator
+      in
+      let cos_next =
+        fixed_div_int (fixed_mul cos_term angle_squared) cos_denominator
+      in
+      loop (k + 1) (Z.neg sin_next) (Z.neg cos_next) sin_sum cos_sum
+  in
+  loop 0 angle_fixed exp_one Z.zero Z.zero
+
+(* Deterministic sin and cos binary64 bits for any finite angle. Range
+   reduces to [0, 2*pi) in Q256 fixed point, applies the alternating
+   series, and rounds ties-to-even. Returns (sin_bits, cos_bits). *)
+let sin_cos bits =
+  match decode bits with
+  | Some value when Z.sign value.significand = 0 ->
+    Some (zero value.negative), Some one_bits
+  | Some value ->
+    let negative_angle = value.negative in
+    let angle_fixed = fixed_of_value { value with negative = false } in
+    let quadrant = Z.div angle_fixed two_pi in
+    let reduced = Z.sub angle_fixed (Z.mul quadrant two_pi) in
+    let sin_fixed, cos_fixed = sin_cos_fixed reduced in
+    let to_bits sign fixed =
+      if Z.sign fixed = 0 then
+        Some (zero sign)
+      else if Z.sign fixed < 0 then
+        round_positive_ratio ~negative:true (Z.neg fixed) exp_one 0
+      else
+        round_positive_ratio ~negative:false fixed exp_one 0
+    in
+    let sin_negative = negative_angle in
+    (match to_bits sin_negative sin_fixed, to_bits false cos_fixed with
+     | Some sin_bits, Some cos_bits ->
+       if negative_angle then
+         Some (negate sin_bits), Some cos_bits
+       else
+         Some sin_bits, Some cos_bits
+     | _ -> None, None)
+  | _ -> None, None
+
+(* Convert a Q256 fixed-point value to binary64 bits (ties-to-even). *)
+let fixed_to_bits fixed =
+  if Z.sign fixed = 0 then
+    Some 0L
+  else if Z.sign fixed < 0 then
+    round_positive_ratio ~negative:true (Z.neg fixed) exp_one 0
+  else
+    round_positive_ratio ~negative:false fixed exp_one 0
+
+(* theta = position / base^exponent in Q256 fixed point for nonnegative
+   position and a fixed-point exponent term. *)
+let rope_theta_fixed position _base_ln_fixed exponent_ratio =
+  (* exponent_ratio is the fixed-point exponent e * ln(base) (>= 0);
+     base^(-e) = exp(-e * ln base). *)
+  match exp_nonpositive_fixed (Z.neg exponent_ratio) with
+  | Some factor ->
+    Some (fixed_mul (Z.mul (Z.of_int64 position) exp_one) factor)
+  | None -> None
+
 (* log(1 + t) for finite nonnegative t via the artanh series:
    log(1+t) = 2 * sum_k u^(2k+1)/(2k+1), u = t/(2+t) in (0, 1/3].
    All arithmetic is integer fixed-point at exp_fraction_bits, so the result
