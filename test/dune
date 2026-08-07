@@ -155,3 +155,8 @@
 (test
  (name runtime_ontology_test)
  (modules runtime_ontology_test))
+
+(test
+ (name q1_native_linear_test)
+ (modules q1_native_linear_test)
+ (libraries octra_vm native_math))

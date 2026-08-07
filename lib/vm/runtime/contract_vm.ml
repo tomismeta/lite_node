@@ -1112,6 +1112,12 @@ let fp64_one_bits = Int64.bits_of_float 1.0
 let fp64_positive_bits =
   Inference_fp64.positive
 
+(* Native Q1-G128 linear kernel by default; OCTRA_Q1_SCALAR=1 forces the
+   scalar reference path for diagnostics. The kernel is verified bit-exact
+   against the scalar semantics (test/q1_native_linear_test.ml). *)
+let q1_native_enabled =
+  lazy (Sys.getenv_opt "OCTRA_Q1_SCALAR" = None)
+
 let fp64_inverse_sqrt_bits =
   Inference_fp64.inverse_sqrt
 
@@ -2399,38 +2405,57 @@ let exec_one st op =
              when valid_mem_span lhs lhs_n && valid_mem_span dst dst_n
                   && off <= String.length q1
                   && q1_n <= String.length q1 - off ->
-             if not (add_dyn_product st [m; n; k] 512) then revert st
-             else
-               (match read_fp64_bits_array st.memory.data lhs lhs_n with
-               | None -> revert st
-               | Some lhs_values ->
-                 (match decode_q1_g128_scale_bits q1 off blocks with
-                  | None -> revert st
-                  | Some scale_bits ->
-                    let output = Array.make dst_n 0L in
-                    let ok = ref true in
-                    for row = 0 to m - 1 do
-                      for col = 0 to n - 1 do
-                        let acc = ref 0L in
-                        for block = 0 to blocks_per_output - 1 do
-                          let q1_block = (col * blocks_per_output) + block in
-                          let scale = Array.unsafe_get scale_bits q1_block in
-                          let block_offset = off + (q1_block * block_bytes) in
-                          for item = 0 to group - 1 do
-                            let sign_byte =
-                              Char.code q1.[block_offset + 2 + (item lsr 3)]
-                            in
-                            let scale =
-                              if (sign_byte lsr (item land 7)) land 1 = 1 then
-                                scale
-                              else
-                                Inference_fp64.negate scale
-                            in
-                            let lhs_value =
-                              Array.unsafe_get
-                                lhs_values
-                                ((row * k) + (block * group) + item)
-                            in
+              if not (add_dyn_product st [m; n; k] 512) then revert st
+              else
+                (match read_fp64_bits_array st.memory.data lhs lhs_n with
+                | None -> revert st
+                | Some lhs_values ->
+                  if Lazy.force q1_native_enabled then begin
+                    (* Native kernel: verified bit-exact against the scalar
+                       path; output is fully computed before any write. *)
+                    let output = Array.make dst_n 0.0 in
+                    if
+                      Native_math.q1_g128_linear
+                        lhs_values output q1 off m k n
+                      <> 0
+                    then revert st
+                    else begin
+                      for i = 0 to dst_n - 1 do
+                        mem_set_fp64_bits
+                          st.memory.data
+                          (dst + i)
+                          (Int64.bits_of_float (Array.unsafe_get output i))
+                      done;
+                      true
+                    end
+                  end else
+                  (match decode_q1_g128_scale_bits q1 off blocks with
+                   | None -> revert st
+                   | Some scale_bits ->
+                     let output = Array.make dst_n 0L in
+                     let ok = ref true in
+                     for row = 0 to m - 1 do
+                       for col = 0 to n - 1 do
+                         let acc = ref 0L in
+                         for block = 0 to blocks_per_output - 1 do
+                           let q1_block = (col * blocks_per_output) + block in
+                           let scale = Array.unsafe_get scale_bits q1_block in
+                           let block_offset = off + (q1_block * block_bytes) in
+                           for item = 0 to group - 1 do
+                             let sign_byte =
+                               Char.code q1.[block_offset + 2 + (item lsr 3)]
+                             in
+                             let scale =
+                               if (sign_byte lsr (item land 7)) land 1 = 1 then
+                                 scale
+                               else
+                                 Inference_fp64.negate scale
+                             in
+                             let lhs_value =
+                               Array.unsafe_get
+                                 lhs_values
+                                 ((row * k) + (block * group) + item)
+                             in
                             match Inference_fp64.mul lhs_value scale with
                             | Some product ->
                               (match Inference_fp64.add !acc product with

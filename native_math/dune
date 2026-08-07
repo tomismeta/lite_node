@@ -1,0 +1,19 @@
+(library
+ (name native_math)
+ (foreign_stubs
+  (language cxx)
+  (names q1_linear)
+  (flags (:include flags.sexp)))
+ (c_library_flags (:include clib_flags.sexp)))
+
+(rule
+ (targets flags.sexp)
+ (action
+  (with-stdout-to flags.sexp
+   (bash "echo '(-std=c++17 -O2 -fPIC -ffp-contract=off)'"))))
+
+(rule
+ (targets clib_flags.sexp)
+ (action
+  (with-stdout-to clib_flags.sexp
+   (bash "if [ \"$(uname -s)\" = 'Darwin' ]; then echo '(-lc++)'; else echo '(-lstdc++)'; fi"))))
