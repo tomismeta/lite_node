@@ -110,11 +110,15 @@ let opcode_selected opcode =
   | [] -> true
   | opcodes -> List.exists (String.equal opcode) opcodes
 
+let spine_matrix_opcodes =
+  Template.p0_opcodes
+  @ ["LOAD_F64_LE_FP"; "ARGMAX_FP"]
+
 let validate_selected_opcodes () =
   List.iter
     (fun opcode ->
-       if not (List.exists (String.equal opcode) Template.p0_opcodes) then
-         fail ("unsupported P0 opcode filter: " ^ opcode))
+       if not (List.exists (String.equal opcode) spine_matrix_opcodes) then
+         fail ("unsupported opcode filter: " ^ opcode))
     (selected_opcodes ())
 
 let read_file path =
@@ -2997,6 +3001,19 @@ let op_softmax registers =
      reg_for "scores" registers,
      reg_for "count" registers)
 
+let op_load_f64 registers =
+  VM.LOAD_F64_LE_FP
+    (reg_for "dst" registers,
+     reg_for "src" registers,
+     reg_for "offset" registers,
+     reg_for "count" registers)
+
+let op_argmax registers =
+  VM.ARGMAX_FP
+    (reg_for "dest" registers,
+     reg_for "addr" registers,
+     reg_for "count" registers)
+
 let op_gated_delta registers =
   VM.GATED_DELTA_RULE_FP
     (reg_for "output" registers,
@@ -3020,6 +3037,8 @@ let op_for opcode registers =
   | "RMSNORM_FP_EPS" -> op_rmsnorm registers
   | "L2NORM_FP" -> op_l2norm registers
   | "SOFTMAX_FP" -> op_softmax registers
+  | "LOAD_F64_LE_FP" -> op_load_f64 registers
+  | "ARGMAX_FP" -> op_argmax registers
   | "GATED_DELTA_RULE_FP" -> op_gated_delta registers
   | value -> fail ("unsupported opcode: " ^ value)
 
@@ -3028,6 +3047,8 @@ let opcode_name = function
   | VM.RMSNORM_FP_EPS _ -> "RMSNORM_FP_EPS"
   | VM.L2NORM_FP _ -> "L2NORM_FP"
   | VM.SOFTMAX_FP _ -> "SOFTMAX_FP"
+  | VM.LOAD_F64_LE_FP _ -> "LOAD_F64_LE_FP"
+  | VM.ARGMAX_FP _ -> "ARGMAX_FP"
   | VM.GATED_DELTA_RULE_FP _ -> "GATED_DELTA_RULE_FP"
   | VM.STOP -> "STOP"
   | _ -> "other"
@@ -3784,6 +3805,17 @@ let execute_template root_dir entry =
       state
       [|op; VM.STOP|]
   in
+  (* ARGMAX writes selected_index to a register; project it into the declared
+     output memory cell so template subspan comparison stays memory-shaped. *)
+  if ran && String.equal opcode "ARGMAX_FP" then begin
+    let dest_reg = reg_for "dest" registers in
+    let output = assoc_field "output" template in
+    let base = int_field "base_address" output in
+    match state.VM.regs.(dest_reg) with
+    | VM.VInt value ->
+      Hashtbl.replace state.VM.memory.data base (VM.VInt value)
+    | _ -> ()
+  end;
   set_output_abi_registers state template;
   let output = assoc_field "output" template in
   let subspans = list_field "subspans" output in

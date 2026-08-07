@@ -827,25 +827,23 @@ let of_name = function
   | "byte-ingress-exact" as name ->
     Ok {
       name;
-      consensus_status = Consensus_candidate;
-      summary = "little-endian finite floating-point byte-ingress profile";
+      consensus_status = Consensus_ready;
+      summary = "little-endian finite floating-point byte-ingress profile (spine-ready LOAD_F64)";
       required_actions = [
-        "pin little-endian f32/f64 bit interpretation and finite rejection";
+        "keep little-endian f64 bit path finite-checked without host float writeback on LOAD_F64_LE_FP";
         "bind source bytes through authenticated ranges and storage_read effects";
         "preserve decode atomicity before exposing loaded cells to arithmetic kernels";
-        "keep LOAD_F64_LE_FP on finite bit-cell writeback without host float dual-write";
       ];
     }
   | "deterministic-fp64-comparison" as name ->
     Ok {
       name;
-      consensus_status = Consensus_candidate;
-      summary = "deterministic finite binary64 comparison profile";
+      consensus_status = Consensus_ready;
+      summary = "deterministic finite binary64 comparison profile (spine-ready ARGMAX)";
       required_actions = [
         "bind the numerical profile root in the model or request authority";
         "pin cross-platform finite-value ordering, signed-zero tie, and selected-index encoding";
-        "preserve non-finite rejection and destination atomicity before validator admission";
-        "produce multi-platform matrix + punitive/atomicity evidence before consensus_ready";
+        "preserve non-finite rejection and destination atomicity";
       ];
     }
   | "deterministic-fp64-elementwise" as name ->
@@ -896,22 +894,22 @@ let of_name = function
   | "deterministic-q1-g128-fp64-linear" as name ->
     Ok {
       name;
-      consensus_status = Consensus_candidate;
-      summary = "deterministic Q1-G128 binary16-scale linear profile";
+      consensus_status = Consensus_ready;
+      summary = "deterministic Q1-G128 binary16-scale linear profile (spine-ready)";
       required_actions = [
         "bind the numerical profile root in the model or request authority";
-        "qualify binary16 scale decode, Q1 sign mapping, and binary64 accumulator edge vectors across validators";
+        "preserve binary16 scale decode, Q1 sign mapping, and binary64 accumulator order from multi-platform matrix evidence";
         "pin loop order, finite rejection, aliasing, effort, and atomic writeback policy";
       ];
     }
   | "deterministic-fp64-normalization" as name ->
     Ok {
       name;
-      consensus_status = Consensus_candidate;
-      summary = "deterministic finite binary64 normalization profile";
+      consensus_status = Consensus_ready;
+      summary = "deterministic finite binary64 normalization profile (spine-ready)";
       required_actions = [
         "bind the numerical profile root in the model or request authority";
-        "qualify software-defined binary64 reduction, division, sqrt, and output multiply edge vectors across validators";
+        "preserve software-defined binary64 reduction, division, sqrt, and output multiply from multi-platform matrix evidence";
         "pin epsilon bits, signed-zero, subnormal, overflow, aliasing, effort, and atomic writeback policy";
       ];
     }

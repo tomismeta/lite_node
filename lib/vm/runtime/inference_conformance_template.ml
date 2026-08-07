@@ -491,6 +491,69 @@ let vm_semantics_contract_json ~opcode =
           `String "program effort also includes surrounding VM instructions such as STOP";
         ];
       ])
+  | "LOAD_F64_LE_FP" ->
+    Some
+      (`Assoc [
+        "schema", `String "octra.inference.vm-semantics.v1";
+        "opcode", `String opcode;
+        "bytecode", `String "0x91";
+        "signature", `String "LOAD_F64_LE_FP(dst, src, offset, count)";
+        "register_roles",
+        `List [
+          `String "dst: destination base cell";
+          `String "src: immutable little-endian f64 source bytes";
+          `String "offset: byte offset into src";
+          `String "count: number of binary64 cells to decode";
+        ];
+        "memory_units",
+        `List [
+          `String "source is immutable octets";
+          `String "destination stores one binary64 bit pattern per VM cell";
+        ];
+        "decode_policy",
+        `List [
+          `String "decode count little-endian binary64 values from src[offset..]";
+          `String "reject non-finite (NaN/Inf) values before writeback";
+          `String "write destination cells only after every source value decodes as finite";
+          `String "destination write uses finite bit-cell storage without host float dual-write";
+        ];
+        "effort_policy",
+        `List [
+          `String "dynamic effort is count";
+          `String "program effort also includes surrounding VM instructions such as STOP";
+        ];
+      ])
+  | "ARGMAX_FP" ->
+    Some
+      (`Assoc [
+        "schema", `String "octra.inference.vm-semantics.v1";
+        "opcode", `String opcode;
+        "bytecode", `String "0x88";
+        "signature", `String "ARGMAX_FP(dest, addr, count)";
+        "register_roles",
+        `List [
+          `String "dest: selected index register";
+          `String "addr: logits base cell";
+          `String "count: number of binary64 logit cells";
+        ];
+        "comparison_policy",
+        `List [
+          `String "read all logit cells as finite binary64 bit patterns";
+          `String "reject non-finite logits before writing dest";
+          `String "select the lowest index among values that strictly maximize under deterministic finite binary64 compare";
+          `String "signed-zero ties preserve the earliest index";
+        ];
+        "output_policy",
+        `List [
+          `String "dest receives the selected integer index";
+          `String "the opcode does not mutate logit memory";
+        ];
+        "effort_policy",
+        `List [
+          `String "dynamic effort is floor(count/2)";
+          `String "program effort also includes surrounding VM instructions such as STOP";
+        ];
+      ])
   | _ -> None
 
 let vm_semantics_root_for_opcode ~opcode =
