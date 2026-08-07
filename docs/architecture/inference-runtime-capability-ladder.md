@@ -79,7 +79,7 @@ Capabilities are cumulative. Higher rungs assume lower rungs.
 | C4 | Partial | FLOAD works; pin reuse / residency still product work |
 | C5 | Met (local) | `graph_real` / `lifecycle_only` evidence rules |
 | C6 | Met (local) | Composed spine programs admitted and executed: S4 FLOAD+RMSNORM+LINEAR+ARGMAX ran end-to-end on the external harness (`46d63d1`) |
-| C7 | Met (local, spine path) | Continuous prefill+decode under one resident session accepted by the harness (spine S4); full-model continuous graph still not claimed |
+| C7 | Met (local) | Continuous prefill+decode accepted by the harness for the spine S4 path AND the composed layer-0 recurrent graph (FLOAD+GDN+RMSNORM+SILU+ELEMWISE+Q1+RESIDUAL, real Bonsai bytes, graph_slice_accepted at `f978d9e`) |
 | C8 | Met (local) | Decode transition bound `decode_token_contract_status` with VM-emitted `selected_index` matching the pinned reference (`310`) |
 | C9 | Partial | Prior-state selected-index contract present; S5 multi-decode remains blocked |
 | C10 | Not met | Inference off consensus critical path; explicit ceilings |
