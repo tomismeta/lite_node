@@ -1103,7 +1103,7 @@ let check_inference_profile_surface_coverage () =
       "ATTENTION_SCORES_FP", "deterministic-fp64-accumulation",
       "consensus_candidate",
       "20bfb100d037cb05d3208ed6c35bb36deae747ff2aa9fc1ac78f1078f19b56e5";
-      "SOFTMAX_FP", "deterministic-fp64-softmax", "consensus_candidate",
+      "SOFTMAX_FP", "deterministic-fp64-softmax", "consensus_ready",
       "407122b6630ad06842386561a931d05325e2c206d6fe4cc4429360fd755de549";
       "ATTENTION_WEIGHTED_SUM_FP", "deterministic-fp64-accumulation",
       "consensus_candidate",
@@ -1136,7 +1136,7 @@ let check_inference_profile_surface_coverage () =
        "p0 profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "d26cf4ca48d4e7563828c31ad0778acd1859f3c9a16ecef2ad5f90c5009a57e1");
+	          "6713aa6a4519f9efbe9f78f2a5c2d140a7a4f14ca402fc8a3ab97a57372ad94a");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "p0 readiness worklist count" (List.length rows = 5);
@@ -1196,7 +1196,7 @@ let check_inference_profile_surface_coverage () =
        "runtime profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "488f9420143bbb54234eb19b86616d81ffdfeadaac1963a9e3069c3e76449136");
+	          "54129e79df8eff5d20256cca897a4d779845f8ee0ccd9ffb0dc7c03d3fb90c69");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "runtime readiness worklist count" (List.length rows = 17)
@@ -1242,8 +1242,8 @@ let check_inference_profile_surface_coverage () =
      check "surface local-only count" (int_value "local_only" fields = 4);
      check
        "surface consensus-candidate count"
-       (int_value "consensus_candidate" fields = 8);
-     check "surface consensus-ready count" (int_value "consensus_ready" fields = 5);
+       (int_value "consensus_candidate" fields = 7);
+     check "surface consensus-ready count" (int_value "consensus_ready" fields = 6);
      check "surface unknown count" (int_value "unknown" fields = 0)
    | _ -> failwith "surface status counts json must be object");
   (match Profile.profile_root_catalog_json gates with
@@ -1274,7 +1274,7 @@ let check_inference_profile_surface_coverage () =
      | `String root ->
 	       String.equal
 	         root
-		         "488f9420143bbb54234eb19b86616d81ffdfeadaac1963a9e3069c3e76449136"
+		         "54129e79df8eff5d20256cca897a4d779845f8ee0ccd9ffb0dc7c03d3fb90c69"
      | _ -> false);
   check
     "empty profile catalog root"
@@ -1493,8 +1493,8 @@ let check_remaining_p0_profile_obligations () =
        (string_value "name" softmax_gate)
        "deterministic-fp64-softmax");
   check
-    "softmax is consensus candidate"
-    (String.equal (string_value "consensus_status" softmax_gate) "consensus_candidate");
+    "softmax is consensus ready"
+    (String.equal (string_value "consensus_status" softmax_gate) "consensus_ready");
   check
     "softmax binds protocol-owned exp qualification"
     (list_contains_substring
@@ -2555,10 +2555,16 @@ let check_p0_vm_semantics_contracts () =
 	          "protocol-owned deterministic nonpositive binary64 exp"
 	          (string_list_value "arithmetic_policy" semantics));
 	     check
-	       "softmax semantics marks consensus candidate"
+	       "softmax semantics marks consensus ready"
 	       (contains_substring
-	          "consensus candidate"
-	          (string_value "consensus_note" semantics))
+	          "consensus_ready"
+	          (string_value "consensus_note" semantics));
+	     check
+	       "softmax semantics no longer claims candidate-only status"
+	       (not
+	          (contains_substring
+	             "remains a consensus candidate"
+	             (string_value "consensus_note" semantics)))
 	   | _ -> failwith "missing softmax vm semantics contract");
   (match Template.vm_semantics_contract_json ~opcode:"GATED_DELTA_RULE_FP" with
    | Some (`Assoc semantics) ->
@@ -2573,16 +2579,16 @@ let check_p0_vm_semantics_contracts () =
 	         "protocol-owned Q256"
 	         (string_list_value "arithmetic_policy" semantics));
 	    check
-      "gated delta semantics marks consensus ready"
-      (contains_substring
-         "consensus_ready"
-         (string_value "consensus_note" semantics));
-    check
-      "gated delta semantics no longer claims candidate-only status"
-      (not
-         (contains_substring
-            "remains a consensus candidate"
-            (string_value "consensus_note" semantics)))
+	      "gated delta semantics marks consensus ready"
+	      (contains_substring
+	         "consensus_ready"
+	         (string_value "consensus_note" semantics));
+	    check
+	      "gated delta semantics no longer claims candidate-only status"
+	      (not
+	         (contains_substring
+	            "remains a consensus candidate"
+	            (string_value "consensus_note" semantics)))
    | _ -> failwith "missing gated delta vm semantics contract");
   (match Template.vm_semantics_contract_json ~opcode:"RMSNORM_FP_EPS" with
    | Some (`Assoc semantics) ->

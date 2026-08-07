@@ -885,11 +885,12 @@ let of_name = function
   | "deterministic-fp64-softmax" as name ->
     Ok {
       name;
-      consensus_status = Consensus_candidate;
-      summary = "deterministic finite binary64 softmax profile with protocol-owned nonpositive exp";
+      consensus_status = Consensus_ready;
+      summary =
+        "deterministic finite binary64 softmax profile with protocol-owned nonpositive exp (spine-ready SOFTMAX_FP)";
       required_actions = [
         "bind the numerical profile root in the model or request authority";
-        "qualify protocol-owned nonpositive exp, binary64 score shifting, exponential summation, and probability division across validators";
+        "preserve protocol-owned nonpositive exp, binary64 score shifting, exponential summation, and probability division from multi-platform matrix evidence";
         "pin max selection, underflow, overflow, overlap, effort, and atomic writeback policy";
       ];
     }
