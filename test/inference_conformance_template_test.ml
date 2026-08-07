@@ -202,7 +202,7 @@ let check_accepts_template () =
   match Template.of_json (template ()) with
   | Error error -> failwith (Template.error_message error)
   | Ok result ->
-    check "p0 opcode count" (List.length Template.p0_opcodes = 13);
+    check "p0 opcode count" (List.length Template.p0_opcodes = 14);
     check "opcode" (String.equal result.Template.opcode "RMSNORM_FP_EPS");
     check "register count" (List.length result.registers = 4);
     check "memory count" (List.length result.memory = 1);
@@ -1098,7 +1098,7 @@ let check_inference_profile_surface_coverage () =
       "RESIDUAL_ADD_FP", "deterministic-fp64-elementwise",
       "consensus_ready",
       "a1d1bc7242bcca11b31395d8313b552eec80e5174651637df0690adec41cd32f";
-      "ROPE_APPLY_INDEXED_FP", "deterministic-fp64-rope-indexed", "consensus_candidate",
+      "ROPE_APPLY_INDEXED_FP", "deterministic-fp64-rope-indexed", "consensus_ready",
       "f959e640ef13a165bcae22eb0d760d0defc4df75f8ae274b46e1882cf56d14ff";
       "ATTENTION_SCORES_FP", "deterministic-fp64-accumulation",
       "consensus_ready",
@@ -1131,15 +1131,15 @@ let check_inference_profile_surface_coverage () =
        (String.equal
           (string_value "schema" fields)
           "octra.inference.profile-catalog.v1");
-     check "p0 profile catalog count" (int_value "opcode_count" fields = 13);
+     check "p0 profile catalog count" (int_value "opcode_count" fields = 14);
      check
        "p0 profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "624ba24f7dd7e34b53064b2f44be2abb4e951a289c911de1ef4ac7ab6bf7184a");
+	          "38b7d77e563a3be7adbf26aa733d66710e0d86ea1d6ab84de39d06e927347f3c");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
-        check "p0 readiness worklist count" (List.length rows = 13);
+        check "p0 readiness worklist count" (List.length rows = 14);
         let row opcode =
           List.find_opt
             (function
@@ -1196,7 +1196,7 @@ let check_inference_profile_surface_coverage () =
         "runtime profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "6a326c0db40ed4dd9f4b10a7dad7ab619e25d9097b5184323a013d8e79383154");
+	          "e23014840196b3cbdea49da9abc76a028020edaf4e2336eacc20a32a35eea78f");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "runtime readiness worklist count" (List.length rows = 17)
@@ -1242,8 +1242,8 @@ let check_inference_profile_surface_coverage () =
      check "surface local-only count" (int_value "local_only" fields = 0);
      check
        "surface consensus-candidate count"
-       (int_value "consensus_candidate" fields = 1);
-     check "surface consensus-ready count" (int_value "consensus_ready" fields = 16);
+       (int_value "consensus_candidate" fields = 0);
+     check "surface consensus-ready count" (int_value "consensus_ready" fields = 17);
      check "surface unknown count" (int_value "unknown" fields = 0)
    | _ -> failwith "surface status counts json must be object");
   (match Profile.profile_root_catalog_json gates with
@@ -1274,7 +1274,7 @@ let check_inference_profile_surface_coverage () =
      | `String root ->
 	       String.equal
 	         root
-		         "6a326c0db40ed4dd9f4b10a7dad7ab619e25d9097b5184323a013d8e79383154"
+		         "e23014840196b3cbdea49da9abc76a028020edaf4e2336eacc20a32a35eea78f"
      | _ -> false);
   check
     "empty profile catalog root"
@@ -1745,8 +1745,8 @@ let check_rope_indexed_profile_gate () =
        (string_value "name" gate)
        "deterministic-fp64-rope-indexed");
   check
-    "rope indexed is candidate"
-    (String.equal (string_value "consensus_status" gate) "consensus_candidate");
+    "rope indexed is consensus-ready"
+    (String.equal (string_value "consensus_status" gate) "consensus_ready");
   check
     "rope indexed local protocol semantics"
     (list_contains_substring

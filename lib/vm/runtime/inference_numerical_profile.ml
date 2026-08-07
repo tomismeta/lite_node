@@ -819,7 +819,7 @@ let of_name = function
   | "deterministic-fp64-rope-indexed" as name ->
     Ok {
       name;
-      consensus_status = Consensus_candidate;
+      consensus_status = Consensus_ready;
       summary =
         "deterministic finite binary64 indexed rotary profile with protocol-owned ln, exp, and sin/cos (ROPE_APPLY_INDEXED_FP no longer uses host pow/cos/sin)";
       required_actions = [
