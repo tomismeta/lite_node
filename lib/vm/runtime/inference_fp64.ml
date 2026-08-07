@@ -451,6 +451,54 @@ let exp_nonpositive bits =
             (-(exp_fraction_bits + quotient))
   | _ -> None
 
+(* log(1 + t) for finite nonnegative t via the artanh series:
+   log(1+t) = 2 * sum_k u^(2k+1)/(2k+1), u = t/(2+t) in (0, 1/3].
+   All arithmetic is integer fixed-point at exp_fraction_bits, so the result
+   is bit-exact across platforms for every finite t >= 0. *)
+let log1p_nonnegative bits =
+  match decode bits, compare bits 0L with
+  | Some value, Some cmp when cmp >= 0 ->
+    if Z.sign value.significand = 0 then
+      Some 0L
+    else
+      let t_fixed = fixed_of_value value in
+      let two_plus_t =
+        Z.add (Z.shift_left Z.one (exp_fraction_bits + 1)) t_fixed
+      in
+      let u =
+        round_signed_ratio_even
+          (Z.shift_left t_fixed exp_fraction_bits)
+          two_plus_t
+      in
+      let u_squared = fixed_mul u u in
+      let rec loop term denominator sum =
+        if Z.sign term = 0 then
+          sum
+        else
+          let sum = Z.add sum term in
+          let next_denominator = denominator + 2 in
+          if next_denominator > (2 * exp_taylor_terms) + 1 then
+            sum
+          else
+            (* term_{k+1} = u^(2k+3)/(2k+3) =
+               term_k * u^2 * (2k+1)/(2k+3). *)
+            let next_term =
+              fixed_div_int
+                (fixed_mul
+                   (Z.mul term (Z.of_int denominator))
+                   u_squared)
+                next_denominator
+            in
+            loop next_term next_denominator sum
+      in
+      let series = loop u 1 Z.zero in
+      round_positive_ratio
+        ~negative:false
+        (Z.shift_left series 1)
+        (Z.shift_left Z.one exp_fraction_bits)
+        0
+  | _ -> None
+
 let of_int value =
   let value = Z.of_int value in
   if Z.sign value = 0 then

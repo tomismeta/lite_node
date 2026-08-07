@@ -44,7 +44,7 @@ does not prove deterministic math; the profile root must bind the math.
 | Profile | Admission role | Purpose |
 | --- | --- | --- |
 | `host-fp-local-candidate` | Local and attested-only | Generic fallback for proof/demo primitives still relying on native host math. This profile is useful for fast engineering but not validator-portable. |
-| `host-fp-exp-local-candidate` | Local and attested-only | Current proof/demo path for primitives still relying on native `exp`/`log1p`, including softmax, gated delta, sigmoid, softplus, and SiLU. This profile is useful for fast engineering but not validator-portable. |
+| `host-fp-exp-local-candidate` | Retired for activations | Historical proof/demo path for native `exp`/`log1p`. Softmax, gated delta, sigmoid, softplus, and SiLU now use protocol-owned deterministic exp; `deterministic-fp64-sigmoid`, `deterministic-fp64-silu`, and `deterministic-fp64-softplus` are `consensus_candidate` (no host libm). Only ROPE remains on host math. |
 | `host-fp-trig-local-candidate` | Local and attested-only | Current proof/demo path for indexed rotary primitives still relying on native exponentiation, `cos`, and `sin`. This profile is useful for fast engineering but not validator-portable. |
 | `byte-ingress-exact` | Legacy shared name (prefer scoped profiles) | Historical shared little-endian float ingress name; new bindings use opcode-scoped `byte-ingress-f32-bits` / `byte-ingress-f64-bits`. |
 | `byte-ingress-f32-bits` | Consensus ready | Little-endian f32→f64 bit-cell ingress for `LOAD_F32_LE_FP` (no host-float dual-write); dual-platform matrix with punitive cases sealed. |
@@ -187,9 +187,13 @@ matrix / catalog tools plus numerics primitive tests that gate promote). Exit 0
 is required before flip. Full multi-OS matrix automation is separate; this gate
 only restores local trust that the promote cannot hide behind a red suite.
 
-Host-trig / host-exp activations (`SIGMOID_FP`, `SOFTPLUS_FP`, `SILU_FP`,
-`ROPE_APPLY_INDEXED_FP`) remain `local_only` until protocol math replaces libm.
-Composed host-SILU goldens must not pin foreign-platform libm bits.
+Host-trig (`ROPE_APPLY_INDEXED_FP`) remains `local_only` until deterministic
+indexed trig replaces libm. The activations (`SIGMOID_FP`, `SOFTPLUS_FP`,
+`SILU_FP`) no longer call host libm: sigmoid/SiLU compose the protocol-owned
+nonpositive exp (Q256 range reduction), and softplus adds a protocol-owned
+artanh-series log1p in Q256 fixed point. The activation profiles are
+`consensus_candidate` pending the dual-platform matrix ceremony. Composed
+goldens must not pin foreign-platform libm bits.
 
 ## Minimal Engineering Path
 

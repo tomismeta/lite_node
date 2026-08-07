@@ -13,5 +13,6 @@ val compare : int64 -> int64 -> int option
 val positive : int64 -> bool
 val inverse_sqrt : int64 -> int64 option
 val exp_nonpositive : int64 -> int64 option
+val log1p_nonnegative : int64 -> int64 option
 val of_int : int -> int64 option
 val negate : int64 -> int64

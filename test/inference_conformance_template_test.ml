@@ -1074,12 +1074,12 @@ let check_inference_profile_surface_coverage () =
       "LINEAR_Q1_G128_FP", "deterministic-q1-g128-fp64-linear",
       "consensus_ready",
       "1247c6e4e8364a774c2585a76a05fadfdf631e9e7562d4949ee5d1b358589367";
-      "SIGMOID_FP", "host-fp-exp-local-candidate", "local_only",
-      "7fdfb04d5c91a7f2b5e80e88c753eb4c16a5d302d52d25374bdccc8cada5bd24";
-      "SOFTPLUS_FP", "host-fp-exp-local-candidate", "local_only",
-      "33dbffcb96885c65c1f91b55442e0883541f4867d8eee4d76dd4559ed7d72423";
-      "SILU_FP", "host-fp-exp-local-candidate", "local_only",
-      "be07fd30c1a90dda2ea4aafaaa3f938749af5fe04bcd4b75f4b7852a525ff854";
+      "SIGMOID_FP", "deterministic-fp64-sigmoid", "consensus_candidate",
+      "f49ff17137a92773d4173130b982f52d44c84c252dc973d11539697ceacba774";
+      "SOFTPLUS_FP", "deterministic-fp64-softplus", "consensus_candidate",
+      "b53f54ea31047681a17559cddd8cd1f7a2a623f7562cf9fba16cfeafb8edfeb5";
+      "SILU_FP", "deterministic-fp64-silu", "consensus_candidate",
+      "1e9da402fbea14ecd54a5ec775a76200bf1ff323315b94384a8e827148b82b98";
       "CAUSAL_DEPTHWISE_CONV1D_FP", "deterministic-fp64-accumulation",
       "consensus_candidate",
       "df645d83fe5fa0e32a7d5349b9b230de9002c0a980e32eb3d6582852fa05d545";
@@ -1191,12 +1191,12 @@ let check_inference_profile_surface_coverage () =
    | _ -> failwith "p0 profile catalog must be object");
   (match Profile.current_runtime_profile_catalog_json ~opcodes:surface_opcodes with
    | `Assoc fields ->
-     check "runtime profile catalog count" (int_value "opcode_count" fields = 17);
-     check
-       "runtime profile catalog root"
+      check "runtime profile catalog count" (int_value "opcode_count" fields = 17);
+      check
+        "runtime profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "f09472f111500ed2d7e181120e990cf7f88fdd930eb9d19312a5bb30ce34fa65");
+	          "a405c3588966b1f4b6b54e0467ba9a4160b0caf7dbebfdbb8b048b42bc6e098b");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "runtime readiness worklist count" (List.length rows = 17)
@@ -1239,10 +1239,10 @@ let check_inference_profile_surface_coverage () =
   let counts = Profile.status_counts_of_json_gates gates in
   (match Profile.status_counts_json counts with
    | `Assoc fields ->
-     check "surface local-only count" (int_value "local_only" fields = 4);
+     check "surface local-only count" (int_value "local_only" fields = 1);
      check
        "surface consensus-candidate count"
-       (int_value "consensus_candidate" fields = 5);
+       (int_value "consensus_candidate" fields = 8);
      check "surface consensus-ready count" (int_value "consensus_ready" fields = 8);
      check "surface unknown count" (int_value "unknown" fields = 0)
    | _ -> failwith "surface status counts json must be object");
@@ -1274,7 +1274,7 @@ let check_inference_profile_surface_coverage () =
      | `String root ->
 	       String.equal
 	         root
-		         "f09472f111500ed2d7e181120e990cf7f88fdd930eb9d19312a5bb30ce34fa65"
+		         "a405c3588966b1f4b6b54e0467ba9a4160b0caf7dbebfdbb8b048b42bc6e098b"
      | _ -> false);
   check
     "empty profile catalog root"
@@ -1328,11 +1328,17 @@ let check_inference_profile_surface_coverage () =
        "binary16_scale_decode"
        "encoding_or_layout";
 	     check_blocker
-      "host_fp_exp"
+      "protocol_owned_exp_conformance"
       ["SIGMOID_FP"; "SOFTPLUS_FP"; "SILU_FP"];
      check_blocker_class
-       "host_fp_exp"
-       "host_native_math";
+       "protocol_owned_exp_conformance"
+       "software_fp64_conformance";
+     check_blocker
+       "protocol_owned_log1p_conformance"
+       ["SOFTPLUS_FP"];
+     check_blocker_class
+       "protocol_owned_log1p_conformance"
+       "software_fp64_conformance";
      check_blocker
        "fp64_sqrt_conformance"
        ["RMSNORM_FP_EPS"; "L2NORM_FP"; "GATED_DELTA_RULE_FP";
@@ -1377,8 +1383,8 @@ let check_inference_profile_surface_coverage () =
        "fp64_sqrt_conformance"
        "RMSNORM_FP_EPS";
 	     check_class
-	       "host_native_math"
-	       "host_fp_exp"
+	       "software_fp64_conformance"
+	       "protocol_owned_exp_conformance"
 	       "SILU_FP";
      check_class
        "safety_policy"
@@ -1817,22 +1823,31 @@ let check_rope_indexed_profile_gate () =
   | Ok _ -> failwith "expected rope indexed profile overclaim rejection"
 
 let check_activation_profile_gates () =
+  let runtime_activation_profile = function
+    | "SIGMOID_FP" -> "deterministic-fp64-sigmoid"
+    | "SOFTPLUS_FP" -> "deterministic-fp64-softplus"
+    | "SILU_FP" -> "deterministic-fp64-silu"
+    | _ -> "unknown"
+  in
   List.iter
     (fun (opcode, local_needle, obligation_needle) ->
       check
         (opcode ^ " runtime profile")
         (match Profile.current_runtime_profile ~opcode with
-         | Some "host-fp-exp-local-candidate" -> true
+         | Some "deterministic-fp64-sigmoid"
+         | Some "deterministic-fp64-softplus"
+         | Some "deterministic-fp64-silu" -> true
          | _ -> false);
       let gate = profile_gate opcode in
       check
-        (opcode ^ " exp-local profile")
-        (String.equal
-           (string_value "name" gate)
-           "host-fp-exp-local-candidate");
+        (opcode ^ " deterministic profile")
+        (let name = string_value "name" gate in
+         String.equal name "deterministic-fp64-sigmoid"
+         || String.equal name "deterministic-fp64-softplus"
+         || String.equal name "deterministic-fp64-silu");
       check
-        (opcode ^ " remains local-only")
-        (String.equal (string_value "consensus_status" gate) "local_only");
+        (opcode ^ " is candidate, not local-only")
+        (String.equal (string_value "consensus_status" gate) "consensus_candidate");
       check
         (opcode ^ " local semantics")
         (list_contains_substring
@@ -1856,7 +1871,7 @@ let check_activation_profile_gates () =
            (String.equal profile "host-fp-local-candidate");
          check
            (opcode ^ " old host profile expected")
-           (String.equal expected "host-fp-exp-local-candidate")
+           (String.equal expected (runtime_activation_profile opcode))
        | Error error -> failwith (Profile.error_message error)
        | Ok _ -> failwith (opcode ^ " should reject old host profile"));
       match Profile.validate_for_opcode ~opcode ~profile:"q16-exact" with
@@ -1865,21 +1880,21 @@ let check_activation_profile_gates () =
         check (opcode ^ " overclaim profile") (String.equal profile "q16-exact");
         check
           (opcode ^ " overclaim expected")
-          (String.equal expected "host-fp-exp-local-candidate")
+          (String.equal expected (runtime_activation_profile opcode))
       | Error error -> failwith (Profile.error_message error)
       | Ok _ -> failwith (opcode ^ " should reject profile overclaim"))
     [
-      "SIGMOID_FP", "native exp only sees finite nonpositive inputs", "nonpositive exp-domain gate";
-      "SOFTPLUS_FP", "log1p receives finite nonnegative inputs", "protocol-owned deterministic exp/log1p behavior";
-      "SILU_FP", "SiLU reuses the SIGMOID_FP sign branch", "deterministic sigmoid reuse";
+      "SIGMOID_FP", "protocol exp", "protocol-owned deterministic";
+      "SOFTPLUS_FP", "protocol log1p uses the artanh series", "protocol-owned deterministic";
+      "SILU_FP", "protocol exp gate", "sigmoid composition order";
     ];
   let sigmoid_gate = profile_gate "SIGMOID_FP" in
   let sigmoid_blockers =
     string_list_value "consensus_blocker_codes" sigmoid_gate
   in
   check
-    "sigmoid host exp blocker"
-    (List.mem "host_fp_exp" sigmoid_blockers);
+    "sigmoid protocol exp blocker"
+    (List.mem "protocol_owned_exp_conformance" sigmoid_blockers);
   check
     "sigmoid comparison blocker"
     (List.mem "fp64_comparison_conformance" sigmoid_blockers);
@@ -1902,7 +1917,7 @@ let check_activation_profile_gates () =
      check
        "sigmoid edge records exp gate"
        (List.mem
-          "native_exp_input_must_be_finite_and_nonpositive"
+          "protocol_exp_input_must_be_finite_and_nonpositive"
           (string_list_value "edge_value_policy" contract))
    | _ -> failwith "missing sigmoid profile contract");
   let softplus_gate = profile_gate "SOFTPLUS_FP" in
@@ -1910,11 +1925,11 @@ let check_activation_profile_gates () =
     string_list_value "consensus_blocker_codes" softplus_gate
   in
   check
-    "softplus host exp blocker"
-    (List.mem "host_fp_exp" softplus_blockers);
+    "softplus protocol exp blocker"
+    (List.mem "protocol_owned_exp_conformance" softplus_blockers);
   check
-    "softplus host log1p blocker"
-    (List.mem "host_fp_log1p" softplus_blockers);
+    "softplus protocol log1p blocker"
+    (List.mem "protocol_owned_log1p_conformance" softplus_blockers);
   check
     "softplus add blocker"
     (List.mem "fp64_add_conformance" softplus_blockers);
@@ -1939,7 +1954,7 @@ let check_activation_profile_gates () =
      check
        "softplus edge records log1p gate"
        (List.mem
-          "native_log1p_input_must_be_finite_and_nonnegative"
+          "protocol_log1p_input_must_be_finite_and_nonnegative"
           (string_list_value "edge_value_policy" contract))
    | _ -> failwith "missing softplus profile contract");
   let silu_gate = profile_gate "SILU_FP" in
@@ -1947,8 +1962,8 @@ let check_activation_profile_gates () =
     string_list_value "consensus_blocker_codes" silu_gate
   in
   check
-    "silu host exp blocker"
-    (List.mem "host_fp_exp" silu_blockers);
+    "silu protocol exp blocker"
+    (List.mem "protocol_owned_exp_conformance" silu_blockers);
   check
     "silu multiply blocker"
     (List.mem "fp64_multiply_conformance" silu_blockers);
@@ -1965,7 +1980,7 @@ let check_activation_profile_gates () =
      check
        "silu edge records exp gate"
        (List.mem
-          "reuse_sigmoid_nonpositive_exp_gate"
+          "reuse_sigmoid_protocol_exp_gate"
           (string_list_value "edge_value_policy" contract))
    | _ -> failwith "missing silu profile contract")
 

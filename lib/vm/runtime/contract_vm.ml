@@ -1115,27 +1115,19 @@ let fp64_positive_bits =
 let fp64_inverse_sqrt_bits =
   Inference_fp64.inverse_sqrt
 
-let host_fp64_exp_nonpositive_bits bits =
-  match Inference_fp64.compare bits 0L with
-  | Some cmp when cmp <= 0 ->
-    let input = Int64.float_of_bits bits in
-    let output = exp input in
-    if finite_fp64 input && finite_fp64 output then
-      Some (Int64.bits_of_float output)
-    else None
-  | _ -> None
-
 let fp64_sigmoid_bits bits =
   match Inference_fp64.compare bits 0L with
   | Some cmp when cmp >= 0 ->
-    (match host_fp64_exp_nonpositive_bits (Inference_fp64.negate bits) with
+    (* sigmoid(x) = 1 / (1 + exp(-x)) for x >= 0; exp(-x) is protocol-owned. *)
+    (match Inference_fp64.exp_nonpositive (Inference_fp64.negate bits) with
      | Some exp_bits ->
        (match Inference_fp64.add fp64_one_bits exp_bits with
         | Some denom -> Inference_fp64.div fp64_one_bits denom
         | None -> None)
      | None -> None)
   | Some _ ->
-    (match host_fp64_exp_nonpositive_bits bits with
+    (* sigmoid(x) = exp(x) / (1 + exp(x)) for x < 0; exp(x) is protocol-owned. *)
+    (match Inference_fp64.exp_nonpositive bits with
      | Some exp_bits ->
        (match Inference_fp64.add fp64_one_bits exp_bits with
         | Some denom -> Inference_fp64.div exp_bits denom
@@ -1148,28 +1140,20 @@ let fp64_silu_bits bits =
   | Some sigmoid -> Inference_fp64.mul bits sigmoid
   | None -> None
 
-let host_fp64_log1p_nonnegative_bits bits =
-  match Inference_fp64.compare bits 0L with
-  | Some cmp when cmp >= 0 ->
-    let input = Int64.float_of_bits bits in
-    let output = log1p input in
-    if finite_fp64 input && finite_fp64 output then
-      Some (Int64.bits_of_float output)
-    else None
-  | _ -> None
-
 let fp64_softplus_bits bits =
   match Inference_fp64.compare bits 0L with
   | Some cmp when cmp > 0 ->
-    (match host_fp64_exp_nonpositive_bits (Inference_fp64.negate bits) with
+    (* softplus(x) = x + log1p(exp(-x)) for x > 0; both halves protocol-owned. *)
+    (match Inference_fp64.exp_nonpositive (Inference_fp64.negate bits) with
      | Some exp_bits ->
-       (match host_fp64_log1p_nonnegative_bits exp_bits with
+       (match Inference_fp64.log1p_nonnegative exp_bits with
         | Some tail_bits -> Inference_fp64.add bits tail_bits
         | None -> None)
      | None -> None)
   | Some _ ->
-    (match host_fp64_exp_nonpositive_bits bits with
-     | Some exp_bits -> host_fp64_log1p_nonnegative_bits exp_bits
+    (* softplus(x) = log1p(exp(x)) for x <= 0. *)
+    (match Inference_fp64.exp_nonpositive bits with
+     | Some exp_bits -> Inference_fp64.log1p_nonnegative exp_bits
      | None -> None)
   | None -> None
 

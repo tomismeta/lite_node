@@ -581,7 +581,8 @@ let blocker_class = function
   | "fp64_reduction_conformance"
   | "fp64_sqrt_conformance"
   | "fp64_subtract_conformance"
-  | "protocol_owned_exp_conformance" ->
+  | "protocol_owned_exp_conformance"
+  | "protocol_owned_log1p_conformance" ->
     "software_fp64_conformance"
   | "accumulation_order"
   | "kernel_accumulation_order"
@@ -917,6 +918,42 @@ let of_name = function
         "pin head mapping, decay order, beta application, state update order, aliasing, effort, and atomic writeback policy";
       ];
     }
+  | "deterministic-fp64-sigmoid" as name ->
+    Ok {
+      name;
+      consensus_status = Consensus_candidate;
+      summary =
+        "deterministic finite binary64 sigmoid profile with protocol-owned exp and division (SIGMOID_FP no longer uses host libm)";
+      required_actions = [
+        "bind the numerical profile root in the model or request authority";
+        "preserve protocol-owned exp, branch split, one-plus denominator, and reciprocal division from dual-platform matrix evidence";
+        "pin underflow, overflow, signed-zero, effort, and atomic writeback policy";
+      ];
+    }
+  | "deterministic-fp64-silu" as name ->
+    Ok {
+      name;
+      consensus_status = Consensus_candidate;
+      summary =
+        "deterministic finite binary64 SiLU profile composing sigmoid then multiply (SILU_FP no longer uses host libm)";
+      required_actions = [
+        "bind the numerical profile root in the model or request authority";
+        "preserve protocol-owned sigmoid composition order and output multiply from dual-platform matrix evidence";
+        "pin underflow, overflow, signed-zero, effort, and atomic writeback policy";
+      ];
+    }
+  | "deterministic-fp64-softplus" as name ->
+    Ok {
+      name;
+      consensus_status = Consensus_candidate;
+      summary =
+        "deterministic finite binary64 softplus profile with protocol-owned exp and log1p (SOFTPLUS_FP no longer uses host libm)";
+      required_actions = [
+        "bind the numerical profile root in the model or request authority";
+        "preserve protocol-owned nonpositive exp, artanh-series log1p, branch split, and add from dual-platform matrix evidence";
+        "pin underflow, overflow, signed-zero, effort, and atomic writeback policy";
+      ];
+    }
   | "deterministic-q1-g128-fp64-linear" as name ->
     Ok {
       name;
@@ -1000,9 +1037,9 @@ let current_runtime_profile_entries = [
   "LOAD_F32_LE_FP", "byte-ingress-f32-bits";
   "LOAD_F64_LE_FP", "byte-ingress-f64-bits";
   "LINEAR_Q1_G128_FP", "deterministic-q1-g128-fp64-linear";
-  "SIGMOID_FP", "host-fp-exp-local-candidate";
-  "SOFTPLUS_FP", "host-fp-exp-local-candidate";
-  "SILU_FP", "host-fp-exp-local-candidate";
+  "SIGMOID_FP", "deterministic-fp64-sigmoid";
+  "SOFTPLUS_FP", "deterministic-fp64-softplus";
+  "SILU_FP", "deterministic-fp64-silu";
   "CAUSAL_DEPTHWISE_CONV1D_FP", "deterministic-fp64-accumulation";
   "GATED_DELTA_RULE_FP", "deterministic-fp64-gated-delta";
   "RMSNORM_FP_EPS", "deterministic-fp64-rmsnorm";
@@ -1097,24 +1134,29 @@ let local_semantics ~opcode =
   | "SIGMOID_FP" ->
     [
       "input cells are finite binary64 values and are updated in place";
-      "nonnegative inputs use exp(-x) and negative inputs use exp(x), so native exp only sees finite nonpositive inputs";
+      "nonnegative inputs use protocol exp(-x) and negative inputs use protocol exp(x) on the nonpositive branch";
+      "protocol exp uses Q256 range reduction, checked-in round-to-nearest ln(2), 80 Taylor terms, and deterministic binary64 ties-to-even composition";
       "1.0 + exp and the final ratio use deterministic finite binary64 add/divide";
       "outputs are written only after the complete finite output vector is computed";
+      "no native host math is used";
     ]
   | "SOFTPLUS_FP" ->
     [
       "input cells are finite binary64 values and are updated in place";
-      "positive inputs use exp(-x) and other inputs use exp(x), so native exp only sees finite nonpositive inputs";
+      "positive inputs use protocol exp(-x) and other inputs use protocol exp(x) on the nonpositive branch";
       "log1p receives finite nonnegative inputs produced by the exp branch";
+      "protocol log1p uses the artanh series 2*sum u^(2k+1)/(2k+1) with u = t/(2+t) in Q256 fixed point";
       "positive-branch x + log1p(exp(-x)) uses deterministic finite binary64 addition";
       "outputs are written only after the complete finite output vector is computed";
+      "no native host math is used";
     ]
   | "SILU_FP" ->
     [
       "input cells are finite binary64 values and are updated in place";
-      "SiLU reuses the SIGMOID_FP sign branch and nonpositive native exp-domain gate";
+      "SiLU reuses the SIGMOID_FP sign branch and protocol exp gate";
       "x * sigmoid(x) uses deterministic finite binary64 multiplication";
       "outputs are written only after the complete finite output vector is computed";
+      "no native host math is used";
     ]
   | "ELEMWISE_MUL_FP" ->
     [
@@ -1237,16 +1279,17 @@ let consensus_obligations ~opcode =
     ]
   | "SIGMOID_FP" ->
     [
-      "replace native binary64 exp with protocol-owned deterministic exp behavior";
-      "pin deterministic sign branch and nonpositive exp-domain gate";
-      "qualify deterministic binary64 addition and division";
+      "bind the deterministic sigmoid profile root before consensus admission";
+      "preserve protocol-owned deterministic exp on the nonpositive branch";
+      "qualify deterministic binary64 one-plus addition and reciprocal division";
       "pin saturation, signed-zero, subnormal, overflow, and non-finite behavior";
       "define in-place writeback atomicity and effort";
       "pass independent cross-platform conformance for sigmoid edge vectors";
     ]
   | "SOFTPLUS_FP" ->
     [
-      "replace native binary64 exp and log1p with protocol-owned deterministic exp/log1p behavior";
+      "bind the deterministic softplus profile root before consensus admission";
+      "preserve protocol-owned deterministic exp and artanh-series log1p";
       "pin deterministic positive/nonpositive branch boundary and nonpositive exp-domain gate";
       "qualify deterministic binary64 positive-branch addition";
       "pin signed-zero, subnormal, overflow, and non-finite behavior";
@@ -1255,12 +1298,12 @@ let consensus_obligations ~opcode =
     ]
   | "SILU_FP" ->
     [
-      "replace native binary64 exp with protocol-owned deterministic exp behavior";
-      "pin deterministic sigmoid reuse and nonpositive exp-domain gate";
-      "qualify deterministic binary64 addition, division, and multiplication";
-      "pin signed-zero, subnormal, overflow, and non-finite behavior";
+      "bind the deterministic silu profile root before consensus admission";
+      "preserve protocol-owned deterministic exp and sigmoid composition order";
+      "qualify deterministic binary64 output multiplication";
+      "pin saturation, signed-zero, subnormal, overflow, and non-finite behavior";
       "define in-place writeback atomicity and effort";
-      "pass independent cross-platform conformance for SiLU edge vectors";
+      "pass independent cross-platform conformance for silu edge vectors";
     ]
   | "ELEMWISE_MUL_FP" ->
     [
@@ -1390,7 +1433,7 @@ let consensus_blocker_codes ~opcode =
   | "SIGMOID_FP" ->
     [
       "fp64_comparison_conformance";
-      "host_fp_exp";
+      "protocol_owned_exp_conformance";
       "fp64_add_conformance";
       "fp64_divide_conformance";
       "activation_branch_policy";
@@ -1402,8 +1445,8 @@ let consensus_blocker_codes ~opcode =
   | "SOFTPLUS_FP" ->
     [
       "fp64_comparison_conformance";
-      "host_fp_exp";
-      "host_fp_log1p";
+      "protocol_owned_exp_conformance";
+      "protocol_owned_log1p_conformance";
       "fp64_add_conformance";
       "activation_branch_policy";
       "signed_zero_subnormal_policy";
@@ -1414,7 +1457,7 @@ let consensus_blocker_codes ~opcode =
   | "SILU_FP" ->
     [
       "fp64_comparison_conformance";
-      "host_fp_exp";
+      "protocol_owned_exp_conformance";
       "fp64_add_conformance";
       "fp64_divide_conformance";
       "fp64_multiply_conformance";
@@ -1806,12 +1849,12 @@ let arithmetic_domain ~profile ~opcode =
     "deterministic-binary64-compare-shift-protocol-exp-sum-divide"
   | "deterministic-fp64-gated-delta", "GATED_DELTA_RULE_FP" ->
     "deterministic-binary64-nonpositive-protocol-exp-recurrence-sqrt-divide"
-  | "host-fp-exp-local-candidate", "SIGMOID_FP" ->
-    "deterministic-binary64-sigmoid-nonpositive-exp-gate-host-exp"
-  | "host-fp-exp-local-candidate", "SOFTPLUS_FP" ->
-    "deterministic-binary64-softplus-nonpositive-exp-gate-host-exp-log1p"
-  | "host-fp-exp-local-candidate", "SILU_FP" ->
-    "deterministic-binary64-silu-nonpositive-exp-gate-host-exp"
+  | "deterministic-fp64-sigmoid", "SIGMOID_FP" ->
+    "deterministic-binary64-protocol-exp-one-plus-divide"
+  | "deterministic-fp64-softplus", "SOFTPLUS_FP" ->
+    "deterministic-binary64-protocol-exp-artanh-series-log1p-add"
+  | "deterministic-fp64-silu", "SILU_FP" ->
+    "deterministic-binary64-protocol-exp-one-plus-divide-multiply"
   | "host-fp-local-candidate", "ARGMAX_FP" ->
     "deterministic-binary64-comparison"
   | "deterministic-fp64-comparison", "ARGMAX_FP" ->
@@ -1840,11 +1883,12 @@ let rounding_mode ~profile ~opcode =
     "deterministic-binary64-roundTiesToEven-with-protocol-exp"
   | "deterministic-fp64-softmax", "SOFTMAX_FP" ->
     "deterministic-binary64-roundTiesToEven-with-protocol-exp"
-  | ( "host-fp-exp-local-candidate",
-      ( "SIGMOID_FP"
-      | "SOFTPLUS_FP"
-      | "SILU_FP" ) ) ->
-    "deterministic-binary64-roundTiesToEven-with-host-math"
+  | "deterministic-fp64-sigmoid", "SIGMOID_FP" ->
+    "deterministic-binary64-roundTiesToEven-with-protocol-exp"
+  | "deterministic-fp64-softplus", "SOFTPLUS_FP" ->
+    "deterministic-binary64-roundTiesToEven-with-protocol-exp-log1p"
+  | "deterministic-fp64-silu", "SILU_FP" ->
+    "deterministic-binary64-roundTiesToEven-with-protocol-exp"
   | ( "deterministic-fp64-elementwise",
       ( "ELEMWISE_MUL_FP" | "RESIDUAL_ADD_FP" ) ) ->
     "deterministic-binary64-roundTiesToEven"
@@ -1925,7 +1969,7 @@ let operation_sequence ~opcode =
       "snapshot_input";
       "select_exp_branch_by_deterministic_sign_compare";
       "check_exp_input_nonpositive_deterministic";
-      "compute_exp_host";
+      "compute_exp_protocol_q256";
       "add_one_plus_exp_deterministic";
       "divide_ratio_deterministic";
       "finite_output_check";
@@ -1936,9 +1980,9 @@ let operation_sequence ~opcode =
       "snapshot_input";
       "select_positive_or_nonpositive_branch_deterministic";
       "check_exp_input_nonpositive_deterministic";
-      "compute_exp_host";
+      "compute_exp_protocol_q256";
       "check_log1p_input_nonnegative_deterministic";
-      "compute_log1p_host";
+      "compute_log1p_protocol_artanh_series";
       "add_positive_branch_tail_deterministic";
       "finite_output_check";
       "atomic_output_writeback";
@@ -2049,22 +2093,22 @@ let edge_value_policy ~opcode =
   | "SIGMOID_FP" ->
     [
       "reject_missing_or_nonfinite_operands";
-      "native_exp_input_must_be_finite_and_nonpositive";
+      "protocol_exp_input_must_be_finite_and_nonpositive";
       "reject_nonfinite_output";
       "preserve_destination_on_reject";
     ]
   | "SOFTPLUS_FP" ->
     [
       "reject_missing_or_nonfinite_operands";
-      "native_exp_input_must_be_finite_and_nonpositive";
-      "native_log1p_input_must_be_finite_and_nonnegative";
+      "protocol_exp_input_must_be_finite_and_nonpositive";
+      "protocol_log1p_input_must_be_finite_and_nonnegative";
       "reject_nonfinite_output";
       "preserve_destination_on_reject";
     ]
   | "SILU_FP" ->
     [
       "reject_missing_or_nonfinite_operands";
-      "reuse_sigmoid_nonpositive_exp_gate";
+      "reuse_sigmoid_protocol_exp_gate";
       "reject_nonfinite_output";
       "preserve_destination_on_reject";
     ]
