@@ -160,3 +160,8 @@
  (name q1_native_linear_test)
  (modules q1_native_linear_test)
  (libraries octra_vm native_math))
+
+(test
+ (name native_fp64_test)
+ (modules native_fp64_test)
+ (libraries octra_vm native_math))

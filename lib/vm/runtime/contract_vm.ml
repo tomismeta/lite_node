@@ -1118,6 +1118,71 @@ let fp64_positive_bits =
 let q1_native_enabled =
   lazy (Sys.getenv_opt "OCTRA_Q1_SCALAR" = None)
 
+(* Native Q256 fixed-point transcendental kernels by default;
+   OCTRA_NATIVE_FP64=1 forces the OCaml scalar path. The kernels are
+   verified bit-exact (test/native_fp64_test.ml). *)
+let fp64_native_enabled =
+  lazy (Sys.getenv_opt "OCTRA_NATIVE_FP64" = None)
+
+let exp_nonpositive bits =
+  if Lazy.force fp64_native_enabled then begin
+    let out = Array.make 1 0L in
+    if Native_math.fp64_exp_nonpositive bits out = 0 then Some out.(0)
+    else Inference_fp64.exp_nonpositive bits
+  end
+  else Inference_fp64.exp_nonpositive bits
+
+let log1p_nonnegative bits =
+  if Lazy.force fp64_native_enabled then begin
+    let out = Array.make 1 0L in
+    if Native_math.fp64_log1p_nonnegative bits out = 0 then Some out.(0)
+    else Inference_fp64.log1p_nonnegative bits
+  end
+  else Inference_fp64.log1p_nonnegative bits
+
+let rope_pair_sin_cos position base_bits i rot_dim =
+  if Lazy.force fp64_native_enabled then begin
+    let out = Array.make 2 0L in
+    if
+      Native_math.fp64_rope_pair_sin_cos position base_bits i rot_dim out
+      = 0
+    then Some (out.(0), out.(1))
+    else begin
+      match Inference_fp64.ln_positive_fixed base_bits with
+      | Some ln_fixed ->
+        let exponent_ratio =
+          Z.div (Z.mul (Z.of_int (2 * i)) ln_fixed) (Z.of_int rot_dim)
+        in
+        (match Inference_fp64.rope_theta_fixed position ln_fixed exponent_ratio with
+         | Some theta_fixed ->
+           (match Inference_fp64.fixed_to_bits theta_fixed with
+            | Some theta_bits ->
+              (match Inference_fp64.sin_cos theta_bits with
+               | Some s, Some c -> Some (s, c)
+               | _ -> None)
+            | None -> None)
+         | None -> None)
+      | None -> None
+    end
+  end
+  else begin
+    match Inference_fp64.ln_positive_fixed base_bits with
+    | Some ln_fixed ->
+      let exponent_ratio =
+        Z.div (Z.mul (Z.of_int (2 * i)) ln_fixed) (Z.of_int rot_dim)
+      in
+      (match Inference_fp64.rope_theta_fixed position ln_fixed exponent_ratio with
+       | Some theta_fixed ->
+         (match Inference_fp64.fixed_to_bits theta_fixed with
+          | Some theta_bits ->
+            (match Inference_fp64.sin_cos theta_bits with
+             | Some s, Some c -> Some (s, c)
+             | _ -> None)
+          | None -> None)
+       | None -> None)
+    | None -> None
+  end
+
 let fp64_inverse_sqrt_bits =
   Inference_fp64.inverse_sqrt
 
@@ -1125,7 +1190,7 @@ let fp64_sigmoid_bits bits =
   match Inference_fp64.compare bits 0L with
   | Some cmp when cmp >= 0 ->
     (* sigmoid(x) = 1 / (1 + exp(-x)) for x >= 0; exp(-x) is protocol-owned. *)
-    (match Inference_fp64.exp_nonpositive (Inference_fp64.negate bits) with
+    (match exp_nonpositive (Inference_fp64.negate bits) with
      | Some exp_bits ->
        (match Inference_fp64.add fp64_one_bits exp_bits with
         | Some denom -> Inference_fp64.div fp64_one_bits denom
@@ -1133,7 +1198,7 @@ let fp64_sigmoid_bits bits =
      | None -> None)
   | Some _ ->
     (* sigmoid(x) = exp(x) / (1 + exp(x)) for x < 0; exp(x) is protocol-owned. *)
-    (match Inference_fp64.exp_nonpositive bits with
+    (match exp_nonpositive bits with
      | Some exp_bits ->
        (match Inference_fp64.add fp64_one_bits exp_bits with
         | Some denom -> Inference_fp64.div exp_bits denom
@@ -1150,16 +1215,16 @@ let fp64_softplus_bits bits =
   match Inference_fp64.compare bits 0L with
   | Some cmp when cmp > 0 ->
     (* softplus(x) = x + log1p(exp(-x)) for x > 0; both halves protocol-owned. *)
-    (match Inference_fp64.exp_nonpositive (Inference_fp64.negate bits) with
+    (match exp_nonpositive (Inference_fp64.negate bits) with
      | Some exp_bits ->
-       (match Inference_fp64.log1p_nonnegative exp_bits with
+       (match log1p_nonnegative exp_bits with
         | Some tail_bits -> Inference_fp64.add bits tail_bits
         | None -> None)
      | None -> None)
   | Some _ ->
     (* softplus(x) = log1p(exp(x)) for x <= 0. *)
-    (match Inference_fp64.exp_nonpositive bits with
-     | Some exp_bits -> Inference_fp64.log1p_nonnegative exp_bits
+    (match exp_nonpositive bits with
+     | Some exp_bits -> log1p_nonnegative exp_bits
      | None -> None)
   | None -> None
 
@@ -2686,7 +2751,7 @@ let exec_one st op =
                        in
                        let decay_bits =
                          match
-                          Inference_fp64.exp_nonpositive decay_input_bits
+                          exp_nonpositive decay_input_bits
                          with
                          | Some decay_bits -> decay_bits
                          | None -> ok := false; 0L
@@ -3087,27 +3152,12 @@ let exec_one st op =
             | Some input_values, Some positions ->
               let output = Array.copy input_values in
               let ok = ref true in
-              (match Inference_fp64.ln_positive_fixed base_bits with
-               | Some base_ln_fixed ->
-                 for head = 0 to heads - 1 do
+              begin
+                for head = 0 to heads - 1 do
                    let base_addr = head * head_dim in
                    for i = 0 to pairs - 1 do
-                     let exponent_ratio =
-                       Z.div
-                         (Z.mul (Z.of_int (2 * i)) base_ln_fixed)
-                         (Z.of_int rot_dim)
-                     in
-                     (match
-                        Inference_fp64.rope_theta_fixed
-                          positions.(i)
-                          base_ln_fixed
-                          exponent_ratio
-                      with
-                      | Some theta_fixed ->
-                        (match Inference_fp64.fixed_to_bits theta_fixed with
-                         | Some theta_bits ->
-                           (match Inference_fp64.sin_cos theta_bits with
-                            | Some s, Some c ->
+                     (match rope_pair_sin_cos positions.(i) base_bits i rot_dim with
+                      | Some (s, c) ->
                               let left_index = base_addr + i in
                               let right_index = base_addr + i + pairs in
                               let left =
@@ -3130,21 +3180,13 @@ let exec_one st op =
                                   with
                                   | Some out_left, Some out_right ->
                                     Array.unsafe_set output left_index out_left;
-                                    Array.unsafe_set output right_index out_right;
-                                    if
-                                      not
-                                        (Inference_fp64.finite theta_bits
-                                        && Inference_fp64.finite c
-                                        && Inference_fp64.finite s)
-                                    then ok := false
+                                    Array.unsafe_set output right_index out_right
                                   | _ -> ok := false)
                                | _ -> ok := false)
                             | _ -> ok := false)
-                         | None -> ok := false)
-                      | None -> ok := false)
                    done
                  done
-               | None -> ok := false);
+              end;
               if not !ok || not (Array.for_all Inference_fp64.finite output) then
                 revert st
               else begin
@@ -3318,7 +3360,7 @@ let exec_one st op =
               | Some shifted_bits ->
                 (match Inference_fp64.compare shifted_bits 0L with
                  | Some cmp when cmp <= 0 ->
-                   (match Inference_fp64.exp_nonpositive shifted_bits with
+                   (match exp_nonpositive shifted_bits with
                     | Some value_bits ->
                       Array.unsafe_set exps index value_bits;
                       (match Inference_fp64.add !sum_exp_bits value_bits with

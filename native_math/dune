@@ -2,7 +2,7 @@
  (name native_math)
  (foreign_stubs
   (language cxx)
-  (names q1_linear)
+  (names q1_linear fp64_fixed)
   (flags (:include flags.sexp)))
  (c_library_flags (:include clib_flags.sexp)))
 
