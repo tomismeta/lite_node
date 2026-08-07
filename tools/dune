@@ -33,17 +33,5 @@
  (modules semroot)
  (libraries octra_vm))
 
-(executable
- (name print_p0_catalog_root)
- (modules print_p0_catalog_root)
- (libraries octra_vm yojson))
 
-(executable
- (name print_p0_worklist)
- (modules print_p0_worklist)
- (libraries octra_vm yojson))
 
-(executable
- (name print_runtime_catalog_root)
- (modules print_runtime_catalog_root)
- (libraries octra_vm yojson))
