@@ -350,6 +350,9 @@ let vm_semantics_contract_json ~opcode =
           `String "outputs are stored as binary64 bit patterns in addr order";
           `String "the opcode does not mutate session ABI registers";
         ];
+        "consensus_note",
+        `String
+          "deterministic finite binary64 L2Norm is consensus_ready on deterministic-fp64-l2norm after dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
         "effort_policy",
         `List [
           `String "opcode base effort is 40";
@@ -490,6 +493,43 @@ let vm_semantics_contract_json ~opcode =
         `List [
           `String "opcode base effort is 200";
           `String "dynamic effort is 4 * timesteps * v_heads * value_dim * key_dim + 2 * timesteps * v_heads * value_dim + timesteps * v_heads";
+          `String "program effort also includes surrounding VM instructions such as STOP";
+        ];
+      ])
+  | "LOAD_F32_LE_FP" ->
+    Some
+      (`Assoc [
+        "schema", `String "octra.inference.vm-semantics.v1";
+        "opcode", `String opcode;
+        "bytecode", `String "0x8A";
+        "signature", `String "LOAD_F32_LE_FP(dst, src, offset, count)";
+        "register_roles",
+        `List [
+          `String "dst: destination base cell";
+          `String "src: immutable little-endian f32 source bytes";
+          `String "offset: byte offset into src";
+          `String "count: number of f32 values to decode into binary64 cells";
+        ];
+        "memory_units",
+        `List [
+          `String "source is immutable little-endian f32 octets";
+          `String "destination stores one binary64 bit pattern per VM cell";
+        ];
+        "decode_policy",
+        `List [
+          `String "decode count little-endian binary32 values from src[offset..]";
+          `String "widen each finite f32 to an exact binary64 bit pattern without host float dual-write";
+          `String "reject non-finite (NaN/Inf) values before writeback";
+          `String "write destination cells only after every source value decodes as finite";
+          `String "destination write uses finite bit-cell storage (mem_set_fp64_bits) without host float dual-write";
+        ];
+        "consensus_note",
+        `String
+          "bits-only f32→f64 bit-cell ingress is consensus_ready on byte-ingress-f32-bits after dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
+        "effort_policy",
+        `List [
+          `String "opcode base effort is 30";
+          `String "dynamic effort is count";
           `String "program effort also includes surrounding VM instructions such as STOP";
         ];
       ])

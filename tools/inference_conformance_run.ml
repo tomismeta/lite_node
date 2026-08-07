@@ -112,7 +112,7 @@ let opcode_selected opcode =
 
 let spine_matrix_opcodes =
   Template.p0_opcodes
-  @ ["LOAD_F64_LE_FP"; "ARGMAX_FP"]
+  @ ["LOAD_F64_LE_FP"; "ARGMAX_FP"; "LOAD_F32_LE_FP"]
 
 let validate_selected_opcodes () =
   List.iter
@@ -2626,6 +2626,21 @@ let apply_mutation state registers values inputs mutation =
         | None ->
           set_f64_cell_bits state input.base (z_field "value_bits" fields);
           `Executed)
+     | "replace_first_f32_input_cell" ->
+       let input = find_input target inputs in
+       (match input.raw_register with
+        | Some reg ->
+          (* LOAD_F32_LE_FP ingress: mutate first 4 little-endian source octets. *)
+          let bits = Z.to_int (z_field "value_bits" fields) land 0xffffffff in
+          let raw = Bytes.create 4 in
+          Bytes.set raw 0 (Char.chr (bits land 0xff));
+          Bytes.set raw 1 (Char.chr ((bits lsr 8) land 0xff));
+          Bytes.set raw 2 (Char.chr ((bits lsr 16) land 0xff));
+          Bytes.set raw 3 (Char.chr ((bits lsr 24) land 0xff));
+          replace_raw_prefix state reg (Bytes.to_string raw);
+          `Executed
+        | None ->
+          fail "replace_first_f32_input_cell requires raw_register source octets")
      | "replace_all_score_cells" ->
        let input = find_input target inputs in
        let cells =
@@ -3017,6 +3032,13 @@ let op_load_f64 registers =
      reg_for "offset" registers,
      reg_for "count" registers)
 
+let op_load_f32 registers =
+  VM.LOAD_F32_LE_FP
+    (reg_for "dst" registers,
+     reg_for "src" registers,
+     reg_for "offset" registers,
+     reg_for "count" registers)
+
 let op_argmax registers =
   VM.ARGMAX_FP
     (reg_for "dest" registers,
@@ -3047,6 +3069,7 @@ let op_for opcode registers =
   | "L2NORM_FP" -> op_l2norm registers
   | "SOFTMAX_FP" -> op_softmax registers
   | "LOAD_F64_LE_FP" -> op_load_f64 registers
+  | "LOAD_F32_LE_FP" -> op_load_f32 registers
   | "ARGMAX_FP" -> op_argmax registers
   | "GATED_DELTA_RULE_FP" -> op_gated_delta registers
   | value -> fail ("unsupported opcode: " ^ value)
@@ -3057,6 +3080,7 @@ let opcode_name = function
   | VM.L2NORM_FP _ -> "L2NORM_FP"
   | VM.SOFTMAX_FP _ -> "SOFTMAX_FP"
   | VM.LOAD_F64_LE_FP _ -> "LOAD_F64_LE_FP"
+  | VM.LOAD_F32_LE_FP _ -> "LOAD_F32_LE_FP"
   | VM.ARGMAX_FP _ -> "ARGMAX_FP"
   | VM.GATED_DELTA_RULE_FP _ -> "GATED_DELTA_RULE_FP"
   | VM.STOP -> "STOP"

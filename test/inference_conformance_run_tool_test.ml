@@ -2518,21 +2518,24 @@ let check_pinned_cross_platform_matrix_is_consumed () =
          let status_counts =
            assoc_json "profile_consensus_status_counts" fields
          in
+         (* Post-spine HEAD: LINEAR_Q1 is consensus_ready on
+            deterministic-q1-g128-fp64-linear; matrix evidence remains required
+            for validator readiness but the static profile is no longer candidate. *)
          check
-           "matrix-backed profile remains static candidate"
-           (int_value "consensus_candidate" status_counts = 1);
+           "matrix-backed profile is static ready"
+           (int_value "consensus_ready" status_counts = 1);
          check
-           "matrix-backed profile is not static ready"
-           (int_value "consensus_ready" status_counts = 0);
+           "matrix-backed profile is not static candidate"
+           (int_value "consensus_candidate" status_counts = 0);
          check
-           "matrix-backed profile is admitted by matrix"
+           "matrix-backed profile admission is consensus_ready"
            (String.equal
               (string_value "profile_admission_status" readiness)
-              "consensus_candidate_admitted_by_cross_platform_matrix")
+              "consensus_ready")
        | _ -> failwith "report must be object")
     | _ -> failwith "seed report must be object")
 
-let check_pinned_matrix_does_not_satisfy_consensus_ready_flag () =
+let check_pinned_matrix_satisfies_consensus_ready_when_profile_ready () =
   with_temp_dir (fun dir ->
     let code, seed_report =
       run_conformance
@@ -2576,22 +2579,23 @@ let check_pinned_matrix_does_not_satisfy_consensus_ready_flag () =
             opcode;
           ]
       in
-      check "consensus-ready flag still exits nonzero" (code = 1);
+      check "consensus-ready flag exits zero when profile is ready" (code = 0);
       (match report with
        | `Assoc fields ->
          let readiness = assoc_json "validator_readiness_gate" fields in
          check
-           "candidate matrix readiness is still accepted"
+           "ready-profile matrix readiness is accepted"
            (String.equal (string_value "status" readiness) "accepted");
          let consensus_ready = assoc_json "consensus_ready_gate" fields in
          check
-           "static consensus-ready gate rejects candidate"
-           (String.equal (string_value "status" consensus_ready) "rejected");
+           "static consensus-ready gate accepts ready profile"
+           (String.equal (string_value "status" consensus_ready) "accepted");
          check
-           "static consensus-ready gate keeps candidate blocker"
-           (List.mem
-              "consensus_candidate_profile_gates"
-              (string_list "blockers" consensus_ready))
+           "static consensus-ready gate has no candidate blocker"
+           (not
+              (List.mem
+                 "consensus_candidate_profile_gates"
+                 (string_list "blockers" consensus_ready)))
        | _ -> failwith "report must be object")
     | _ -> failwith "seed report must be object")
 
@@ -3575,7 +3579,7 @@ let () =
   check_missing_cross_platform_matrix_request_is_actionable ();
   check_matrix_request_seed_reports_are_matrix_inputs ();
   check_pinned_cross_platform_matrix_is_consumed ();
-  check_pinned_matrix_does_not_satisfy_consensus_ready_flag ();
+  check_pinned_matrix_satisfies_consensus_ready_when_profile_ready ();
   check_cross_platform_matrix_without_pin_rejects ();
   check_cross_platform_matrix_sha_mismatch_rejects ();
   check_cross_platform_matrix_schema_mismatch_rejects ();

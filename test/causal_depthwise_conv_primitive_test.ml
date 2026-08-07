@@ -110,15 +110,35 @@ let ssm_kernel =
     "000000000000d03f000000000000e0bf000000000000e83f000000000000f0bf\
      000000000000e03f000000000000d03f"
 
-let ssm_expected =
-  bytes_of_hex
-    "834bbc9259fdc13fc9798a5a7d2ffc3f9ac1f414508dc3bfc3c2431efa6ab2bf\
-     8701bfccaaffb03f86ba54145636d1bfa6d7aae84b2deb3fc635c631a1480040"
-
+(* Host-local SILU fixture bits from another platform's libm are intentionally
+   not pinned: SILU_FP still uses host exp and is local_only / non-consensus.
+   Compose expected silu cells via the same opcode path on this host. *)
 let ssm_conv_expected =
   List.map
     Int64.bits_of_float
     [0.25; 2.0; -0.375; -4.0; 0.125; -1.0; 1.125; 2.25]
+
+let host_local_silu_bits conv_bits =
+  let n = List.length conv_bits in
+  let state =
+    VM.create_state
+      ~limit:1_000_000
+      ~caller:"caller"
+      ~origin:"origin"
+      ~address:"contract"
+      ~value:Z.zero
+      ~storage:(Hashtbl.create 0)
+      ()
+  in
+  List.iteri
+    (fun index bits -> set_f64_bits state (300 + index) bits)
+    conv_bits;
+  set_int_reg state 0 300;
+  set_int_reg state 6 n;
+  check
+    "host-local silu reference run"
+    (VM.run state [|VM.SILU_FP (0, 6); VM.STOP|]);
+  List.init n (fun index -> f64_bits state (300 + index))
 
 let make_conv_state ?(dst = 300) ?(input_base = 100) ?(kernel_base = 200)
     ?(timesteps = 4) ?(channels = 2) ?(width = 3) ?(limit = 1_000_000)
@@ -177,9 +197,12 @@ let check_golden_conv () =
   let state, ok = run_conv ssm_input ssm_kernel conv_code in
   check "conv succeeds" ok;
   check_cells "conv" state 300 ssm_conv_expected;
+  (* Composed SILU is host-local (local_only profile); golden is same-host
+     SILU_FP on the deterministic conv cells — not a cross-platform libm pin. *)
+  let silu_expected = host_local_silu_bits ssm_conv_expected in
   let state, ok = run_conv ssm_input ssm_kernel composed_code in
   check "conv silu succeeds" ok;
-  check_cells "conv silu" state 300 (fixture_bits ssm_expected)
+  check_cells "conv silu" state 300 silu_expected
 
 let f64_bytes values =
   let buffer = Bytes.create (List.length values * 8) in
@@ -562,7 +585,11 @@ let check_session_execution () =
         (output_payload 300 8 state)
     in
     check "session output root" (String.equal result.Execution.output_root expected);
-    check_cells "session local" state 300 (fixture_bits ssm_expected)
+    check_cells
+      "session local"
+      state
+      300
+      (host_local_silu_bits ssm_conv_expected)
   | Error error -> failwith (Execution.error_message error)
 
 let () =

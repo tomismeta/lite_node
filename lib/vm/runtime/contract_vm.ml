@@ -566,29 +566,51 @@ let mem_set_fp64 mem a f =
 let mem_set_fp64_bits mem a bits =
   Hashtbl.replace mem a (VInt (Z.of_int64 bits))
 
-let f32_le_to_fp64 data offset =
-  let bits =
-    Char.code data.[offset]
-    lor (Char.code data.[offset + 1] lsl 8)
-    lor (Char.code data.[offset + 2] lsl 16)
-    lor (Char.code data.[offset + 3] lsl 24)
-  in
-  let sign = if bits land 0x80000000 = 0 then 1.0 else -1.0 in
+let f32_le_bits data offset =
+  Char.code data.[offset]
+  lor (Char.code data.[offset + 1] lsl 8)
+  lor (Char.code data.[offset + 2] lsl 16)
+  lor (Char.code data.[offset + 3] lsl 24)
+
+(* Exact finite f32 → f64 bit-pattern widen (no host float dual-write). *)
+let f32_le_to_fp64_bits data offset =
+  let bits = f32_le_bits data offset in
+  let sign32 = (bits lsr 31) land 1 in
   let exponent = (bits lsr 23) land 0xff in
   let fraction = bits land 0x7fffff in
   if exponent = 0xff then None
   else
-    let value =
-      if exponent = 0 then
-        if fraction = 0 then sign *. 0.0
-        else sign *. ldexp (float_of_int fraction) (-149)
+    let sign64 = Int64.shift_left (Int64.of_int sign32) 63 in
+    if exponent = 0 then
+      if fraction = 0 then
+        Some sign64
       else
-        let significand =
-          1.0 +. (float_of_int fraction /. 8388608.0)
+        (* Subnormal f32 → normalized f64 (exact). *)
+        let rec normalize frac exp =
+          if frac land 0x800000 <> 0 then frac, exp
+          else normalize (frac lsl 1) (exp - 1)
         in
-        sign *. ldexp significand (exponent - 127)
-    in
-    Some value
+        let frac_norm, exp_adj = normalize fraction 1 in
+        let mantissa = (frac_norm land 0x7fffff) lsl 29 in
+        (* unbiased = exp_adj - 127; f64_exp = unbiased + 1023 = exp_adj + 896 *)
+        let exp64 = Int64.of_int (exp_adj + 896) in
+        Some
+          (Int64.logor
+             sign64
+             (Int64.logor
+                (Int64.shift_left exp64 52)
+                (Int64.of_int mantissa)))
+    else
+      (* Normal f32: f64_exp = exp - 127 + 1023 = exp + 896; frac << 29. *)
+      let exp64 = Int64.of_int (exponent + 896) in
+      let mantissa = Int64.shift_left (Int64.of_int fraction) 29 in
+      Some
+        (Int64.logor
+           sign64
+           (Int64.logor (Int64.shift_left exp64 52) mantissa))
+
+let f32_le_to_fp64 data offset =
+  Option.map Int64.float_of_bits (f32_le_to_fp64_bits data offset)
 
 let f64_le_bits data offset =
   let bits = ref 0L in
@@ -2457,17 +2479,18 @@ let exec_one st op =
             && n <= (String.length src - off) / 4 ->
        if not (add_dyn_effort st n) then revert st
        else
-         let decoded = Array.make n 0.0 in
+         (* Bits-only path: finite f32→f64 bit widen, no host-float dual-write. *)
+         let decoded = Array.make n 0L in
          let ok = ref true in
          for i = 0 to n - 1 do
-           match f32_le_to_fp64 src (off + (i * 4)) with
+           match f32_le_to_fp64_bits src (off + (i * 4)) with
            | None -> ok := false
-           | Some value -> decoded.(i) <- value
+           | Some bits -> decoded.(i) <- bits
          done;
          if not !ok then revert st
          else begin
            for i = 0 to n - 1 do
-             mem_set_fp64 st.memory.data (dst + i) decoded.(i)
+             mem_set_fp64_bits st.memory.data (dst + i) decoded.(i)
            done;
            true
        end

@@ -27,7 +27,7 @@ The VM already has three relevant numerical surfaces:
 | --- | --- | --- |
 | Legacy host-float FP | `MATMUL_FP`, `RMSNORM_FP`, `SILU_FP`, `ARGMAX_FP`, `ATTENTION_KV_FP`, `ROPE_APPLY_FP`, `VECDOT_FP` | Classified as `Consensus_unsafe` by opcode policy. These are useful reference points, but they are not the plain inference consensus path. |
 | Existing Q16 fixed point | `SOFTMAX_Q16_INPLACE`, `LAYERNORM_Q16_INPLACE`, `RMSNORM_Q16_INPLACE`, `SILU_Q16_INPLACE`, `ROPE_APPLY_Q16`, `ATTENTION_KV_Q16`, `VECDOT_Q16`, `ARGMAX_Q16` | Classified as `Program_only` and admitted by inference only under `tensor.fixed`. This is the closest existing deterministic math profile. |
-| Inference proof surface | `LOAD_F32_LE_FP`, `LOAD_F64_LE_FP`, `LINEAR_Q1_G128_FP`, `SIGMOID_FP`, `SOFTPLUS_FP`, `SILU_FP`, `CAUSAL_DEPTHWISE_CONV1D_FP`, `GATED_DELTA_RULE_FP`, `RMSNORM_FP_EPS`, `L2NORM_FP`, `ELEMWISE_MUL_FP`, `RESIDUAL_ADD_FP`, `ROPE_APPLY_INDEXED_FP`, `ATTENTION_SCORES_FP`, `SOFTMAX_FP`, `ATTENTION_WEIGHTED_SUM_FP`, `ARGMAX_FP` | Selectively admitted by the inference harness under explicit capabilities. Opcode-scoped spine-ready profiles (`byte-ingress-f64-bits` for LOAD_F64, `deterministic-fp64-rmsnorm` for RMSNORM, `deterministic-q1-g128-fp64-linear`, `deterministic-fp64-comparison`, `deterministic-fp64-gated-delta` for GDN, `deterministic-fp64-softmax` for SOFTMAX) are `consensus_ready` after dual-platform matrix with per-op punitive cases. LOAD_F32 (`byte-ingress-exact`) and L2NORM (`deterministic-fp64-normalization`) remain `consensus_candidate`. Host-trig/host-exp remain local-only. |
+| Inference proof surface | `LOAD_F32_LE_FP`, `LOAD_F64_LE_FP`, `LINEAR_Q1_G128_FP`, `SIGMOID_FP`, `SOFTPLUS_FP`, `SILU_FP`, `CAUSAL_DEPTHWISE_CONV1D_FP`, `GATED_DELTA_RULE_FP`, `RMSNORM_FP_EPS`, `L2NORM_FP`, `ELEMWISE_MUL_FP`, `RESIDUAL_ADD_FP`, `ROPE_APPLY_INDEXED_FP`, `ATTENTION_SCORES_FP`, `SOFTMAX_FP`, `ATTENTION_WEIGHTED_SUM_FP`, `ARGMAX_FP` | Selectively admitted by the inference harness under explicit capabilities. Opcode-scoped ready profiles (`byte-ingress-f32-bits` for LOAD_F32, `byte-ingress-f64-bits` for LOAD_F64, `deterministic-fp64-rmsnorm` for RMSNORM, `deterministic-fp64-l2norm` for L2NORM, `deterministic-q1-g128-fp64-linear`, `deterministic-fp64-comparison`, `deterministic-fp64-gated-delta` for GDN, `deterministic-fp64-softmax` for SOFTMAX) are `consensus_ready` after dual-platform matrix with per-op punitive cases. Host-trig/host-exp remain local-only. This does not claim S5 continuous, AML/HTTP, RoPE host activations, 409MB devnet model-load, or PVAC chat. |
 
 The existing `host_float_hit` policy mechanism is correct and should remain:
 plain legacy/program admission still identifies host-floating-point opcodes as
@@ -46,9 +46,13 @@ does not prove deterministic math; the profile root must bind the math.
 | `host-fp-local-candidate` | Local and attested-only | Generic fallback for proof/demo primitives still relying on native host math. This profile is useful for fast engineering but not validator-portable. |
 | `host-fp-exp-local-candidate` | Local and attested-only | Current proof/demo path for primitives still relying on native `exp`/`log1p`, including softmax, gated delta, sigmoid, softplus, and SiLU. This profile is useful for fast engineering but not validator-portable. |
 | `host-fp-trig-local-candidate` | Local and attested-only | Current proof/demo path for indexed rotary primitives still relying on native exponentiation, `cos`, and `sin`. This profile is useful for fast engineering but not validator-portable. |
-| `byte-ingress-exact` | Consensus candidate | Exact little-endian f32/f64 byte loading from authenticated ranges. |
-| `deterministic-q1-g128-fp64-linear` | Consensus candidate | Q1-G128 projection with exact binary16 scale decode, pinned sign mapping, and deterministic binary64 accumulation order. |
-| `deterministic-fp64-normalization` | Consensus candidate | RMSNorm/L2Norm finite binary64 reductions with explicit epsilon and deterministic sqrt/divide/output multiply policy. |
+| `byte-ingress-exact` | Legacy shared name (prefer scoped profiles) | Historical shared little-endian float ingress name; new bindings use opcode-scoped `byte-ingress-f32-bits` / `byte-ingress-f64-bits`. |
+| `byte-ingress-f32-bits` | Consensus ready | Little-endian f32→f64 bit-cell ingress for `LOAD_F32_LE_FP` (no host-float dual-write); dual-platform matrix with punitive cases sealed. |
+| `byte-ingress-f64-bits` | Consensus ready | Little-endian f64 bit-cell ingress for `LOAD_F64_LE_FP`; dual-platform matrix with punitive cases sealed. |
+| `deterministic-q1-g128-fp64-linear` | Consensus ready | Q1-G128 projection with exact binary16 scale decode, pinned sign mapping, and deterministic binary64 accumulation order. |
+| `deterministic-fp64-normalization` | Legacy shared name (prefer scoped profiles) | Historical shared RMSNorm/L2Norm name; new bindings use `deterministic-fp64-rmsnorm` / `deterministic-fp64-l2norm`. |
+| `deterministic-fp64-rmsnorm` | Consensus ready | RMSNorm finite binary64 reductions with explicit epsilon and deterministic sqrt/divide/output multiply; dual-platform matrix sealed. |
+| `deterministic-fp64-l2norm` | Consensus ready | L2Norm finite binary64 reductions with explicit epsilon and deterministic sqrt/divide/output multiply; dual-platform matrix sealed. |
 | `deterministic-fp64-elementwise` | Consensus candidate | Elementwise add/multiply over finite binary64 cells with aliasing and atomicity policy. |
 | `deterministic-fp64-accumulation` | Consensus candidate | Finite binary64 multiply/add reductions for attention scores, weighted sums, and causal depthwise convolution. |
 | `q16-exact` | First consensus candidate | Integer-defined fixed-point math using exact Q16 semantics where model quality allows it. |
@@ -84,14 +88,16 @@ kernels.
 
 | Priority | Primitive family | Why first | Required decision |
 | --- | --- | --- | --- |
-| P0 | `LINEAR_Q1_G128_FP` | Runtime hotspot and core compressed projection path. | Specify Q1 block format, fp16 scale decode, sign handling, accumulation order, and binary64 or fixed-point profile. |
-| P0 | `RMSNORM_FP_EPS`, `L2NORM_FP` | Repeated throughout prompt prefill; reductions and `sqrt` now use LiteNode's deterministic finite binary64 core locally. | Bind exact oracle roots and cross-platform conformance before consensus promotion. |
-| P0 | `SOFTMAX_FP` | Attention correctness and token distribution; protocol-owned nonpositive exp path is matrix-qualified on `deterministic-fp64-softmax` (`consensus_ready`). | Keep dual-platform punitive evidence sealed; do not promote LOAD_F32/L2NORM or claim S5/devnet/PVAC from this promote. |
+| P0 | `LINEAR_Q1_G128_FP` | Runtime hotspot and core compressed projection path. | Matrix-qualified on `deterministic-q1-g128-fp64-linear` (`consensus_ready`); keep dual-platform punitive evidence sealed. |
+| P0 | `RMSNORM_FP_EPS` | Repeated throughout prompt prefill; reductions and `sqrt` use deterministic finite binary64. | Matrix-qualified on `deterministic-fp64-rmsnorm` (`consensus_ready`); keep dual-platform punitive evidence sealed. |
+| P0 | `L2NORM_FP` | In-place L2 normalize; reductions and `sqrt` use deterministic finite binary64. | Matrix-qualified on `deterministic-fp64-l2norm` (`consensus_ready`) with dual-platform punitive cases; do not claim S5/devnet/AML/PVAC from this promote. |
+| P0 | `SOFTMAX_FP` | Attention correctness and token distribution; protocol-owned nonpositive exp path is matrix-qualified on `deterministic-fp64-softmax` (`consensus_ready`). | Keep dual-platform punitive evidence sealed; do not claim S5/devnet/PVAC from this promote. |
 | P0 | `GATED_DELTA_RULE_FP` | Stateful recurrence; protocol-owned nonpositive exp and dual output/next-state writeback are matrix-qualified on `deterministic-fp64-gated-delta` (`consensus_ready`). | Keep dual-platform punitive evidence sealed; do not claim S5/devnet model-load or PVAC chat from this promote. |
+| P0 | `LOAD_F32_LE_FP`, `LOAD_F64_LE_FP`, `ARGMAX_FP` | Byte ingress and comparison; LOAD_F32 is bits-only f32→f64 widen without host-float dual-write. | Matrix-qualified on `byte-ingress-f32-bits` / `byte-ingress-f64-bits` / `deterministic-fp64-comparison` (`consensus_ready`); keep dual-platform punitive evidence sealed; no S5/AML/PVAC overclaim. |
 | P1 | `ATTENTION_SCORES_FP`, `ATTENTION_WEIGHTED_SUM_FP` | Attention composition boundary; finite reductions without native exp/trig. | Keep under `deterministic-fp64-accumulation`; bind profile roots and cross-platform conformance before consensus-ready admission. |
 | P1 | `ROPE_APPLY_INDEXED_FP` | Uses trigonometric functions and exponentiation. | Prefer table/indexed deterministic contract over host trig. |
 | P1 | `SIGMOID_FP`, `SOFTPLUS_FP`, `SILU_FP` | Nonlinear activations. | Define deterministic exp/log1p behavior or lower to fixed-point profile. |
-| P2 | `LOAD_F32_LE_FP`, `LOAD_F64_LE_FP`, `ARGMAX_FP`, `ELEMWISE_MUL_FP`, `RESIDUAL_ADD_FP`, `CAUSAL_DEPTHWISE_CONV1D_FP` | Lower mathematical risk or mostly data movement/vector arithmetic. | Keep the existing narrow candidate profiles; still need edge vectors, aliasing rules, failure atomicity, and cross-platform conformance. |
+| P2 | `ELEMWISE_MUL_FP`, `RESIDUAL_ADD_FP`, `CAUSAL_DEPTHWISE_CONV1D_FP` | Lower mathematical risk or mostly vector arithmetic still under candidate profiles. | Keep `deterministic-fp64-elementwise` / `deterministic-fp64-accumulation` candidate; still need edge vectors, aliasing rules, failure atomicity, and cross-platform conformance. |
 
 ## First Qualification Corpus
 
@@ -117,8 +123,9 @@ The practical decision from this corpus is conservative:
 | --- | --- |
 | `q16-exact` viable | immutable range reads; argmax only when ordering preservation is proven |
 | wider fixed point needed | residual add, elementwise multiply, attention weighted sum |
-| deterministic FP64 candidate, still awaiting profile-root/cross-platform proof | Q1 projection, RMSNorm, L2Norm, residual add, elementwise multiply, causal depthwise convolution, attention scores, attention weighted sum |
-| deterministic software transcendental still required | SiLU, sigmoid, softplus, gated delta rule, indexed RoPE, softmax |
+| deterministic FP64 **now matrix-ready** (opcode-scoped profiles) | Q1 projection, RMSNorm, L2Norm, LOAD_F32/LOAD_F64 bit ingress, ARGMAX, Softmax, GDN |
+| deterministic FP64 candidate, still awaiting profile-root/cross-platform proof | residual add, elementwise multiply, causal depthwise convolution, attention scores, attention weighted sum |
+| deterministic software transcendental still required for remaining host paths | SiLU, sigmoid, softplus, indexed RoPE (Softmax/GDN protocol-owned exp is already matrix-ready) |
 
 This means the existing Q16 surface is useful, but it is not the broad answer
 for Bonsai-class inference. The next LiteNode work should prioritize exact
@@ -165,6 +172,25 @@ epsilon of one Q16 unit, which is about `1.53e-5`; that does not exactly encode
 Bonsai's `1e-6` RMSNorm contract without a new explicit-epsilon fixed-point
 semantic.
 
+## Promotion process guard
+
+**Rule:** no `consensus_ready` profile promotion ships while the readiness suite
+is red. Before landing a promote commit, run from the repo root (with opam env
+active):
+
+```bash
+./scripts/pre-promote-consensus-ready.sh
+```
+
+That script executes the readiness-relevant suite (conformance template / run /
+matrix / catalog tools plus numerics primitive tests that gate promote). Exit 0
+is required before flip. Full multi-OS matrix automation is separate; this gate
+only restores local trust that the promote cannot hide behind a red suite.
+
+Host-trig / host-exp activations (`SIGMOID_FP`, `SOFTPLUS_FP`, `SILU_FP`,
+`ROPE_APPLY_INDEXED_FP`) remain `local_only` until protocol math replaces libm.
+Composed host-SILU goldens must not pin foreign-platform libm bits.
+
 ## Minimal Engineering Path
 
 1. Freeze new inference opcodes unless a generated schedule proves there is no
@@ -178,7 +204,9 @@ semantic.
    validator-readiness discussion, so local-only host math cannot hide behind
    matching output roots.
 7. Run conformance on at least Linux x86_64, macOS arm64, and release/debug
-   builds before any validator-readiness claim.
+   builds before any validator-readiness claim. Require
+   `./scripts/pre-promote-consensus-ready.sh` green before any `consensus_ready`
+   flip.
 8. Only after P0 conformance passes, decide whether to optimize FP kernels or
    move more of the path onto Q16/fixed-point semantics.
 

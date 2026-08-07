@@ -1067,8 +1067,8 @@ let check_p0_profile_gate_coverage () =
 let check_inference_profile_surface_coverage () =
   let surface =
     [
-      "LOAD_F32_LE_FP", "byte-ingress-exact", "consensus_candidate",
-      "ec3f31d8a2cc8c4f390c372c6d489e5e3418b544967285e24efbb6aef65cacc2";
+      "LOAD_F32_LE_FP", "byte-ingress-f32-bits", "consensus_ready",
+      "3e90bd2ce93a98d639e7d78274beebb596b1fbc5ee112c91e8581da87434f1c4";
       "LOAD_F64_LE_FP", "byte-ingress-f64-bits", "consensus_ready",
       "4109c53ff1d1e56c15a023f701da288c8c78a0962d7a74491a5924f6342d41f0";
       "LINEAR_Q1_G128_FP", "deterministic-q1-g128-fp64-linear",
@@ -1089,9 +1089,9 @@ let check_inference_profile_surface_coverage () =
       "RMSNORM_FP_EPS", "deterministic-fp64-rmsnorm",
       "consensus_ready",
       "b8f1b4710cb0799b8c59f72314e40be23548f70cfb0a3ba4fb531a24803798f1";
-      "L2NORM_FP", "deterministic-fp64-normalization",
-      "consensus_candidate",
-      "dacd9b51945432a4e025510c67edc28c65706de345c5770c2d0a2da4ab396875";
+      "L2NORM_FP", "deterministic-fp64-l2norm",
+      "consensus_ready",
+      "1b8026e38d749fb7aebb33a75ecf236f295934dcebb3cc937734e4ee2c2f8c26";
       "ELEMWISE_MUL_FP", "deterministic-fp64-elementwise",
       "consensus_candidate",
       "e2d242453af8bc36fb42d0083c97d3cffff38d9ad1c4c364385e52b84cb898d3";
@@ -1136,7 +1136,7 @@ let check_inference_profile_surface_coverage () =
        "p0 profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "6713aa6a4519f9efbe9f78f2a5c2d140a7a4f14ca402fc8a3ab97a57372ad94a");
+	          "823cdc439d2d25c4e0f2c88ea334dfb42e974f240c80d65b5b0e843af0af01b9");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "p0 readiness worklist count" (List.length rows = 5);
@@ -1196,7 +1196,7 @@ let check_inference_profile_surface_coverage () =
        "runtime profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "54129e79df8eff5d20256cca897a4d779845f8ee0ccd9ffb0dc7c03d3fb90c69");
+	          "f09472f111500ed2d7e181120e990cf7f88fdd930eb9d19312a5bb30ce34fa65");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "runtime readiness worklist count" (List.length rows = 17)
@@ -1242,8 +1242,8 @@ let check_inference_profile_surface_coverage () =
      check "surface local-only count" (int_value "local_only" fields = 4);
      check
        "surface consensus-candidate count"
-       (int_value "consensus_candidate" fields = 7);
-     check "surface consensus-ready count" (int_value "consensus_ready" fields = 6);
+       (int_value "consensus_candidate" fields = 5);
+     check "surface consensus-ready count" (int_value "consensus_ready" fields = 8);
      check "surface unknown count" (int_value "unknown" fields = 0)
    | _ -> failwith "surface status counts json must be object");
   (match Profile.profile_root_catalog_json gates with
@@ -1274,7 +1274,7 @@ let check_inference_profile_surface_coverage () =
      | `String root ->
 	       String.equal
 	         root
-		         "54129e79df8eff5d20256cca897a4d779845f8ee0ccd9ffb0dc7c03d3fb90c69"
+		         "f09472f111500ed2d7e181120e990cf7f88fdd930eb9d19312a5bb30ce34fa65"
      | _ -> false);
   check
     "empty profile catalog root"
@@ -1465,7 +1465,7 @@ let check_remaining_p0_profile_obligations () =
       | Ok _ -> failwith (opcode ^ " should reject profile overclaim"))
     [
       "RMSNORM_FP_EPS", "consensus_ready", "deterministic-fp64-rmsnorm";
-      "L2NORM_FP", "consensus_candidate", "deterministic-fp64-normalization";
+      "L2NORM_FP", "consensus_ready", "deterministic-fp64-l2norm";
     ];
   let l2_gate = profile_gate "L2NORM_FP" in
   (match List.assoc_opt "profile_contract" l2_gate with
@@ -2314,8 +2314,8 @@ let check_byte_ingress_profile_gates () =
           | Ok _ -> failwith (opcode ^ " should reject profile " ^ rejected_profile))
         ["host-fp-local-candidate"; "q16-exact"])
     [
-      "LOAD_F32_LE_FP", "byte-ingress-exact", "consensus_candidate",
-      "binary32 values are decoded", "f32 little-endian ingress";
+      "LOAD_F32_LE_FP", "byte-ingress-f32-bits", "consensus_ready",
+      "finite f32→f64 bit widen", "f32 little-endian ingress";
       "LOAD_F64_LE_FP", "byte-ingress-f64-bits", "consensus_ready",
       "bit patterns are copied", "f64 little-endian ingress";
     ]
@@ -2604,8 +2604,38 @@ let check_p0_vm_semantics_contracts () =
        "l2norm semantics pins inverse sqrt"
        (list_contains_substring
           "inverse_sqrt"
-          (string_list_value "arithmetic_policy" semantics))
-   | _ -> failwith "missing l2norm vm semantics contract")
+          (string_list_value "arithmetic_policy" semantics));
+     check
+       "l2norm semantics marks consensus ready"
+       (contains_substring
+          "consensus_ready"
+          (string_value "consensus_note" semantics));
+     check
+       "l2norm semantics no longer claims candidate-only status"
+       (not
+          (contains_substring
+             "remains a consensus candidate"
+             (string_value "consensus_note" semantics)))
+   | _ -> failwith "missing l2norm vm semantics contract");
+  (match Template.vm_semantics_contract_json ~opcode:"LOAD_F32_LE_FP" with
+   | Some (`Assoc semantics) ->
+     check
+       "load f32 semantics pins bits-only writeback"
+       (list_contains_substring
+          "mem_set_fp64_bits"
+          (string_list_value "decode_policy" semantics));
+     check
+       "load f32 semantics marks consensus ready"
+       (contains_substring
+          "consensus_ready"
+          (string_value "consensus_note" semantics));
+     check
+       "load f32 semantics no longer claims candidate-only status"
+       (not
+          (contains_substring
+             "remains a consensus candidate"
+             (string_value "consensus_note" semantics)))
+   | _ -> failwith "missing load f32 vm semantics contract")
 
 let () =
   check_accepts_template ();
