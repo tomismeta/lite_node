@@ -2399,12 +2399,26 @@ let check_matrix_request_seed_reports_are_matrix_inputs () =
     let local_report = Filename.concat dir "local-runner-report.cjson" in
     let remote_report = Filename.concat dir "remote-runner-report.cjson" in
     write_json local_report seed_report;
+    (* The faked remote runner must land on a platform key distinct from the
+       local host; otherwise the matrix sees one platform on Linux/x86_64 and
+       rejects the seed pair. *)
+    let local_machine =
+      match seed_report with
+      | `Assoc fields ->
+        (match assoc_value "platform" fields with
+         | `Assoc platform -> string_value "machine" platform
+         | _ -> failwith "seed report platform must be an object")
+      | _ -> failwith "seed report must be an object"
+    in
+    let remote_machine =
+      if String.equal local_machine "x86_64" then "arm64" else "x86_64"
+    in
     write_json
       remote_report
       (replace_platform_observation
          seed_report
          ~system_name:"Linux"
-         ~machine:"x86_64"
+         ~machine:remote_machine
          ~runner_sha:(hex_root '9'));
     let code, matrix =
       run_matrix
