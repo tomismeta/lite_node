@@ -191,8 +191,10 @@ Host-trig (`ROPE_APPLY_INDEXED_FP`) remains `local_only` until deterministic
 indexed trig replaces libm. The activations (`SIGMOID_FP`, `SOFTPLUS_FP`,
 `SILU_FP`) no longer call host libm: sigmoid/SiLU compose the protocol-owned
 nonpositive exp (Q256 range reduction), and softplus adds a protocol-owned
-artanh-series log1p in Q256 fixed point. The activation profiles are
-`consensus_candidate` pending the dual-platform matrix ceremony. Composed
+artanh-series log1p in Q256 fixed point. The activation profiles
+(`deterministic-fp64-sigmoid`, `deterministic-fp64-softplus`,
+`deterministic-fp64-silu`) are `consensus_ready` after the dual-platform
+matrix with punitive acceptance. Only ROPE remains on host math. Composed
 goldens must not pin foreign-platform libm bits.
 
 ## Minimal Engineering Path

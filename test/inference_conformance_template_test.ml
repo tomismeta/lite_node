@@ -1074,11 +1074,11 @@ let check_inference_profile_surface_coverage () =
       "LINEAR_Q1_G128_FP", "deterministic-q1-g128-fp64-linear",
       "consensus_ready",
       "1247c6e4e8364a774c2585a76a05fadfdf631e9e7562d4949ee5d1b358589367";
-      "SIGMOID_FP", "deterministic-fp64-sigmoid", "consensus_candidate",
+      "SIGMOID_FP", "deterministic-fp64-sigmoid", "consensus_ready",
       "f49ff17137a92773d4173130b982f52d44c84c252dc973d11539697ceacba774";
-      "SOFTPLUS_FP", "deterministic-fp64-softplus", "consensus_candidate",
+      "SOFTPLUS_FP", "deterministic-fp64-softplus", "consensus_ready",
       "b53f54ea31047681a17559cddd8cd1f7a2a623f7562cf9fba16cfeafb8edfeb5";
-      "SILU_FP", "deterministic-fp64-silu", "consensus_candidate",
+      "SILU_FP", "deterministic-fp64-silu", "consensus_ready",
       "1e9da402fbea14ecd54a5ec775a76200bf1ff323315b94384a8e827148b82b98";
       "CAUSAL_DEPTHWISE_CONV1D_FP", "deterministic-fp64-accumulation",
       "consensus_candidate",
@@ -1136,7 +1136,7 @@ let check_inference_profile_surface_coverage () =
        "p0 profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "cbb28c86995f7ef2509d67b19b70f4f456d94be3b474120f323c6c47184249f0");
+	          "a70fa147bdb3fb6f47b112a5d10b4c09b6de3ea8a9b7524eac4c5a1bfca7cdb1");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "p0 readiness worklist count" (List.length rows = 8);
@@ -1196,7 +1196,7 @@ let check_inference_profile_surface_coverage () =
         "runtime profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "a405c3588966b1f4b6b54e0467ba9a4160b0caf7dbebfdbb8b048b42bc6e098b");
+	          "d7155fbae27675b630fa0e9ee7998d0daf6f078ae97b917317240bffaffb3fd0");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "runtime readiness worklist count" (List.length rows = 17)
@@ -1242,8 +1242,8 @@ let check_inference_profile_surface_coverage () =
      check "surface local-only count" (int_value "local_only" fields = 1);
      check
        "surface consensus-candidate count"
-       (int_value "consensus_candidate" fields = 8);
-     check "surface consensus-ready count" (int_value "consensus_ready" fields = 8);
+       (int_value "consensus_candidate" fields = 5);
+     check "surface consensus-ready count" (int_value "consensus_ready" fields = 11);
      check "surface unknown count" (int_value "unknown" fields = 0)
    | _ -> failwith "surface status counts json must be object");
   (match Profile.profile_root_catalog_json gates with
@@ -1274,7 +1274,7 @@ let check_inference_profile_surface_coverage () =
      | `String root ->
 	       String.equal
 	         root
-		         "a405c3588966b1f4b6b54e0467ba9a4160b0caf7dbebfdbb8b048b42bc6e098b"
+		         "d7155fbae27675b630fa0e9ee7998d0daf6f078ae97b917317240bffaffb3fd0"
      | _ -> false);
   check
     "empty profile catalog root"
@@ -1846,8 +1846,8 @@ let check_activation_profile_gates () =
          || String.equal name "deterministic-fp64-softplus"
          || String.equal name "deterministic-fp64-silu");
       check
-        (opcode ^ " is candidate, not local-only")
-        (String.equal (string_value "consensus_status" gate) "consensus_candidate");
+        (opcode ^ " is consensus-ready")
+        (String.equal (string_value "consensus_status" gate) "consensus_ready");
       check
         (opcode ^ " local semantics")
         (list_contains_substring

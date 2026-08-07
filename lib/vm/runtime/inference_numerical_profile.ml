@@ -921,7 +921,7 @@ let of_name = function
   | "deterministic-fp64-sigmoid" as name ->
     Ok {
       name;
-      consensus_status = Consensus_candidate;
+      consensus_status = Consensus_ready;
       summary =
         "deterministic finite binary64 sigmoid profile with protocol-owned exp and division (SIGMOID_FP no longer uses host libm)";
       required_actions = [
@@ -933,7 +933,7 @@ let of_name = function
   | "deterministic-fp64-silu" as name ->
     Ok {
       name;
-      consensus_status = Consensus_candidate;
+      consensus_status = Consensus_ready;
       summary =
         "deterministic finite binary64 SiLU profile composing sigmoid then multiply (SILU_FP no longer uses host libm)";
       required_actions = [
@@ -945,7 +945,7 @@ let of_name = function
   | "deterministic-fp64-softplus" as name ->
     Ok {
       name;
-      consensus_status = Consensus_candidate;
+      consensus_status = Consensus_ready;
       summary =
         "deterministic finite binary64 softplus profile with protocol-owned exp and log1p (SOFTPLUS_FP no longer uses host libm)";
       required_actions = [
@@ -1574,49 +1574,9 @@ let native_dependency_details ~opcode =
   match opcode with
   | "SOFTMAX_FP" -> None
   | "GATED_DELTA_RULE_FP" -> None
-  | "SIGMOID_FP" ->
-    Some
-      ( ["native_exp_nonpositive"],
-        [
-          "exp(-x) for nonnegative x";
-          "exp(x) for negative x";
-        ],
-        ["protocol_owned_exp_nonpositive_binary64"],
-        [
-          "signed_zero_branch";
-          "large_positive_saturation";
-          "large_negative_tail";
-          "subnormal_input";
-        ] )
-  | "SILU_FP" ->
-    Some
-      ( ["native_exp_nonpositive"],
-        ["SIGMOID_FP branch reused before x * sigmoid(x)"],
-        ["protocol_owned_exp_nonpositive_binary64"],
-        [
-          "signed_zero_branch";
-          "large_positive_identity_tail";
-          "large_negative_zero_tail";
-          "subnormal_input";
-        ] )
-  | "SOFTPLUS_FP" ->
-    Some
-      ( ["native_exp_nonpositive"; "native_log1p_nonnegative"],
-        [
-          "exp(-x) for positive x";
-          "exp(x) for nonpositive x";
-          "log1p(exp(...))";
-        ],
-        [
-          "protocol_owned_exp_nonpositive_binary64";
-          "protocol_owned_log1p_nonnegative_binary64";
-        ],
-        [
-          "positive_branch_boundary";
-          "large_positive_linear_tail";
-          "large_negative_zero_tail";
-          "subnormal_exp_tail";
-        ] )
+  | "SIGMOID_FP"
+  | "SILU_FP"
+  | "SOFTPLUS_FP" -> None
   | "ROPE_APPLY_INDEXED_FP" ->
     Some
       ( ["native_pow"; "native_cos"; "native_sin"],

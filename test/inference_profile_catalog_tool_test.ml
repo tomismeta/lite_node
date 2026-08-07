@@ -220,8 +220,8 @@ let check_all_catalog_exports_complete_transcendental_inventory () =
   | `Assoc fields ->
     let catalog = assoc_value "transcendental_dependency_catalog" fields in
     let entries = list_value "entries" catalog in
-    check "entry count" (int_value "entry_count" catalog = 4);
-    check "dependency count" (int_value "dependency_count" catalog = 7);
+    check "entry count" (int_value "entry_count" catalog = 1);
+    check "dependency count" (int_value "dependency_count" catalog = 3);
     check
       "dependency catalog root"
       (String.equal
@@ -230,30 +230,12 @@ let check_all_catalog_exports_complete_transcendental_inventory () =
     check
       "dependency opcodes"
       (sorted_dependency_opcodes entries
-       = [
-           "ROPE_APPLY_INDEXED_FP";
-           "SIGMOID_FP";
-           "SILU_FP";
-           "SOFTPLUS_FP";
-         ]);
+       = ["ROPE_APPLY_INDEXED_FP"]);
     let entry opcode =
       match List.find_map (dependency_entry opcode) entries with
       | Some fields -> fields
       | None -> failwith ("missing dependency entry: " ^ opcode)
     in
-    let softplus_replacements =
-      string_list_value "required_replacements" (entry "SOFTPLUS_FP")
-    in
-    check
-      "softplus exp replacement"
-      (List.mem
-         "protocol_owned_exp_nonpositive_binary64"
-         softplus_replacements);
-    check
-      "softplus log1p replacement"
-      (List.mem
-         "protocol_owned_log1p_nonnegative_binary64"
-         softplus_replacements);
     let rope_replacements =
       string_list_value "required_replacements" (entry "ROPE_APPLY_INDEXED_FP")
     in
