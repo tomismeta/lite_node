@@ -5,6 +5,7 @@
    VM feeds all fit: |exp| <= 750, t in [0,1], angles up to 2^53,
    ln(base) <= 710. */
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 
@@ -992,6 +993,48 @@ bool kernel_rope_pair_sin_cos(int64_t position, uint64_t base_bits, int i,
 }  // namespace
 
 extern "C" {
+
+/* Correctly-rounded f64 binary ops. IEEE roundTiesToEven results are
+   unique, so hardware ops are bit-exact vs the scalar bignum semantics;
+   the kernel rejects (None) exactly where the scalar does: non-finite
+   inputs, non-finite (overflowed) results, and division by zero. */
+static bool kernel_fp64_binop(int op, uint64_t a_bits, uint64_t b_bits,
+                              uint64_t* out) {
+  double a, b;
+  std::memcpy(&a, &a_bits, sizeof(a));
+  std::memcpy(&b, &b_bits, sizeof(b));
+  if (!std::isfinite(a) || !std::isfinite(b)) return false;
+  double r;
+  switch (op) {
+    case 0: r = a + b; break;
+    case 1: r = a - b; break;
+    case 2: r = a * b; break;
+    default:
+      if (b == 0.0) return false;
+      r = a / b;
+      break;
+  }
+  if (!std::isfinite(r)) return false;
+  std::memcpy(out, &r, sizeof(r));
+  return true;
+}
+
+#define DEFINE_FP64_BINOP(name, op)                                          \
+  CAMLprim value name(value v_a, value v_b, value v_out) {                  \
+    CAMLparam3(v_a, v_b, v_out);                                            \
+    uint64_t a = (uint64_t)Int64_val(v_a);                                  \
+    uint64_t b = (uint64_t)Int64_val(v_b);                                  \
+    uint64_t out = 0;                                                       \
+    if (!kernel_fp64_binop(op, a, b, &out)) CAMLreturn(Val_int(-1));        \
+    Store_field(v_out, 0, caml_copy_int64((int64_t)out));                   \
+    CAMLreturn(Val_int(0));                                                 \
+  }
+
+DEFINE_FP64_BINOP(octra_native_fp64_add, 0)
+DEFINE_FP64_BINOP(octra_native_fp64_sub, 1)
+DEFINE_FP64_BINOP(octra_native_fp64_mul, 2)
+DEFINE_FP64_BINOP(octra_native_fp64_div, 3)
+
 
 /* All kernels write outputs into an int64 array passed from OCaml and
    return 0 on success, -1 on None/arithmetic failure. */

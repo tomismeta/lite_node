@@ -8,3 +8,11 @@ val fp64_log1p_nonnegative : int64 -> int64 array -> int
 val fp64_sin_cos : int64 -> int64 array -> int
 
 val fp64_rope_pair_sin_cos : int64 -> int64 -> int -> int -> int64 array -> int
+
+val fp64_add : int64 -> int64 -> int64 array -> int
+
+val fp64_sub : int64 -> int64 -> int64 array -> int
+
+val fp64_mul : int64 -> int64 -> int64 array -> int
+
+val fp64_div : int64 -> int64 -> int64 array -> int

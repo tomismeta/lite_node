@@ -1140,8 +1140,41 @@ let log1p_nonnegative bits =
   end
   else Inference_fp64.log1p_nonnegative bits
 
-let rope_pair_sin_cos position base_bits i rot_dim =
+let fp64_mul a b =
   if Lazy.force fp64_native_enabled then begin
+    let out = Array.make 1 0L in
+    if Native_math.fp64_mul a b out = 0 then Some out.(0)
+    else Inference_fp64.mul a b
+  end
+  else Inference_fp64.mul a b
+
+let fp64_add a b =
+  if Lazy.force fp64_native_enabled then begin
+    let out = Array.make 1 0L in
+    if Native_math.fp64_add a b out = 0 then Some out.(0)
+    else Inference_fp64.add a b
+  end
+  else Inference_fp64.add a b
+
+let fp64_sub a b =
+  if Lazy.force fp64_native_enabled then begin
+    let out = Array.make 1 0L in
+    if Native_math.fp64_sub a b out = 0 then Some out.(0)
+    else Inference_fp64.sub a b
+  end
+  else Inference_fp64.sub a b
+
+let fp64_div a b =
+  if Lazy.force fp64_native_enabled then begin
+    let out = Array.make 1 0L in
+    if Native_math.fp64_div a b out = 0 then Some out.(0)
+    else Inference_fp64.div a b
+  end
+  else Inference_fp64.div a b
+
+let fp64_square bits = fp64_mul bits bits
+
+let rope_pair_sin_cos position base_bits i rot_dim =  if Lazy.force fp64_native_enabled then begin
     let out = Array.make 2 0L in
     if
       Native_math.fp64_rope_pair_sin_cos position base_bits i rot_dim out
@@ -1192,23 +1225,23 @@ let fp64_sigmoid_bits bits =
     (* sigmoid(x) = 1 / (1 + exp(-x)) for x >= 0; exp(-x) is protocol-owned. *)
     (match exp_nonpositive (Inference_fp64.negate bits) with
      | Some exp_bits ->
-       (match Inference_fp64.add fp64_one_bits exp_bits with
-        | Some denom -> Inference_fp64.div fp64_one_bits denom
+       (match fp64_add fp64_one_bits exp_bits with
+        | Some denom -> fp64_div fp64_one_bits denom
         | None -> None)
      | None -> None)
   | Some _ ->
     (* sigmoid(x) = exp(x) / (1 + exp(x)) for x < 0; exp(x) is protocol-owned. *)
     (match exp_nonpositive bits with
      | Some exp_bits ->
-       (match Inference_fp64.add fp64_one_bits exp_bits with
-        | Some denom -> Inference_fp64.div exp_bits denom
+       (match fp64_add fp64_one_bits exp_bits with
+        | Some denom -> fp64_div exp_bits denom
         | None -> None)
      | None -> None)
   | None -> None
 
 let fp64_silu_bits bits =
   match fp64_sigmoid_bits bits with
-  | Some sigmoid -> Inference_fp64.mul bits sigmoid
+  | Some sigmoid -> fp64_mul bits sigmoid
   | None -> None
 
 let fp64_softplus_bits bits =
@@ -1218,7 +1251,7 @@ let fp64_softplus_bits bits =
     (match exp_nonpositive (Inference_fp64.negate bits) with
      | Some exp_bits ->
        (match log1p_nonnegative exp_bits with
-        | Some tail_bits -> Inference_fp64.add bits tail_bits
+        | Some tail_bits -> fp64_add bits tail_bits
         | None -> None)
      | None -> None)
   | Some _ ->
@@ -2521,9 +2554,9 @@ let exec_one st op =
                                  lhs_values
                                  ((row * k) + (block * group) + item)
                              in
-                            match Inference_fp64.mul lhs_value scale with
+                            match fp64_mul lhs_value scale with
                             | Some product ->
-                              (match Inference_fp64.add !acc product with
+                              (match fp64_add !acc product with
                                | Some next -> acc := next
                                | None -> ok := false)
                             | None -> ok := false
@@ -2631,7 +2664,7 @@ let exec_one st op =
                    for k = 0 to width - 1 do
                      if t >= k then
                        match
-                         Inference_fp64.mul
+                         fp64_mul
                            (Array.unsafe_get
                               input_values
                               (((t - k) * channels) + c))
@@ -2640,7 +2673,7 @@ let exec_one st op =
                               ((c * width) + k))
                        with
                        | Some product ->
-                         (match Inference_fp64.add !acc product with
+                         (match fp64_add !acc product with
                           | Some next -> acc := next
                           | None -> ok := false)
                        | None -> ok := false
@@ -2729,8 +2762,8 @@ let exec_one st op =
                    in
                    let ok = ref scale_ok in
                    let mul_add acc left right =
-                     match Inference_fp64.mul left right with
-                     | Some product -> Inference_fp64.add acc product
+                     match fp64_mul left right with
+                     | Some product -> fp64_add acc product
                      | None -> None
                    in
                    for timestep = 0 to timesteps - 1 do
@@ -2758,7 +2791,7 @@ let exec_one st op =
                        in
                        for i = 0 to state_per_head - 1 do
                          match
-                           Inference_fp64.mul
+                           fp64_mul
                              state_values.(state_base + i)
                              decay_bits
                          with
@@ -2782,12 +2815,12 @@ let exec_one st op =
                          done;
                          let value =
                            match
-                             Inference_fp64.sub
+                             fp64_sub
                                v_values.(v_base + row)
                                !memory
                            with
                            | Some diff ->
-                             Inference_fp64.mul
+                             fp64_mul
                                diff
                                beta_values.(gate_t + head)
                            | None -> None
@@ -2824,7 +2857,7 @@ let exec_one st op =
                            | Some next -> value := next
                            | None -> ok := false
                          done;
-                         (match Inference_fp64.mul !value scale_bits with
+                         (match fp64_mul !value scale_bits with
                           | Some scaled ->
                             output_values.(out_base + row) <- scaled
                           | None -> ok := false)
@@ -2932,9 +2965,9 @@ let exec_one st op =
             let sum_sq_bits = ref 0L in
             Array.iter
               (fun value ->
-                 match Inference_fp64.square value with
+                 match fp64_square value with
                  | Some square ->
-                   (match Inference_fp64.add !sum_sq_bits square with
+                   (match fp64_add !sum_sq_bits square with
                     | Some next -> sum_sq_bits := next
                     | None -> ok := false)
                  | None -> ok := false)
@@ -2942,9 +2975,9 @@ let exec_one st op =
             let inv_rms_bits =
               match Inference_fp64.of_int n with
               | Some count_bits ->
-                (match Inference_fp64.div !sum_sq_bits count_bits with
+                (match fp64_div !sum_sq_bits count_bits with
                  | Some mean_sq_bits ->
-                   (match Inference_fp64.add mean_sq_bits epsilon_bits with
+                   (match fp64_add mean_sq_bits epsilon_bits with
                     | Some inverse_input_bits ->
                       fp64_inverse_sqrt_bits inverse_input_bits
                     | None -> None)
@@ -2955,9 +2988,9 @@ let exec_one st op =
               Array.init n (fun i ->
                 match inv_rms_bits with
                 | Some inv_rms_bits ->
-                  (match Inference_fp64.mul input_values.(i) inv_rms_bits with
+                  (match fp64_mul input_values.(i) inv_rms_bits with
                    | Some scaled ->
-                     Inference_fp64.mul scaled gamma_values.(i)
+                     fp64_mul scaled gamma_values.(i)
                    | None -> None)
                 | None -> None)
             in
@@ -2992,15 +3025,15 @@ let exec_one st op =
            let sum_sq_bits = ref 0L in
            Array.iter
              (fun value ->
-                match Inference_fp64.square value with
+                match fp64_square value with
                 | Some square ->
-                  (match Inference_fp64.add !sum_sq_bits square with
+                  (match fp64_add !sum_sq_bits square with
                    | Some next -> sum_sq_bits := next
                    | None -> ok := false)
                 | None -> ok := false)
              input_values;
            let inv_norm_bits =
-             match Inference_fp64.add !sum_sq_bits epsilon_bits with
+             match fp64_add !sum_sq_bits epsilon_bits with
              | Some inverse_input_bits -> fp64_inverse_sqrt_bits inverse_input_bits
              | None -> None
            in
@@ -3008,7 +3041,7 @@ let exec_one st op =
              Array.init n (fun i ->
                match inv_norm_bits with
                | Some inv_norm_bits ->
-                 Inference_fp64.mul input_values.(i) inv_norm_bits
+                 fp64_mul input_values.(i) inv_norm_bits
                | None -> None)
            in
            if not !ok
@@ -3048,7 +3081,7 @@ let exec_one st op =
           | Some dst_values, Some src_values ->
             let output =
               Array.init n (fun i ->
-                Inference_fp64.mul dst_values.(i) src_values.(i))
+                fp64_mul dst_values.(i) src_values.(i))
             in
             if not (Array.for_all Option.is_some output) then revert st
             else begin
@@ -3079,7 +3112,7 @@ let exec_one st op =
           | Some dst_values, Some src_values ->
             let output =
               Array.init n (fun i ->
-                Inference_fp64.add dst_values.(i) src_values.(i))
+                fp64_add dst_values.(i) src_values.(i))
             in
             if not (Array.for_all Option.is_some output) then revert st
             else begin
@@ -3167,16 +3200,16 @@ let exec_one st op =
                                 Array.unsafe_get input_values right_index
                               in
                               (match
-                                 Inference_fp64.mul left c,
-                                 Inference_fp64.mul right s,
-                                 Inference_fp64.mul left s,
-                                 Inference_fp64.mul right c
+                                 fp64_mul left c,
+                                 fp64_mul right s,
+                                 fp64_mul left s,
+                                 fp64_mul right c
                                with
                                | Some left_c, Some right_s, Some left_s,
                                  Some right_c ->
                                  (match
-                                    Inference_fp64.sub left_c right_s,
-                                    Inference_fp64.add left_s right_c
+                                    fp64_sub left_c right_s,
+                                    fp64_add left_s right_c
                                   with
                                   | Some out_left, Some out_right ->
                                     Array.unsafe_set output left_index out_left;
@@ -3299,17 +3332,17 @@ let exec_one st op =
                  let key_base = key_index * head_dim in
                  for dim = 0 to head_dim - 1 do
                    match
-                     Inference_fp64.mul
+                     fp64_mul
                        (Array.unsafe_get query_values dim)
                        (Array.unsafe_get key_values (key_base + dim))
                    with
                    | Some product ->
-                     (match Inference_fp64.add !acc product with
+                     (match fp64_add !acc product with
                       | Some next -> acc := next
                       | None -> ok := false)
                    | None -> ok := false
                  done;
-                 (match Inference_fp64.mul !acc scale_bits with
+                 (match fp64_mul !acc scale_bits with
                   | Some score -> Array.unsafe_set output key_index score
                   | None -> ok := false)
                done;
@@ -3353,7 +3386,7 @@ let exec_one st op =
             let sum_exp_bits = ref 0L in
             for index = 0 to count - 1 do
               match
-                Inference_fp64.sub
+                fp64_sub
                   (Array.unsafe_get score_values index)
                   !max_score_bits
               with
@@ -3363,7 +3396,7 @@ let exec_one st op =
                    (match exp_nonpositive shifted_bits with
                     | Some value_bits ->
                       Array.unsafe_set exps index value_bits;
-                      (match Inference_fp64.add !sum_exp_bits value_bits with
+                      (match fp64_add !sum_exp_bits value_bits with
                        | Some next -> sum_exp_bits := next
                        | None -> ok := false)
                     | None -> ok := false)
@@ -3376,7 +3409,7 @@ let exec_one st op =
               let output = Array.make count None in
               for index = 0 to count - 1 do
                 match
-                  Inference_fp64.div
+                  fp64_div
                     (Array.unsafe_get exps index)
                     !sum_exp_bits
                 with
@@ -3423,14 +3456,14 @@ let exec_one st op =
                  let acc = ref 0L in
                  for key_index = 0 to key_count - 1 do
                    match
-                     Inference_fp64.mul
+                     fp64_mul
                        (Array.unsafe_get prob_values key_index)
                        (Array.unsafe_get
                           value_values
                           ((key_index * head_dim) + dim))
                    with
                    | Some product ->
-                     (match Inference_fp64.add !acc product with
+                     (match fp64_add !acc product with
                       | Some next -> acc := next
                       | None -> ok := false)
                    | None -> ok := false

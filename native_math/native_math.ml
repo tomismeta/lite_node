@@ -14,3 +14,15 @@ external fp64_sin_cos : int64 -> int64 array -> int
 external fp64_rope_pair_sin_cos : int64 -> int64 -> int -> int -> int64 array -> int
   = "octra_native_fp64_rope_pair_sin_cos"
 
+
+external fp64_add : int64 -> int64 -> int64 array -> int
+  = "octra_native_fp64_add"
+
+external fp64_sub : int64 -> int64 -> int64 array -> int
+  = "octra_native_fp64_sub"
+
+external fp64_mul : int64 -> int64 -> int64 array -> int
+  = "octra_native_fp64_mul"
+
+external fp64_div : int64 -> int64 -> int64 array -> int
+  = "octra_native_fp64_div"

@@ -174,9 +174,58 @@ let check_rope () =
     | _ -> failwith "rope partial result") cases;
   Printf.printf "rope: %d cases bit-exact\n%!" (List.length cases)
 
+let check_binops () =
+  let module F = Octra_vm.Inference_fp64 in
+  let edge = [
+    0L, 0L;
+    Int64.min_int, Int64.min_int;
+    Int64.min_int, 0L;
+    0L, Int64.min_int;
+    0x0010000000000000L, 0x0010000000000000L;  (* min normal *)
+    0x0000000000000001L, 0x0000000000000001L;  (* min subnormal *)
+    0x7fefffffffffffffL, 0x7fefffffffffffffL;  (* max *)
+    0x7fefffffffffffffL, 0x4000000000000000L;  (* overflow mul *)
+    0x3ff0000000000000L, 0L;                   (* div by zero *)
+    0x3ff0000000000000L, 0x8000000000000000L;  (* div by -0 *)
+    0x7ff0000000000000L, 0x3ff0000000000000L;  (* Inf input *)
+    0x7ff8000000000000L, 0x3ff0000000000000L;  (* NaN input *)
+    0x3ff0000000000000L, 0x3ff0000000000000L;
+    0xbfd0000000000000L, 0x3fd0000000000000L;  (* -0.25 + 0.25 -> +0 *)
+  ] in
+  let next = lfsr 0xCAFEBABE12345678L in
+  let random = List.init 3000 (fun _ ->
+    let exp = Int64.logand (next ()) 0x7ffL in
+    let frac = Int64.logand (next ()) 0x000fffffffffffffL in
+    let sign = if Int64.logand (next ()) 1L = 0L then 0L else Int64.min_int in
+    Int64.logor sign (Int64.logor (Int64.shift_left exp 52) frac)) in
+  let ops = [
+    "add", Native_math.fp64_add, F.add;
+    "sub", Native_math.fp64_sub, F.sub;
+    "mul", Native_math.fp64_mul, F.mul;
+    "div", Native_math.fp64_div, F.div;
+  ] in
+  List.iter (fun (name, native_f, ocaml_f) ->
+    let cases = edge @
+      (List.map (fun x -> x, Int64.bits_of_float 0.5) random) @
+      (List.map (fun x -> Int64.bits_of_float 2.0, x) random) in
+    let out = Array.make 1 0L in
+    List.iteri (fun i (a, b) ->
+      let st = native_f a b out in
+      match ocaml_f a b with
+      | None -> check (Printf.sprintf "%s[%d] None parity" name i) (st <> 0)
+      | Some expected ->
+        check (Printf.sprintf "%s[%d] ok parity" name i) (st = 0);
+        if not (Int64.equal out.(0) expected) then
+          Printf.printf "%s[%d] native=%Lx ocaml=%Lx (a=%Lx b=%Lx)\n%!"
+            name i out.(0) expected a b;
+        check (Printf.sprintf "%s[%d] bit-exact" name i) (Int64.equal out.(0) expected))
+      cases;
+    Printf.printf "%s: %d cases bit-exact\n%!" name (List.length cases)) ops
+
 let () =
   check_exp_nonpositive ();
   check_log1p ();
   check_sin_cos ();
   check_rope ();
+  check_binops ();
   Printf.printf "native fp64 kernels: all bit-exact checks passed\n"
