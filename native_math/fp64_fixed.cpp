@@ -790,7 +790,6 @@ bool kernel_ln_fixed(uint64_t bits, u320 out) {
       for (int i = 0; i < 2 * W; ++i) num[i] = 0;
       for (int i = 0; i < W; ++i) num[i + 4] = m_minus_one[i];
       div_round_even640(num, two_plus_t, u);
-    }
     u320 u_squared;
     fixed_mul(u, u, u_squared);
     u320 series;
