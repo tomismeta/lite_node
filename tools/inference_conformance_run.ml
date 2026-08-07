@@ -2615,8 +2615,17 @@ let apply_mutation state registers values inputs mutation =
     (match name with
      | "replace_first_f64_input_cell" ->
        let input = find_input target inputs in
-       set_f64_cell_bits state input.base (z_field "value_bits" fields);
-       `Executed
+       (match input.raw_register with
+        | Some reg ->
+          (* LOAD_F64_LE_FP ingress: mutate first 8 source octets, not VM cells. *)
+          let bits = Z.to_int64 (z_field "value_bits" fields) in
+          let raw = Bytes.create 8 in
+          put_int64_le raw 0 bits;
+          replace_raw_prefix state reg (Bytes.to_string raw);
+          `Executed
+        | None ->
+          set_f64_cell_bits state input.base (z_field "value_bits" fields);
+          `Executed)
      | "replace_all_score_cells" ->
        let input = find_input target inputs in
        let cells =

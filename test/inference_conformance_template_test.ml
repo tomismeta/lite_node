@@ -487,7 +487,7 @@ let profile_gate opcode =
        | _ -> failwith "profile gate must be object")
 
 let check_profile_root () =
-  match Profile.of_name "deterministic-fp64-normalization" with
+  match Profile.of_name "deterministic-fp64-rmsnorm" with
   | Error error -> failwith (Profile.error_message error)
   | Ok profile ->
     let root = Profile.root_for_opcode ~opcode:"RMSNORM_FP_EPS" profile in
@@ -680,7 +680,7 @@ let check_profile_root_binding_catalog () =
        "binding catalog profile"
        (String.equal
           (string_value "name" fields)
-          "deterministic-fp64-normalization");
+          "deterministic-fp64-rmsnorm");
      check
        "binding catalog status"
        (String.equal (string_value "status" fields) "unbound");
@@ -783,9 +783,9 @@ let check_profile_status_counts () =
    | `Assoc fields ->
      check "classified count" (Profile.classified_gate_count counts = 6);
      check "local-only count" (int_value "local_only" fields = 0);
-     (* LINEAR, RMSNORM, and byte-ingress are spine-ready; one explicit ready. *)
-     check "candidate count" (int_value "consensus_candidate" fields = 0);
-     check "ready count" (int_value "consensus_ready" fields = 4);
+     (* LINEAR + RMSNORM ready; byte-ingress-exact candidate; one explicit ready. *)
+     check "candidate count" (int_value "consensus_candidate" fields = 1);
+     check "ready count" (int_value "consensus_ready" fields = 3);
      check "unknown count" (int_value "unknown" fields = 2);
      check
        "mixed counts are not consensus-ready"
@@ -813,6 +813,7 @@ let check_profile_status_counts () =
              counts)
           [
             "unprofiled_profile_gates";
+            "consensus_candidate_profile_gates";
             "unknown_profile_gates";
           ]);
      let ready_counts =
@@ -1066,10 +1067,10 @@ let check_p0_profile_gate_coverage () =
 let check_inference_profile_surface_coverage () =
   let surface =
     [
-      "LOAD_F32_LE_FP", "byte-ingress-exact", "consensus_ready",
+      "LOAD_F32_LE_FP", "byte-ingress-exact", "consensus_candidate",
       "ec3f31d8a2cc8c4f390c372c6d489e5e3418b544967285e24efbb6aef65cacc2";
-      "LOAD_F64_LE_FP", "byte-ingress-exact", "consensus_ready",
-      "d9c2a61f7e058320bef47cd240c6193b2c3b00426ce50ee61556b41779da0c45";
+      "LOAD_F64_LE_FP", "byte-ingress-f64-bits", "consensus_ready",
+      "4109c53ff1d1e56c15a023f701da288c8c78a0962d7a74491a5924f6342d41f0";
       "LINEAR_Q1_G128_FP", "deterministic-q1-g128-fp64-linear",
       "consensus_ready",
       "1247c6e4e8364a774c2585a76a05fadfdf631e9e7562d4949ee5d1b358589367";
@@ -1085,11 +1086,11 @@ let check_inference_profile_surface_coverage () =
       "GATED_DELTA_RULE_FP", "deterministic-fp64-gated-delta",
       "consensus_candidate",
       "f79dba18fda942ef0bc862c017b643688d45d15be1b46b0acf7494936cfe2bf0";
-      "RMSNORM_FP_EPS", "deterministic-fp64-normalization",
+      "RMSNORM_FP_EPS", "deterministic-fp64-rmsnorm",
       "consensus_ready",
-      "a77dc41d33540e3c6872f830b4c0df1280d23ea9f0a8e1ff2273039c23fe88f9";
+      "b8f1b4710cb0799b8c59f72314e40be23548f70cfb0a3ba4fb531a24803798f1";
       "L2NORM_FP", "deterministic-fp64-normalization",
-      "consensus_ready",
+      "consensus_candidate",
       "dacd9b51945432a4e025510c67edc28c65706de345c5770c2d0a2da4ab396875";
       "ELEMWISE_MUL_FP", "deterministic-fp64-elementwise",
       "consensus_candidate",
@@ -1135,7 +1136,7 @@ let check_inference_profile_surface_coverage () =
        "p0 profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "a38ad923425bb2b5727292cf21b032c2adb3498672938a66f824a54de241dc30");
+	          "8e6f605367fef50e362a3c6c293453cd69313ce6136854cf7c126d23c8622a04");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "p0 readiness worklist count" (List.length rows = 5);
@@ -1195,7 +1196,7 @@ let check_inference_profile_surface_coverage () =
        "runtime profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "7b7b61cebf91b7651840b3f9b1804edc42534a527ece83fb55f116097bfcf170");
+	          "d1e4046d7360b6bd9f52517854a27c67933ef34911d3ba727491be1e8ab7db78");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "runtime readiness worklist count" (List.length rows = 17)
@@ -1241,8 +1242,8 @@ let check_inference_profile_surface_coverage () =
      check "surface local-only count" (int_value "local_only" fields = 4);
      check
        "surface consensus-candidate count"
-       (int_value "consensus_candidate" fields = 7);
-     check "surface consensus-ready count" (int_value "consensus_ready" fields = 6);
+       (int_value "consensus_candidate" fields = 9);
+     check "surface consensus-ready count" (int_value "consensus_ready" fields = 4);
      check "surface unknown count" (int_value "unknown" fields = 0)
    | _ -> failwith "surface status counts json must be object");
   (match Profile.profile_root_catalog_json gates with
@@ -1273,7 +1274,7 @@ let check_inference_profile_surface_coverage () =
      | `String root ->
 	       String.equal
 	         root
-		         "7b7b61cebf91b7651840b3f9b1804edc42534a527ece83fb55f116097bfcf170"
+		         "d1e4046d7360b6bd9f52517854a27c67933ef34911d3ba727491be1e8ab7db78"
      | _ -> false);
   check
     "empty profile catalog root"
@@ -1408,13 +1409,13 @@ let check_remaining_p0_profile_obligations () =
       "GATED_DELTA_RULE_FP", "next-state cells", "state-transition";
     ];
   List.iter
-    (fun opcode ->
+    (fun (opcode, expected_status, expected_profile) ->
       let gate = profile_gate opcode in
       check
-        (opcode ^ " consensus ready")
+        (opcode ^ " consensus status")
         (String.equal
            (string_value "consensus_status" gate)
-           "consensus_ready");
+           expected_status);
       check
         (opcode ^ " records no native fp math")
         (list_contains_substring
@@ -1431,7 +1432,7 @@ let check_remaining_p0_profile_obligations () =
            (opcode ^ " profile name")
            (String.equal
               (string_value "profile_name" contract)
-              "deterministic-fp64-normalization");
+              expected_profile);
          check
            (opcode ^ " rounding mode")
            (String.equal
@@ -1450,7 +1451,7 @@ let check_remaining_p0_profile_obligations () =
            (String.equal profile "host-fp-local-candidate");
          check
            (opcode ^ " old host profile expected")
-           (String.equal expected "deterministic-fp64-normalization")
+           (String.equal expected expected_profile)
        | Error error -> failwith (Profile.error_message error)
        | Ok _ -> failwith (opcode ^ " should reject old host profile"));
       match Profile.validate_for_opcode ~opcode ~profile:"q16-exact" with
@@ -1459,10 +1460,13 @@ let check_remaining_p0_profile_obligations () =
         check (opcode ^ " overclaim profile") (String.equal profile "q16-exact");
         check
           (opcode ^ " overclaim expected")
-          (String.equal expected "deterministic-fp64-normalization")
+          (String.equal expected expected_profile)
       | Error error -> failwith (Profile.error_message error)
       | Ok _ -> failwith (opcode ^ " should reject profile overclaim"))
-    ["RMSNORM_FP_EPS"; "L2NORM_FP"];
+    [
+      "RMSNORM_FP_EPS", "consensus_ready", "deterministic-fp64-rmsnorm";
+      "L2NORM_FP", "consensus_candidate", "deterministic-fp64-normalization";
+    ];
   let l2_gate = profile_gate "L2NORM_FP" in
   (match List.assoc_opt "profile_contract" l2_gate with
    | Some (`Assoc contract) ->
@@ -2266,22 +2270,22 @@ let check_causal_conv_profile_gate () =
 
 let check_byte_ingress_profile_gates () =
   List.iter
-    (fun (opcode, local_needle, obligation_needle) ->
+    (fun (opcode, profile_name, expected_status, local_needle, obligation_needle) ->
       check
         (opcode ^ " runtime profile")
         (match Profile.current_runtime_profile ~opcode with
-         | Some "byte-ingress-exact" -> true
+         | Some actual -> String.equal actual profile_name
          | _ -> false);
       let profile =
-        match Profile.of_name "byte-ingress-exact" with
+        match Profile.of_name profile_name with
         | Ok profile -> profile
         | Error error -> failwith (Profile.error_message error)
       in
       check
-        (opcode ^ " consensus ready")
+        (opcode ^ " consensus status")
         (String.equal
            (Profile.status_string profile.Profile.consensus_status)
-           "consensus_ready");
+           expected_status);
       let gate =
         match Profile.to_json_for_opcode ~opcode profile with
         | `Assoc gate -> gate
@@ -2298,20 +2302,22 @@ let check_byte_ingress_profile_gates () =
            obligation_needle
            (string_list_value "consensus_obligations" gate));
       List.iter
-        (fun profile ->
-          match Profile.validate_for_opcode ~opcode ~profile with
+        (fun rejected_profile ->
+          match Profile.validate_for_opcode ~opcode ~profile:rejected_profile with
           | Error (Profile.Unsupported_opcode_profile { opcode = actual; profile = actual_profile; expected }) ->
             check (opcode ^ " overclaim opcode") (String.equal actual opcode);
-            check (opcode ^ " overclaim profile") (String.equal actual_profile profile);
+            check (opcode ^ " overclaim profile") (String.equal actual_profile rejected_profile);
             check
               (opcode ^ " overclaim expected")
-              (String.equal expected "byte-ingress-exact")
+              (String.equal expected profile_name)
           | Error error -> failwith (Profile.error_message error)
-          | Ok _ -> failwith (opcode ^ " should reject profile " ^ profile))
+          | Ok _ -> failwith (opcode ^ " should reject profile " ^ rejected_profile))
         ["host-fp-local-candidate"; "q16-exact"])
     [
-      "LOAD_F32_LE_FP", "binary32 values are decoded", "f32 little-endian ingress";
-      "LOAD_F64_LE_FP", "bit patterns are copied", "f64 little-endian ingress";
+      "LOAD_F32_LE_FP", "byte-ingress-exact", "consensus_candidate",
+      "binary32 values are decoded", "f32 little-endian ingress";
+      "LOAD_F64_LE_FP", "byte-ingress-f64-bits", "consensus_ready",
+      "bit patterns are copied", "f64 little-endian ingress";
     ]
 
 let check_rejects_unknown_opcode () =
@@ -2358,7 +2364,7 @@ let check_rejects_profile_overclaim () =
       (String.equal
          message
          "profile soft-fp-exact is not implemented for opcode \
-          RMSNORM_FP_EPS; expected deterministic-fp64-normalization")
+          RMSNORM_FP_EPS; expected deterministic-fp64-rmsnorm")
   | Error error -> failwith (Template.error_message error)
   | Ok _ -> failwith "expected profile overclaim rejection"
 

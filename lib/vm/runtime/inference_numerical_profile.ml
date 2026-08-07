@@ -827,8 +827,22 @@ let of_name = function
   | "byte-ingress-exact" as name ->
     Ok {
       name;
+      consensus_status = Consensus_candidate;
+      summary =
+        "little-endian floating-point byte-ingress profile (LOAD_F32 still host-float writeback)";
+      required_actions = [
+        "pin little-endian f32 bit interpretation and finite rejection";
+        "eliminate host float dual-write on LOAD_F32_LE_FP before consensus_ready";
+        "bind source bytes through authenticated ranges and storage_read effects";
+        "preserve decode atomicity before exposing loaded cells to arithmetic kernels";
+      ];
+    }
+  | "byte-ingress-f64-bits" as name ->
+    Ok {
+      name;
       consensus_status = Consensus_ready;
-      summary = "little-endian finite floating-point byte-ingress profile (spine-ready LOAD_F64)";
+      summary =
+        "little-endian f64 bit-cell ingress profile (spine-ready LOAD_F64_LE_FP; no host float dual-write)";
       required_actions = [
         "keep little-endian f64 bit path finite-checked without host float writeback on LOAD_F64_LE_FP";
         "bind source bytes through authenticated ranges and storage_read effects";
@@ -905,8 +919,21 @@ let of_name = function
   | "deterministic-fp64-normalization" as name ->
     Ok {
       name;
+      consensus_status = Consensus_candidate;
+      summary =
+        "deterministic finite binary64 normalization profile (L2NORM and other non-spine norms)";
+      required_actions = [
+        "bind the numerical profile root in the model or request authority";
+        "qualify software-defined binary64 reduction, division, sqrt, and output multiply edge vectors across validators";
+        "pin epsilon bits, signed-zero, subnormal, overflow, aliasing, effort, and atomic writeback policy";
+      ];
+    }
+  | "deterministic-fp64-rmsnorm" as name ->
+    Ok {
+      name;
       consensus_status = Consensus_ready;
-      summary = "deterministic finite binary64 normalization profile (spine-ready)";
+      summary =
+        "deterministic finite binary64 RMSNorm profile (spine-ready RMSNORM_FP_EPS)";
       required_actions = [
         "bind the numerical profile root in the model or request authority";
         "preserve software-defined binary64 reduction, division, sqrt, and output multiply from multi-platform matrix evidence";
@@ -947,14 +974,14 @@ let of_name = function
 
 let current_runtime_profile_entries = [
   "LOAD_F32_LE_FP", "byte-ingress-exact";
-  "LOAD_F64_LE_FP", "byte-ingress-exact";
+  "LOAD_F64_LE_FP", "byte-ingress-f64-bits";
   "LINEAR_Q1_G128_FP", "deterministic-q1-g128-fp64-linear";
   "SIGMOID_FP", "host-fp-exp-local-candidate";
   "SOFTPLUS_FP", "host-fp-exp-local-candidate";
   "SILU_FP", "host-fp-exp-local-candidate";
   "CAUSAL_DEPTHWISE_CONV1D_FP", "deterministic-fp64-accumulation";
   "GATED_DELTA_RULE_FP", "deterministic-fp64-gated-delta";
-  "RMSNORM_FP_EPS", "deterministic-fp64-normalization";
+  "RMSNORM_FP_EPS", "deterministic-fp64-rmsnorm";
   "L2NORM_FP", "deterministic-fp64-normalization";
   "ELEMWISE_MUL_FP", "deterministic-fp64-elementwise";
   "RESIDUAL_ADD_FP", "deterministic-fp64-elementwise";
@@ -1464,7 +1491,8 @@ let consensus_blocker_codes ~opcode =
         "atomic_writeback";
         "cross_platform_conformance";
       ]
-    | Some "byte-ingress-exact" ->
+    | Some "byte-ingress-exact"
+    | Some "byte-ingress-f64-bits" ->
       [
         "float_byte_decode";
         "finite_rejection";
@@ -1730,11 +1758,14 @@ let transcendental_dependency_catalog_root catalog =
 let arithmetic_domain ~profile ~opcode =
   match profile.name, opcode with
   | "byte-ingress-exact", _ -> "ieee754-little-endian-byte-ingress"
+  | "byte-ingress-f64-bits", _ -> "ieee754-little-endian-f64-bit-cell-ingress"
   | "q16-exact", _ -> "integer-q16"
   | "q32-exact", _ -> "integer-q32"
   | "soft-fp-exact", _ -> "software-defined-floating-point"
   | "deterministic-q1-g128-fp64-linear", "LINEAR_Q1_G128_FP" ->
     "q1-g128-binary16-scale-deterministic-binary64-accumulator"
+  | "deterministic-fp64-rmsnorm", "RMSNORM_FP_EPS" ->
+    "deterministic-binary64-reduction-divide-epsilon-sqrt-output-mul"
   | "deterministic-fp64-normalization", "RMSNORM_FP_EPS" ->
     "deterministic-binary64-reduction-divide-epsilon-sqrt-output-mul"
   | "deterministic-fp64-normalization", "L2NORM_FP" ->
@@ -1772,7 +1803,7 @@ let rounding_mode ~profile ~opcode =
   match profile.name, opcode with
   | "deterministic-q1-g128-fp64-linear", "LINEAR_Q1_G128_FP" ->
     "deterministic-binary64-roundTiesToEven"
-  | ( "deterministic-fp64-normalization",
+  | ( ("deterministic-fp64-normalization" | "deterministic-fp64-rmsnorm"),
       ( "RMSNORM_FP_EPS" | "L2NORM_FP" ) ) ->
     "deterministic-binary64-roundTiesToEven"
   | "deterministic-fp64-gated-delta", "GATED_DELTA_RULE_FP" ->
@@ -1801,6 +1832,7 @@ let rounding_mode ~profile ~opcode =
   | ("q16-exact" | "q32-exact"), _ -> "integer-profile-defined"
   | "soft-fp-exact", _ -> "software-profile-defined"
   | "byte-ingress-exact", _ -> "exact-byte-decode"
+  | "byte-ingress-f64-bits", _ -> "exact-f64-bit-cell-decode"
   | "host-fp-local-candidate", _ -> "host-runtime-native"
   | _ -> "profile-defined"
 

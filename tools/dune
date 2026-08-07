@@ -28,10 +28,7 @@
  (modules inference_profile_catalog)
  (libraries octra_vm yojson))
 
-(executable
- (name semroot)
- (modules semroot)
- (libraries octra_vm))
+
 
 
 
