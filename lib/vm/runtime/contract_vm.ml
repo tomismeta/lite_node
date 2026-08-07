@@ -590,7 +590,7 @@ let f32_le_to_fp64 data offset =
     in
     Some value
 
-let f64_le_to_fp64 data offset =
+let f64_le_bits data offset =
   let bits = ref 0L in
   for i = 0 to 7 do
     bits :=
@@ -600,8 +600,14 @@ let f64_le_to_fp64 data offset =
            (Int64.of_int (Char.code data.[offset + i]))
            (i * 8))
   done;
-  let value = Int64.float_of_bits !bits in
-  if finite_fp64 value then Some value else None
+  !bits
+
+let f64_le_to_fp64_bits data offset =
+  let bits = f64_le_bits data offset in
+  if Inference_fp64.finite bits then Some bits else None
+
+let f64_le_to_fp64 data offset =
+  Option.map Int64.float_of_bits (f64_le_to_fp64_bits data offset)
 
 let fp16_le_to_fp64_bits data offset =
   let bits =
@@ -2475,17 +2481,18 @@ let exec_one st op =
             && n <= (String.length src - off) / 8 ->
        if not (add_dyn_effort st n) then revert st
        else
-         let decoded = Array.make n 0.0 in
+         (* Spine-safe path: bit-exact finite binary64 cells, no host float writeback. *)
+         let decoded = Array.make n 0L in
          let ok = ref true in
          for i = 0 to n - 1 do
-           match f64_le_to_fp64 src (off + (i * 8)) with
+           match f64_le_to_fp64_bits src (off + (i * 8)) with
            | None -> ok := false
-           | Some value -> decoded.(i) <- value
+           | Some bits -> decoded.(i) <- bits
          done;
          if not !ok then revert st
          else begin
            for i = 0 to n - 1 do
-             mem_set_fp64 st.memory.data (dst + i) decoded.(i)
+             mem_set_fp64_bits st.memory.data (dst + i) decoded.(i)
            done;
            true
        end

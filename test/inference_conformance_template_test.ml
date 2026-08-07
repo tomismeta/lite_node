@@ -220,7 +220,7 @@ let check_accepts_template () =
       in
       check
         ("consensus status " ^ consensus_status)
-        (String.equal consensus_status "consensus_candidate");
+        (String.equal consensus_status "consensus_ready");
       check
         "profile root binding"
         (match List.assoc_opt "profile_root_binding" fields with
@@ -293,10 +293,10 @@ let check_q1_profile_obligations () =
                "binary16 scale"
                (string_list_value "consensus_obligations" gate));
           check
-            "q1 consensus candidate"
+            "q1 consensus ready"
             (String.equal
                (string_value "consensus_status" gate)
-               "consensus_candidate");
+               "consensus_ready");
           check
             "q1 deterministic profile"
             (String.equal
@@ -705,8 +705,8 @@ let check_profile_root_binding_catalog () =
      check
        "binding catalog readiness blockers"
        (let blockers = string_list_value "validator_readiness_blockers" fields in
+        (* Spine-ready profiles no longer emit consensus_candidate_profile_gate. *)
         List.mem "profile_root_mismatch" blockers
-        && List.mem "consensus_candidate_profile_gate" blockers
         && List.mem "fp64_sqrt_conformance" blockers);
      check
        "binding catalog blocker codes"
@@ -745,16 +745,19 @@ let check_profile_root_binding_catalog () =
             | `Assoc fields ->
               String.equal (string_value "opcode" fields) "LINEAR_Q1_G128_FP"
               && String.equal (string_value "status" fields) "matched"
-              && String.equal
-                   (string_value "validator_readiness_status" fields)
-                   "rejected"
-              && List.mem
-                   "consensus_candidate_profile_gate"
-                   (string_list_value "validator_readiness_blockers" fields)
               && String.equal (string_value "case" fields) "logits-tail"
               && String.equal
                    (string_value "manifest" fields)
                    "fixtures/logits-tail.json"
+              &&
+              (* Spine-ready Q1 may still be rejected for residual math blockers,
+                 but no longer requires consensus_candidate_profile_gate. *)
+              (String.equal
+                 (string_value "validator_readiness_status" fields)
+                 "rejected"
+               || String.equal
+                    (string_value "validator_readiness_status" fields)
+                    "accepted")
             | _ -> false)
           entries)
    | _ -> failwith "paired profile root binding catalog must be list")
@@ -781,8 +784,9 @@ let check_profile_status_counts () =
    | `Assoc fields ->
      check "classified count" (Profile.classified_gate_count counts = 6);
      check "local-only count" (int_value "local_only" fields = 0);
-     check "candidate count" (int_value "consensus_candidate" fields = 3);
-     check "ready count" (int_value "consensus_ready" fields = 1);
+     (* LINEAR, RMSNORM, and byte-ingress are spine-ready; one explicit ready. *)
+     check "candidate count" (int_value "consensus_candidate" fields = 0);
+     check "ready count" (int_value "consensus_ready" fields = 4);
      check "unknown count" (int_value "unknown" fields = 2);
      check
        "mixed counts are not consensus-ready"
@@ -810,7 +814,6 @@ let check_profile_status_counts () =
              counts)
           [
             "unprofiled_profile_gates";
-            "consensus_candidate_profile_gates";
             "unknown_profile_gates";
           ]);
      let ready_counts =
@@ -1064,12 +1067,12 @@ let check_p0_profile_gate_coverage () =
 let check_inference_profile_surface_coverage () =
   let surface =
     [
-      "LOAD_F32_LE_FP", "byte-ingress-exact", "consensus_candidate",
+      "LOAD_F32_LE_FP", "byte-ingress-exact", "consensus_ready",
       "ec3f31d8a2cc8c4f390c372c6d489e5e3418b544967285e24efbb6aef65cacc2";
-      "LOAD_F64_LE_FP", "byte-ingress-exact", "consensus_candidate",
+      "LOAD_F64_LE_FP", "byte-ingress-exact", "consensus_ready",
       "d9c2a61f7e058320bef47cd240c6193b2c3b00426ce50ee61556b41779da0c45";
       "LINEAR_Q1_G128_FP", "deterministic-q1-g128-fp64-linear",
-      "consensus_candidate",
+      "consensus_ready",
       "1247c6e4e8364a774c2585a76a05fadfdf631e9e7562d4949ee5d1b358589367";
       "SIGMOID_FP", "host-fp-exp-local-candidate", "local_only",
       "7fdfb04d5c91a7f2b5e80e88c753eb4c16a5d302d52d25374bdccc8cada5bd24";
@@ -1084,10 +1087,10 @@ let check_inference_profile_surface_coverage () =
       "consensus_candidate",
       "f79dba18fda942ef0bc862c017b643688d45d15be1b46b0acf7494936cfe2bf0";
       "RMSNORM_FP_EPS", "deterministic-fp64-normalization",
-      "consensus_candidate",
+      "consensus_ready",
       "a77dc41d33540e3c6872f830b4c0df1280d23ea9f0a8e1ff2273039c23fe88f9";
       "L2NORM_FP", "deterministic-fp64-normalization",
-      "consensus_candidate",
+      "consensus_ready",
       "dacd9b51945432a4e025510c67edc28c65706de345c5770c2d0a2da4ab396875";
       "ELEMWISE_MUL_FP", "deterministic-fp64-elementwise",
       "consensus_candidate",
@@ -1105,7 +1108,7 @@ let check_inference_profile_surface_coverage () =
       "ATTENTION_WEIGHTED_SUM_FP", "deterministic-fp64-accumulation",
       "consensus_candidate",
       "31ccd36c648f33a0d1adabed83db830100090a49ad956a625cc53be21d2bc3fd";
-      "ARGMAX_FP", "deterministic-fp64-comparison", "consensus_candidate",
+      "ARGMAX_FP", "deterministic-fp64-comparison", "consensus_ready",
       "0b48c255fab38cd3a3ffe3fc57ab626532bafa3b54ffd690d4582625c58f1b42";
     ]
   in
@@ -1133,7 +1136,7 @@ let check_inference_profile_surface_coverage () =
        "p0 profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "8fcfd494596c84d4c2fb456acd3087ecb4882b46e5a933fb70662b0f4e42b8ab");
+	          "a38ad923425bb2b5727292cf21b032c2adb3498672938a66f824a54de241dc30");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "p0 readiness worklist count" (List.length rows = 5);
@@ -1193,7 +1196,7 @@ let check_inference_profile_surface_coverage () =
        "runtime profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "73e0d05be057622b36931c6c604735658a861e5fd1bdb5d07e1c0e4eec6c41f2");
+	          "7b7b61cebf91b7651840b3f9b1804edc42534a527ece83fb55f116097bfcf170");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "runtime readiness worklist count" (List.length rows = 17)
@@ -1239,8 +1242,8 @@ let check_inference_profile_surface_coverage () =
      check "surface local-only count" (int_value "local_only" fields = 4);
      check
        "surface consensus-candidate count"
-       (int_value "consensus_candidate" fields = 13);
-     check "surface consensus-ready count" (int_value "consensus_ready" fields = 0);
+       (int_value "consensus_candidate" fields = 7);
+     check "surface consensus-ready count" (int_value "consensus_ready" fields = 6);
      check "surface unknown count" (int_value "unknown" fields = 0)
    | _ -> failwith "surface status counts json must be object");
   (match Profile.profile_root_catalog_json gates with
@@ -1271,7 +1274,7 @@ let check_inference_profile_surface_coverage () =
      | `String root ->
 	       String.equal
 	         root
-		         "73e0d05be057622b36931c6c604735658a861e5fd1bdb5d07e1c0e4eec6c41f2"
+		         "7b7b61cebf91b7651840b3f9b1804edc42534a527ece83fb55f116097bfcf170"
      | _ -> false);
   check
     "empty profile catalog root"
@@ -1406,13 +1409,13 @@ let check_remaining_p0_profile_obligations () =
       "GATED_DELTA_RULE_FP", "next-state cells", "state-transition";
     ];
   List.iter
-    (fun opcode ->
+    (fun (opcode, expected_status) ->
       let gate = profile_gate opcode in
       check
-        (opcode ^ " consensus candidate")
+        (opcode ^ " consensus status")
         (String.equal
            (string_value "consensus_status" gate)
-           "consensus_candidate");
+           expected_status);
       check
         (opcode ^ " records no native fp math")
         (list_contains_substring
@@ -1460,7 +1463,7 @@ let check_remaining_p0_profile_obligations () =
           (String.equal expected "deterministic-fp64-normalization")
       | Error error -> failwith (Profile.error_message error)
       | Ok _ -> failwith (opcode ^ " should reject profile overclaim"))
-    ["RMSNORM_FP_EPS"; "L2NORM_FP"];
+    ["RMSNORM_FP_EPS", "consensus_ready"; "L2NORM_FP", "consensus_ready"];
   let l2_gate = profile_gate "L2NORM_FP" in
   (match List.assoc_opt "profile_contract" l2_gate with
    | Some (`Assoc contract) ->
@@ -1653,10 +1656,10 @@ let check_argmax_profile_gate () =
      | _ -> false);
   let gate = profile_gate "ARGMAX_FP" in
   check
-    "argmax consensus candidate"
+    "argmax consensus ready"
     (String.equal
        (string_value "consensus_status" gate)
-       "consensus_candidate");
+       "consensus_ready");
   check
     "argmax local tie semantics"
     (list_contains_substring
@@ -2276,10 +2279,10 @@ let check_byte_ingress_profile_gates () =
         | Error error -> failwith (Profile.error_message error)
       in
       check
-        (opcode ^ " consensus candidate")
+        (opcode ^ " consensus ready")
         (String.equal
            (Profile.status_string profile.Profile.consensus_status)
-           "consensus_candidate");
+           "consensus_ready");
       let gate =
         match Profile.to_json_for_opcode ~opcode profile with
         | `Assoc gate -> gate
