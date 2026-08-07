@@ -123,8 +123,8 @@ The practical decision from this corpus is conservative:
 | --- | --- |
 | `q16-exact` viable | immutable range reads; argmax only when ordering preservation is proven |
 | wider fixed point needed | residual add, elementwise multiply, attention weighted sum |
-| deterministic FP64 **now matrix-ready** (opcode-scoped profiles) | Q1 projection, RMSNorm, L2Norm, LOAD_F32/LOAD_F64 bit ingress, ARGMAX, Softmax, GDN |
-| deterministic FP64 candidate, still awaiting profile-root/cross-platform proof | residual add, elementwise multiply, causal depthwise convolution, attention scores, attention weighted sum |
+| deterministic FP64 **matrix-ready** | Q1 projection, RMSNorm, L2Norm, LOAD_F32/LOAD_F64 bit ingress, ARGMAX, Softmax, GDN, Sigmoid, Softplus, SiLU, attention scores, attention weighted sum, causal depthwise convolution, elementwise multiply, residual add |
+| deterministic FP64 candidate | none (16/17 opcodes consensus_ready) |
 | deterministic software transcendental still required for remaining host paths | SiLU, sigmoid, softplus, indexed RoPE (Softmax/GDN protocol-owned exp is already matrix-ready) |
 
 This means the existing Q16 surface is useful, but it is not the broad answer

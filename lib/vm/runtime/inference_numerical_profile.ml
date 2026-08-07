@@ -875,7 +875,7 @@ let of_name = function
   | "deterministic-fp64-elementwise" as name ->
     Ok {
       name;
-      consensus_status = Consensus_candidate;
+      consensus_status = Consensus_ready;
       summary = "deterministic finite binary64 elementwise arithmetic profile";
       required_actions = [
         "bind the numerical profile root in the model or request authority";
@@ -886,7 +886,7 @@ let of_name = function
   | "deterministic-fp64-accumulation" as name ->
     Ok {
       name;
-      consensus_status = Consensus_candidate;
+      consensus_status = Consensus_ready;
       summary = "deterministic finite binary64 accumulation profile";
       required_actions = [
         "bind the numerical profile root in the model or request authority";

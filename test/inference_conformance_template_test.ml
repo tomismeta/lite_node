@@ -1081,7 +1081,7 @@ let check_inference_profile_surface_coverage () =
       "SILU_FP", "deterministic-fp64-silu", "consensus_ready",
       "1e9da402fbea14ecd54a5ec775a76200bf1ff323315b94384a8e827148b82b98";
       "CAUSAL_DEPTHWISE_CONV1D_FP", "deterministic-fp64-accumulation",
-      "consensus_candidate",
+      "consensus_ready",
       "df645d83fe5fa0e32a7d5349b9b230de9002c0a980e32eb3d6582852fa05d545";
       "GATED_DELTA_RULE_FP", "deterministic-fp64-gated-delta",
       "consensus_ready",
@@ -1093,20 +1093,20 @@ let check_inference_profile_surface_coverage () =
       "consensus_ready",
       "1b8026e38d749fb7aebb33a75ecf236f295934dcebb3cc937734e4ee2c2f8c26";
       "ELEMWISE_MUL_FP", "deterministic-fp64-elementwise",
-      "consensus_candidate",
+      "consensus_ready",
       "e2d242453af8bc36fb42d0083c97d3cffff38d9ad1c4c364385e52b84cb898d3";
       "RESIDUAL_ADD_FP", "deterministic-fp64-elementwise",
-      "consensus_candidate",
+      "consensus_ready",
       "a1d1bc7242bcca11b31395d8313b552eec80e5174651637df0690adec41cd32f";
       "ROPE_APPLY_INDEXED_FP", "host-fp-trig-local-candidate", "local_only",
       "a36d7dad881a763dab58fdd62b12a3ba7adddcc021c979d86372583559f0a0f4";
       "ATTENTION_SCORES_FP", "deterministic-fp64-accumulation",
-      "consensus_candidate",
+      "consensus_ready",
       "20bfb100d037cb05d3208ed6c35bb36deae747ff2aa9fc1ac78f1078f19b56e5";
       "SOFTMAX_FP", "deterministic-fp64-softmax", "consensus_ready",
       "407122b6630ad06842386561a931d05325e2c206d6fe4cc4429360fd755de549";
       "ATTENTION_WEIGHTED_SUM_FP", "deterministic-fp64-accumulation",
-      "consensus_candidate",
+      "consensus_ready",
       "31ccd36c648f33a0d1adabed83db830100090a49ad956a625cc53be21d2bc3fd";
       "ARGMAX_FP", "deterministic-fp64-comparison", "consensus_ready",
       "0b48c255fab38cd3a3ffe3fc57ab626532bafa3b54ffd690d4582625c58f1b42";
@@ -1136,7 +1136,7 @@ let check_inference_profile_surface_coverage () =
        "p0 profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "19376a3823e400021d3a343e8ba5034ba8c7c452b44cd10a7c94b99bd209ffc3");
+	          "624ba24f7dd7e34b53064b2f44be2abb4e951a289c911de1ef4ac7ab6bf7184a");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "p0 readiness worklist count" (List.length rows = 13);
@@ -1196,7 +1196,7 @@ let check_inference_profile_surface_coverage () =
         "runtime profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "d7155fbae27675b630fa0e9ee7998d0daf6f078ae97b917317240bffaffb3fd0");
+	          "eb15d4395f254eb9ce54e1c481f3f42d55edd9ff81b92437d37292bd8cde5221");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "runtime readiness worklist count" (List.length rows = 17)
@@ -1242,8 +1242,8 @@ let check_inference_profile_surface_coverage () =
      check "surface local-only count" (int_value "local_only" fields = 1);
      check
        "surface consensus-candidate count"
-       (int_value "consensus_candidate" fields = 5);
-     check "surface consensus-ready count" (int_value "consensus_ready" fields = 11);
+       (int_value "consensus_candidate" fields = 0);
+     check "surface consensus-ready count" (int_value "consensus_ready" fields = 16);
      check "surface unknown count" (int_value "unknown" fields = 0)
    | _ -> failwith "surface status counts json must be object");
   (match Profile.profile_root_catalog_json gates with
@@ -1274,7 +1274,7 @@ let check_inference_profile_surface_coverage () =
      | `String root ->
 	       String.equal
 	         root
-		         "d7155fbae27675b630fa0e9ee7998d0daf6f078ae97b917317240bffaffb3fd0"
+		         "eb15d4395f254eb9ce54e1c481f3f42d55edd9ff81b92437d37292bd8cde5221"
      | _ -> false);
   check
     "empty profile catalog root"
@@ -1994,10 +1994,10 @@ let check_vector_arithmetic_profile_gates () =
          | _ -> false);
       let gate = profile_gate opcode in
       check
-        (opcode ^ " consensus candidate")
+        (opcode ^ " consensus ready")
         (String.equal
            (string_value "consensus_status" gate)
-           "consensus_candidate");
+           "consensus_ready");
       check
         (opcode ^ " local semantics")
         (list_contains_substring
@@ -2007,8 +2007,7 @@ let check_vector_arithmetic_profile_gates () =
         (opcode ^ " records no host math")
         (list_contains_substring
            "no native host math"
-           (string_list_value "local_semantics" gate));
-      check
+           (string_list_value "local_semantics" gate));      check
         (opcode ^ " consensus obligations")
         (list_contains_substring
            obligation_needle
@@ -2092,10 +2091,10 @@ let check_attention_profile_gates () =
          | _ -> false);
       let gate = profile_gate opcode in
       check
-        (opcode ^ " consensus candidate")
+        (opcode ^ " consensus ready")
         (String.equal
            (string_value "consensus_status" gate)
-           "consensus_candidate");
+           "consensus_ready");
       check
         (opcode ^ " profile name")
         (String.equal
@@ -2195,8 +2194,8 @@ let check_causal_conv_profile_gate () =
      | _ -> false);
   let gate = profile_gate "CAUSAL_DEPTHWISE_CONV1D_FP" in
   check
-    "causal conv consensus candidate"
-    (String.equal (string_value "consensus_status" gate) "consensus_candidate");
+    "causal conv consensus ready"
+    (String.equal (string_value "consensus_status" gate) "consensus_ready");
   check
     "causal conv profile name"
     (String.equal
