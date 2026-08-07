@@ -113,7 +113,6 @@ let opcode_selected opcode =
 let spine_matrix_opcodes =
   Template.p0_opcodes
   @ ["LOAD_F64_LE_FP"; "ARGMAX_FP"; "LOAD_F32_LE_FP"]
-
 let validate_selected_opcodes () =
   List.iter
     (fun opcode ->
@@ -2668,7 +2667,12 @@ let apply_mutation state registers values inputs mutation =
          values;
        `Executed
      | "set_count_to_zero" ->
-       set_int_reg state (reg_for "count" registers) 0;
+       let param =
+         match List.rev (String.split_on_char '.' target) with
+         | param :: _ -> param
+         | [] -> fail "bad count mutation target"
+       in
+       set_int_reg state (reg_for param registers) 0;
        `Executed
      | "set_epsilon_bits" ->
        set_z_reg state (reg_for "epsilon_bits" registers) (z_field "value_bits" fields);
@@ -3034,6 +3038,43 @@ let op_softplus registers =
 let op_silu registers =
   VM.SILU_FP (reg_for "addr" registers, reg_for "count" registers)
 
+let op_elemwise_mul registers =
+  VM.ELEMWISE_MUL_FP
+    (reg_for "dst" registers,
+     reg_for "src" registers,
+     reg_for "count" registers)
+
+let op_residual_add registers =
+  VM.RESIDUAL_ADD_FP
+    (reg_for "dst" registers,
+     reg_for "src" registers,
+     reg_for "count" registers)
+
+let op_attention_scores registers =
+  VM.ATTENTION_SCORES_FP
+    (reg_for "dst" registers,
+     reg_for "query" registers,
+     reg_for "key" registers,
+     reg_for "key_count" registers,
+     reg_for "head_dim" registers)
+
+let op_attention_weighted_sum registers =
+  VM.ATTENTION_WEIGHTED_SUM_FP
+    (reg_for "dst" registers,
+     reg_for "probs" registers,
+     reg_for "value" registers,
+     reg_for "key_count" registers,
+     reg_for "head_dim" registers)
+
+let op_causal_depthwise_conv registers =
+  VM.CAUSAL_DEPTHWISE_CONV1D_FP
+    (reg_for "dst" registers,
+     reg_for "input" registers,
+     reg_for "kernel" registers,
+     reg_for "timesteps" registers,
+     reg_for "channels" registers,
+     reg_for "width" registers)
+
 let op_load_f64 registers =
   VM.LOAD_F64_LE_FP
     (reg_for "dst" registers,
@@ -3080,6 +3121,11 @@ let op_for opcode registers =
   | "SIGMOID_FP" -> op_sigmoid registers
   | "SOFTPLUS_FP" -> op_softplus registers
   | "SILU_FP" -> op_silu registers
+  | "ELEMWISE_MUL_FP" -> op_elemwise_mul registers
+  | "RESIDUAL_ADD_FP" -> op_residual_add registers
+  | "ATTENTION_SCORES_FP" -> op_attention_scores registers
+  | "ATTENTION_WEIGHTED_SUM_FP" -> op_attention_weighted_sum registers
+  | "CAUSAL_DEPTHWISE_CONV1D_FP" -> op_causal_depthwise_conv registers
   | "LOAD_F64_LE_FP" -> op_load_f64 registers
   | "LOAD_F32_LE_FP" -> op_load_f32 registers
   | "ARGMAX_FP" -> op_argmax registers
@@ -3094,6 +3140,11 @@ let opcode_name = function
   | VM.SIGMOID_FP _ -> "SIGMOID_FP"
   | VM.SOFTPLUS_FP _ -> "SOFTPLUS_FP"
   | VM.SILU_FP _ -> "SILU_FP"
+  | VM.ELEMWISE_MUL_FP _ -> "ELEMWISE_MUL_FP"
+  | VM.RESIDUAL_ADD_FP _ -> "RESIDUAL_ADD_FP"
+  | VM.ATTENTION_SCORES_FP _ -> "ATTENTION_SCORES_FP"
+  | VM.ATTENTION_WEIGHTED_SUM_FP _ -> "ATTENTION_WEIGHTED_SUM_FP"
+  | VM.CAUSAL_DEPTHWISE_CONV1D_FP _ -> "CAUSAL_DEPTHWISE_CONV1D_FP"
   | VM.LOAD_F64_LE_FP _ -> "LOAD_F64_LE_FP"
   | VM.LOAD_F32_LE_FP _ -> "LOAD_F32_LE_FP"
   | VM.ARGMAX_FP _ -> "ARGMAX_FP"

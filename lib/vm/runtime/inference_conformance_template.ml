@@ -125,6 +125,31 @@ let requirements = [
     primitives = ["silu_fp"];
     effects = ["memory_read"; "memory_write"];
   };
+  {
+    opcode = "ELEMWISE_MUL_FP";
+    primitives = ["elemwise_mul_fp"];
+    effects = ["memory_read"; "memory_write"];
+  };
+  {
+    opcode = "RESIDUAL_ADD_FP";
+    primitives = ["residual_add_fp"];
+    effects = ["memory_read"; "memory_write"];
+  };
+  {
+    opcode = "ATTENTION_SCORES_FP";
+    primitives = ["attention_scores_fp"];
+    effects = ["memory_read"; "memory_write"];
+  };
+  {
+    opcode = "ATTENTION_WEIGHTED_SUM_FP";
+    primitives = ["attention_weighted_sum_fp"];
+    effects = ["memory_read"; "memory_write"];
+  };
+  {
+    opcode = "CAUSAL_DEPTHWISE_CONV1D_FP";
+    primitives = ["causal_depthwise_conv1d_fp"];
+    effects = ["memory_read"; "memory_write"];
+  };
 ]
 
 let p0_opcodes = List.map (fun requirement -> requirement.opcode) requirements
@@ -653,6 +678,259 @@ let vm_semantics_contract_json ~opcode =
         `List [
           `String "opcode base effort is 200";
           `String "dynamic effort is 4 * timesteps * v_heads * value_dim * key_dim + 2 * timesteps * v_heads * value_dim + timesteps * v_heads";
+          `String "program effort also includes surrounding VM instructions such as STOP";
+        ];
+      ])
+  | "ELEMWISE_MUL_FP" ->
+    Some
+      (`Assoc [
+        "schema", `String "octra.inference.vm-semantics.v1";
+        "opcode", `String opcode;
+        "bytecode", `String "0x72";
+        "signature", `String "ELEMWISE_MUL_FP(dst, src, count)";
+        "register_roles",
+        `List [
+          `String "dst: destination base cell (also first operand)";
+          `String "src: source base cell";
+          `String "count: number of binary64 cells";
+        ];
+        "memory_units",
+        `List [
+          `String "cells use one binary64 bit pattern per VM cell";
+        ];
+        "shape_policy",
+        `List [
+          `String "count must be positive and both spans must be valid large VM memory spans";
+          `String "dst/src overlap is rejected unless the spans are exactly the same range";
+        ];
+        "arithmetic_policy",
+        `List [
+          `String "read both spans before writeback";
+          `String "output[i] = dst[i] * src[i] with deterministic finite binary64 multiplication";
+          `String "no native host math is used";
+        ];
+        "read_write_policy",
+        `List [
+          `String "compute every output cell before mutating dst";
+          `String "reject before writeback on missing cells, non-finite values, invalid span, arithmetic failure, or effort exhaustion";
+        ];
+        "output_policy",
+        `List [
+          `String "outputs are stored as binary64 bit patterns in dst order";
+          `String "the opcode does not mutate session ABI registers";
+        ];
+        "consensus_note",
+        `String
+          "deterministic binary64 elementwise multiply is host-math-free; deterministic-fp64-elementwise is consensus_candidate pending dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
+        "effort_policy",
+        `List [
+          `String "opcode base effort is 10";
+          `String "dynamic effort is count * 3";
+          `String "program effort also includes surrounding VM instructions such as STOP";
+        ];
+      ])
+  | "RESIDUAL_ADD_FP" ->
+    Some
+      (`Assoc [
+        "schema", `String "octra.inference.vm-semantics.v1";
+        "opcode", `String opcode;
+        "bytecode", `String "0x73";
+        "signature", `String "RESIDUAL_ADD_FP(dst, src, count)";
+        "register_roles",
+        `List [
+          `String "dst: destination base cell (also first operand)";
+          `String "src: source base cell";
+          `String "count: number of binary64 cells";
+        ];
+        "memory_units",
+        `List [
+          `String "cells use one binary64 bit pattern per VM cell";
+        ];
+        "shape_policy",
+        `List [
+          `String "count must be positive and both spans must be valid large VM memory spans";
+          `String "dst/src overlap is rejected unless the spans are exactly the same range";
+        ];
+        "arithmetic_policy",
+        `List [
+          `String "read both spans before writeback";
+          `String "output[i] = dst[i] + src[i] with deterministic finite binary64 addition";
+          `String "no native host math is used";
+        ];
+        "read_write_policy",
+        `List [
+          `String "compute every output cell before mutating dst";
+          `String "reject before writeback on missing cells, non-finite values, invalid span, arithmetic failure, or effort exhaustion";
+        ];
+        "output_policy",
+        `List [
+          `String "outputs are stored as binary64 bit patterns in dst order";
+          `String "the opcode does not mutate session ABI registers";
+        ];
+        "consensus_note",
+        `String
+          "deterministic binary64 elementwise add is host-math-free; deterministic-fp64-elementwise is consensus_candidate pending dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
+        "effort_policy",
+        `List [
+          `String "opcode base effort is 10";
+          `String "dynamic effort is count * 2";
+          `String "program effort also includes surrounding VM instructions such as STOP";
+        ];
+      ])
+  | "ATTENTION_SCORES_FP" ->
+    Some
+      (`Assoc [
+        "schema", `String "octra.inference.vm-semantics.v1";
+        "opcode", `String opcode;
+        "bytecode", `String "0x93";
+        "signature", `String "ATTENTION_SCORES_FP(dst, query, key, key_count, head_dim)";
+        "register_roles",
+        `List [
+          `String "dst: output score base cell (key_count cells)";
+          `String "query: query base cell (head_dim cells)";
+          `String "key: key base cell (key_count * head_dim cells)";
+          `String "key_count: number of keys";
+          `String "head_dim: dimension per head";
+        ];
+        "memory_units",
+        `List [
+          `String "cells use one binary64 bit pattern per VM cell";
+        ];
+        "shape_policy",
+        `List [
+          `String "key_count must be positive and at most 8192; head_dim positive and at most 1024";
+          `String "all spans must be valid large VM memory spans";
+          `String "dst must not overlap query or key";
+        ];
+        "arithmetic_policy",
+        `List [
+          `String "read query and key spans before writeback";
+          `String "scale = deterministic finite binary64 inverse_sqrt(head_dim)";
+          `String "score[key] = sum_dim query[dim] * key[key * head_dim + dim] * scale in dim ascending order";
+          `String "all multiply, add, and scale steps use the deterministic finite binary64 core";
+          `String "no native host math is used";
+        ];
+        "read_write_policy",
+        `List [
+          `String "compute every score before mutating dst";
+          `String "reject before writeback on missing cells, non-finite values, invalid spans, arithmetic failure, or effort exhaustion";
+        ];
+        "output_policy",
+        `List [
+          `String "outputs are stored as binary64 bit patterns in dst order";
+          `String "the opcode does not mutate session ABI registers";
+        ];
+        "consensus_note",
+        `String
+          "deterministic binary64 score accumulation is host-math-free; deterministic-fp64-accumulation is consensus_candidate pending dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
+        "effort_policy",
+        `List [
+          `String "opcode base effort is 100";
+          `String "dynamic effort is 4 * key_count * head_dim";
+          `String "program effort also includes surrounding VM instructions such as STOP";
+        ];
+      ])
+  | "ATTENTION_WEIGHTED_SUM_FP" ->
+    Some
+      (`Assoc [
+        "schema", `String "octra.inference.vm-semantics.v1";
+        "opcode", `String opcode;
+        "bytecode", `String "0x95";
+        "signature", `String "ATTENTION_WEIGHTED_SUM_FP(dst, probs, value, key_count, head_dim)";
+        "register_roles",
+        `List [
+          `String "dst: output base cell (head_dim cells)";
+          `String "probs: probability base cell (key_count cells)";
+          `String "value: value base cell (key_count * head_dim cells)";
+          `String "key_count: number of keys";
+          `String "head_dim: dimension per head";
+        ];
+        "memory_units",
+        `List [
+          `String "cells use one binary64 bit pattern per VM cell";
+        ];
+        "shape_policy",
+        `List [
+          `String "key_count must be positive and at most 8192; head_dim positive and at most 1024";
+          `String "all spans must be valid large VM memory spans";
+          `String "dst must not overlap probs or value";
+        ];
+        "arithmetic_policy",
+        `List [
+          `String "read probs and value spans before writeback";
+          `String "output[dim] = sum_key probs[key] * value[key * head_dim + dim] in key ascending order";
+          `String "all multiply and add steps use the deterministic finite binary64 core";
+          `String "no native host math is used";
+        ];
+        "read_write_policy",
+        `List [
+          `String "compute every output cell before mutating dst";
+          `String "reject before writeback on missing cells, non-finite values, invalid spans, arithmetic failure, or effort exhaustion";
+        ];
+        "output_policy",
+        `List [
+          `String "outputs are stored as binary64 bit patterns in dst order";
+          `String "the opcode does not mutate session ABI registers";
+        ];
+        "consensus_note",
+        `String
+          "deterministic binary64 weighted-sum accumulation is host-math-free; deterministic-fp64-accumulation is consensus_candidate pending dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
+        "effort_policy",
+        `List [
+          `String "opcode base effort is 100";
+          `String "dynamic effort is 4 * key_count * head_dim";
+          `String "program effort also includes surrounding VM instructions such as STOP";
+        ];
+      ])
+  | "CAUSAL_DEPTHWISE_CONV1D_FP" ->
+    Some
+      (`Assoc [
+        "schema", `String "octra.inference.vm-semantics.v1";
+        "opcode", `String opcode;
+        "bytecode", `String "0x8D";
+        "signature", `String "CAUSAL_DEPTHWISE_CONV1D_FP(dst, input, kernel, timesteps, channels, width)";
+        "register_roles",
+        `List [
+          `String "dst: output base cell (timesteps * channels cells)";
+          `String "input: input base cell (timesteps * channels cells)";
+          `String "kernel: kernel base cell (channels * width cells)";
+          `String "timesteps: number of timesteps";
+          `String "channels: number of channels";
+          `String "width: kernel width";
+        ];
+        "memory_units",
+        `List [
+          `String "cells use one binary64 bit pattern per VM cell";
+        ];
+        "shape_policy",
+        `List [
+          `String "timesteps, channels, and width must all be positive";
+          `String "all spans must be valid large VM memory spans";
+        ];
+        "arithmetic_policy",
+        `List [
+          `String "read input and kernel spans before writeback";
+          `String "output[t, c] = sum_k input[(t - k) * channels + c] * kernel[c * width + k] for t >= k in k ascending order";
+          `String "all multiply and add steps use the deterministic finite binary64 core";
+          `String "no native host math is used";
+        ];
+        "read_write_policy",
+        `List [
+          `String "compute every output cell before mutating dst";
+          `String "reject before writeback on missing cells, non-finite values, invalid spans, arithmetic failure, or effort exhaustion";
+        ];
+        "output_policy",
+        `List [
+          `String "outputs are stored as binary64 bit patterns in dst order";
+          `String "the opcode does not mutate session ABI registers";
+        ];
+        "consensus_note",
+        `String
+          "deterministic binary64 causal depthwise convolution is host-math-free; deterministic-fp64-accumulation is consensus_candidate pending dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
+        "effort_policy",
+        `List [
+          `String "opcode base effort is 100";
+          `String "dynamic effort is timesteps * channels * width";
           `String "program effort also includes surrounding VM instructions such as STOP";
         ];
       ])

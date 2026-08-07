@@ -202,7 +202,7 @@ let check_accepts_template () =
   match Template.of_json (template ()) with
   | Error error -> failwith (Template.error_message error)
   | Ok result ->
-    check "p0 opcode count" (List.length Template.p0_opcodes = 8);
+    check "p0 opcode count" (List.length Template.p0_opcodes = 13);
     check "opcode" (String.equal result.Template.opcode "RMSNORM_FP_EPS");
     check "register count" (List.length result.registers = 4);
     check "memory count" (List.length result.memory = 1);
@@ -1131,15 +1131,15 @@ let check_inference_profile_surface_coverage () =
        (String.equal
           (string_value "schema" fields)
           "octra.inference.profile-catalog.v1");
-     check "p0 profile catalog count" (int_value "opcode_count" fields = 8);
+     check "p0 profile catalog count" (int_value "opcode_count" fields = 13);
      check
        "p0 profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "a70fa147bdb3fb6f47b112a5d10b4c09b6de3ea8a9b7524eac4c5a1bfca7cdb1");
+	          "19376a3823e400021d3a343e8ba5034ba8c7c452b44cd10a7c94b99bd209ffc3");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
-        check "p0 readiness worklist count" (List.length rows = 8);
+        check "p0 readiness worklist count" (List.length rows = 13);
         let row opcode =
           List.find_opt
             (function
