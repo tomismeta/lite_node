@@ -78,6 +78,41 @@ let rec pin_ranges ~read acc total = function
          let next_total = total + pinned.length in
          pin_ranges ~read (pinned :: acc) next_total rest)
 
+(* Streamed pinning: read_span hashes the whole owner in one pass and returns
+   only the range span (plus the actual owner root), so multi-GB owners never
+   become full heap strings. *)
+let pin_range_streamed ~read_span (range : Inference_model.range) =
+  match read_span range with
+  | None -> Error (Missing_owner range.owner_root)
+  | Some (actual_owner_root, span) ->
+    if not (String.equal actual_owner_root range.owner_root) then
+      Error (Owner_root_mismatch (range.owner_root, actual_owner_root))
+    else if String.length span <> range.length then
+      Error (Range_out_of_bounds
+               (range.owner_root, range.offset, range.length, String.length span))
+    else
+      Ok {
+        range_root = Inference_model.range_root range;
+        owner_root = range.owner_root;
+        offset = range.offset;
+        length = range.length;
+        encoding = range.encoding;
+        shape_root = range.shape_root;
+        bytes = span;
+      }
+
+let rec pin_ranges_streamed ~read_span acc total = function
+  | [] -> Ok (List.rev acc, total)
+  | range :: rest ->
+    (match pin_range_streamed ~read_span range with
+     | Error error -> Error error
+     | Ok pinned ->
+       if total > max_int - pinned.length then
+         Error (Range_overflow (total, pinned.length))
+       else
+         let next_total = total + pinned.length in
+         pin_ranges_streamed ~read_span (pinned :: acc) next_total rest)
+
 let rec preflight_total limit total (ranges : Inference_model.range list) =
   match ranges with
   | [] -> Ok total
@@ -106,6 +141,25 @@ let pin ~limits ~read model =
   | Error error -> Error error
   | Ok _ ->
     (match pin_ranges ~read [] 0 model.Inference_model.ranges with
+     | Error error -> Error error
+     | Ok (ranges, _) ->
+       Ok {
+         model_root = model.model_root;
+         store_root = model.store_root;
+         model_ranges_root = Inference_model.root model;
+         ranges;
+       })
+
+let pin_streamed ~limits ~read_span model =
+  match
+    preflight_total
+      limits.Execution_requirement.max_model_bytes
+      0
+      model.Inference_model.ranges
+  with
+  | Error error -> Error error
+  | Ok _ ->
+    (match pin_ranges_streamed ~read_span [] 0 model.Inference_model.ranges with
      | Error error -> Error error
      | Ok (ranges, _) ->
        Ok {

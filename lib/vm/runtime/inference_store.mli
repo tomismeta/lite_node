@@ -38,6 +38,12 @@ val pin :
   Inference_model.t ->
   (pin_set, error) result
 
+val pin_streamed :
+  limits:Execution_requirement.limits ->
+  read_span:(Inference_model.range -> (string * string) option) ->
+  Inference_model.t ->
+  (pin_set, error) result
+
 val model_root : pin_set -> string
 val store_root : pin_set -> string
 val model_ranges_root : pin_set -> string

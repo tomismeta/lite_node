@@ -269,7 +269,6 @@ type continuation_preflight = {
 
 let max_batch_stages = 256
 
-let max_batch_owner_cache_entries = 4096
 
 let max_batch_pin_cache_entries = 512
 
@@ -1045,11 +1044,42 @@ let check_declared_root name declared actual =
   | Some expected ->
     Error (Printf.sprintf "%s mismatch: expected %s actual %s" name expected actual)
 
-let read_range_source sources owner_root =
+(* Streamed owner authentication: hash the whole owner file in 1 MiB chunks
+   while capturing the range span window [offset, offset + length), so
+   multi-GB owners never become full heap strings. Returns
+   (actual_owner_root, span_bytes) or None when the span is out of bounds. *)
+let read_owner_span sources owner_root offset length =
   match List.assoc_opt owner_root sources with
   | None -> None
   | Some path ->
-    try Some (read_file path) with Sys_error error -> fail error
+    try
+      let ic = open_in_bin path in
+      let digest = ref (Digestif.SHA256.init ()) in
+      let span = Buffer.create length in
+      let buf = Bytes.create (1 lsl 20) in
+      let position = ref 0 in
+      let finished = ref false in
+      while not !finished do
+        let count = input ic buf 0 (Bytes.length buf) in
+        if count = 0 then finished := true
+        else begin
+          digest := Digestif.SHA256.feed_bytes ~off:0 ~len:count !digest buf;
+          let window_start = max !position offset in
+          let window_stop = min (!position + count) (offset + length) in
+          if window_stop > window_start then
+            Buffer.add_subbytes
+              span
+              buf
+              (window_start - !position)
+              (window_stop - window_start);
+          position := !position + count
+        end
+      done;
+      close_in ic;
+      let root = Digestif.SHA256.(to_hex (get !digest)) in
+      let bytes = Buffer.contents span in
+      if String.length bytes <> length then None else Some (root, bytes)
+    with Sys_error error -> fail error
 
 let sha256 raw =
   Digestif.SHA256.(digest_string raw |> to_hex)
@@ -2178,22 +2208,9 @@ let batch_cache () =
     pins_by_ranges_root_and_limit = Hashtbl.create 64;
   }
 
-let cached_range_reader cache sources owner_root =
-  match Hashtbl.find_opt cache.owner_bytes owner_root with
-  | Some bytes -> Some bytes
-  | None ->
-    (match read_range_source sources owner_root with
-     | None -> None
-     | Some bytes ->
-       if Hashtbl.length cache.owner_bytes >= max_batch_owner_cache_entries then
-         fail
-           (Printf.sprintf
-              "batch owner-byte cache exceeded: %d"
-              max_batch_owner_cache_entries);
-       Hashtbl.replace cache.owner_bytes owner_root bytes;
-       Some bytes)
-
-let batch_pins cache ~limits ~read model =
+(* Streamed pinning with the span reader: owners are hashed and sliced in a
+   single pass, so multi-GB owners never become full heap strings. *)
+let batch_pins_streamed cache ~limits ~read_span model =
   let model_ranges_root = Model.root model in
   let cache_key =
     Printf.sprintf
@@ -2204,7 +2221,7 @@ let batch_pins cache ~limits ~read model =
   match Hashtbl.find_opt cache.pins_by_ranges_root_and_limit cache_key with
   | Some pins -> Ok pins
   | None ->
-    (match Store.pin ~limits ~read model with
+    (match Store.pin_streamed ~limits ~read_span model with
      | Error error -> Error error
      | Ok pins ->
        if
@@ -2331,11 +2348,19 @@ let prepare_batch_stage ~cache ~timer stage =
    | Error error -> fail error
    | Ok () -> ());
   timing_mark timer "root_checks";
-  let read =
-    cached_range_reader cache stage.range_sources
-  in
   let pins =
-    match batch_pins cache ~limits:requirement.Req.limits ~read model_packet.model with
+    match
+      batch_pins_streamed
+        cache
+        ~limits:requirement.Req.limits
+        ~read_span:(fun range ->
+          read_owner_span
+            stage.range_sources
+            range.Model.owner_root
+            range.Model.offset
+            range.Model.length)
+        model_packet.model
+    with
     | Error error -> fail (Store.error_message error)
     | Ok pins -> pins
   in
@@ -5655,13 +5680,18 @@ let () =
                  | Error error -> fail (Model.error_message error)
                  | Ok () ->
                    timing_mark timer "model_check";
-                   let read =
-                     read_range_source paths.range_sources
+                   let read_span =
+                     fun range ->
+                       read_owner_span
+                         paths.range_sources
+                         range.Model.owner_root
+                         range.Model.offset
+                         range.Model.length
                    in
                    match
-                     Store.pin
+                     Store.pin_streamed
                        ~limits:requirement.Req.limits
-                       ~read
+                       ~read_span
                        model_packet.model
                    with
                    | Error error -> fail (Store.error_message error)
