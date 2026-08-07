@@ -483,7 +483,8 @@ let vm_semantics_contract_json ~opcode =
           `String "the opcode does not mutate session ABI registers";
         ];
         "consensus_note",
-        `String "protocol-owned nonpositive exp is deterministic but remains a consensus candidate until P0 vectors and cross-platform conformance are accepted";
+        `String
+          "protocol-owned nonpositive exp is deterministic and consensus_ready on deterministic-fp64-gated-delta after dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
         "effort_policy",
         `List [
           `String "opcode base effort is 200";

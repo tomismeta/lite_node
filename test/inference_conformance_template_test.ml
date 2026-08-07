@@ -1084,7 +1084,7 @@ let check_inference_profile_surface_coverage () =
       "consensus_candidate",
       "df645d83fe5fa0e32a7d5349b9b230de9002c0a980e32eb3d6582852fa05d545";
       "GATED_DELTA_RULE_FP", "deterministic-fp64-gated-delta",
-      "consensus_candidate",
+      "consensus_ready",
       "f79dba18fda942ef0bc862c017b643688d45d15be1b46b0acf7494936cfe2bf0";
       "RMSNORM_FP_EPS", "deterministic-fp64-rmsnorm",
       "consensus_ready",
@@ -1136,7 +1136,7 @@ let check_inference_profile_surface_coverage () =
        "p0 profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "8e6f605367fef50e362a3c6c293453cd69313ce6136854cf7c126d23c8622a04");
+	          "d26cf4ca48d4e7563828c31ad0778acd1859f3c9a16ecef2ad5f90c5009a57e1");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "p0 readiness worklist count" (List.length rows = 5);
@@ -1196,7 +1196,7 @@ let check_inference_profile_surface_coverage () =
        "runtime profile catalog root"
 	       (String.equal
 	          (string_value "profile_catalog_root" fields)
-	          "d1e4046d7360b6bd9f52517854a27c67933ef34911d3ba727491be1e8ab7db78");
+	          "488f9420143bbb54234eb19b86616d81ffdfeadaac1963a9e3069c3e76449136");
      (match assoc_value "profile_readiness_worklist" fields with
       | `List rows ->
         check "runtime readiness worklist count" (List.length rows = 17)
@@ -1242,8 +1242,8 @@ let check_inference_profile_surface_coverage () =
      check "surface local-only count" (int_value "local_only" fields = 4);
      check
        "surface consensus-candidate count"
-       (int_value "consensus_candidate" fields = 9);
-     check "surface consensus-ready count" (int_value "consensus_ready" fields = 4);
+       (int_value "consensus_candidate" fields = 8);
+     check "surface consensus-ready count" (int_value "consensus_ready" fields = 5);
      check "surface unknown count" (int_value "unknown" fields = 0)
    | _ -> failwith "surface status counts json must be object");
   (match Profile.profile_root_catalog_json gates with
@@ -1274,7 +1274,7 @@ let check_inference_profile_surface_coverage () =
      | `String root ->
 	       String.equal
 	         root
-		         "d1e4046d7360b6bd9f52517854a27c67933ef34911d3ba727491be1e8ab7db78"
+		         "488f9420143bbb54234eb19b86616d81ffdfeadaac1963a9e3069c3e76449136"
      | _ -> false);
   check
     "empty profile catalog root"
@@ -1562,8 +1562,8 @@ let check_remaining_p0_profile_obligations () =
        (string_value "name" delta_gate)
        "deterministic-fp64-gated-delta");
   check
-    "delta is consensus candidate"
-    (String.equal (string_value "consensus_status" delta_gate) "consensus_candidate");
+    "delta is consensus ready"
+    (String.equal (string_value "consensus_status" delta_gate) "consensus_ready");
   check_protocol_owned_transcendental_obligation "GATED_DELTA_RULE_FP" delta_gate;
   let delta_blockers =
     string_list_value "consensus_blocker_codes" delta_gate
@@ -2573,10 +2573,16 @@ let check_p0_vm_semantics_contracts () =
 	         "protocol-owned Q256"
 	         (string_list_value "arithmetic_policy" semantics));
 	    check
-	      "gated delta semantics marks consensus candidate"
-	      (contains_substring
-	         "consensus candidate"
-	         (string_value "consensus_note" semantics))
+      "gated delta semantics marks consensus ready"
+      (contains_substring
+         "consensus_ready"
+         (string_value "consensus_note" semantics));
+    check
+      "gated delta semantics no longer claims candidate-only status"
+      (not
+         (contains_substring
+            "remains a consensus candidate"
+            (string_value "consensus_note" semantics)))
    | _ -> failwith "missing gated delta vm semantics contract");
   (match Template.vm_semantics_contract_json ~opcode:"RMSNORM_FP_EPS" with
    | Some (`Assoc semantics) ->

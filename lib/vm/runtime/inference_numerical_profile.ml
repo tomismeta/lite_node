@@ -896,12 +896,12 @@ let of_name = function
   | "deterministic-fp64-gated-delta" as name ->
     Ok {
       name;
-      consensus_status = Consensus_candidate;
+      consensus_status = Consensus_ready;
       summary =
-        "deterministic finite binary64 Gated Delta recurrence profile with protocol-owned nonpositive exp";
+        "deterministic finite binary64 Gated Delta recurrence profile with protocol-owned nonpositive exp (spine-ready GATED_DELTA_RULE_FP)";
       required_actions = [
         "bind the numerical profile root in the model or request authority";
-        "qualify protocol-owned nonpositive exp, recurrence add/mul, dot-product, reciprocal division, and sqrt behavior across validators";
+        "preserve protocol-owned nonpositive exp, recurrence add/mul, dot-product, reciprocal division, and sqrt from multi-platform matrix evidence";
         "pin head mapping, decay order, beta application, state update order, aliasing, effort, and atomic writeback policy";
       ];
     }
