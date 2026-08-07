@@ -83,7 +83,7 @@ Capabilities are cumulative. Higher rungs assume lower rungs.
 | C8 | Met (local) | Decode transition bound `decode_token_contract_status` with VM-emitted `selected_index` matching the pinned reference (`310`) |
 | C9 | Partial | Prior-state selected-index contract present; S5 multi-decode remains blocked |
 | C10 | Not met | Inference off consensus critical path; explicit ceilings |
-| C11 | Partial | Spine ops (`LINEAR_Q1_G128_FP`, `RMSNORM_FP_EPS`, `L2NORM_FP`, `SOFTMAX_FP`, `GATED_DELTA_RULE_FP`, `LOAD_F32_LE_FP`, `LOAD_F64_LE_FP`, `ARGMAX_FP`) statically `consensus_ready`; dual-platform matrix sealed at `46d63d1` (`litenode-p0-linux-46d63d1-20260807-152258`). Remaining ops stay candidate/local_only. |
+| C11 | Partial | 11 ops statically `consensus_ready`: spine ops (sealed at `46d63d1`, `litenode-p0-linux-46d63d1-20260807-152258`) plus `SIGMOID_FP`, `SOFTPLUS_FP`, `SILU_FP` on host-libm-free protocol exp/log1p (sealed at `f259b45`, `activation-p0-matrix-20260807-174753`). Remaining ops: 5 candidate (attention/conv/elementwise), ROPE local_only. |
 
 ## Packet contracts LiteNode enforces (no stage names)
 
