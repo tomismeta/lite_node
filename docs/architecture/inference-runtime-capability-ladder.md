@@ -78,8 +78,10 @@ Capabilities are cumulative. Higher rungs assume lower rungs.
 | C3 | Met (local) | Committed-state ABI present; not durable network store |
 | C4 | Partial | FLOAD works; pin reuse / residency still product work |
 | C5 | Met (local) | `graph_real` / `lifecycle_only` evidence rules |
-| C6 | In progress | Composed programs admitted when producer emits them |
-| C7–C9 | Partial | Shell works; full continuous product graph not claimed |
+| C6 | Met (local) | Composed spine programs admitted and executed: S4 FLOAD+RMSNORM+LINEAR+ARGMAX ran end-to-end on the external harness (`46d63d1`) |
+| C7 | Met (local, spine path) | Continuous prefill+decode under one resident session accepted by the harness (spine S4); full-model continuous graph still not claimed |
+| C8 | Met (local) | Decode transition bound `decode_token_contract_status` with VM-emitted `selected_index` matching the pinned reference (`310`) |
+| C9 | Partial | Prior-state selected-index contract present; S5 multi-decode remains blocked |
 | C10 | Not met | Inference off consensus critical path; explicit ceilings |
 | C11 | Partial | Spine ops (`LINEAR_Q1_G128_FP`, `RMSNORM_FP_EPS`, `L2NORM_FP`, `SOFTMAX_FP`, `GATED_DELTA_RULE_FP`, `LOAD_F32_LE_FP`, `LOAD_F64_LE_FP`, `ARGMAX_FP`) statically `consensus_ready`; dual-platform matrix sealed at `46d63d1` (`litenode-p0-linux-46d63d1-20260807-152258`). Remaining ops stay candidate/local_only. |
 
