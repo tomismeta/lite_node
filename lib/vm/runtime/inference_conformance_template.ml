@@ -472,7 +472,7 @@ let vm_semantics_contract_json ~opcode =
          ];
          "consensus_note",
          `String
-           "protocol-owned exp makes SIGMOID_FP host-libm-free; deterministic-fp64-sigmoid is consensus_candidate pending dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
+           "protocol-owned exp makes SIGMOID_FP host-libm-free; deterministic-fp64-sigmoid is consensus_ready after dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
          "effort_policy",
          `List [
            `String "opcode base effort is 20";
@@ -521,7 +521,7 @@ let vm_semantics_contract_json ~opcode =
          ];
          "consensus_note",
          `String
-           "protocol-owned exp and artanh-series log1p make SOFTPLUS_FP host-libm-free; deterministic-fp64-softplus is consensus_candidate pending dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
+           "protocol-owned exp and artanh-series log1p make SOFTPLUS_FP host-libm-free; deterministic-fp64-softplus is consensus_ready after dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
          "effort_policy",
          `List [
            `String "opcode base effort is 20";
@@ -568,7 +568,7 @@ let vm_semantics_contract_json ~opcode =
          ];
          "consensus_note",
          `String
-           "protocol-owned exp makes SILU_FP host-libm-free; deterministic-fp64-silu is consensus_candidate pending dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
+           "protocol-owned exp makes SILU_FP host-libm-free; deterministic-fp64-silu is consensus_ready after dual-platform matrix with punitive acceptance; catalog profile status is the readiness authority";
          "effort_policy",
          `List [
            `String "opcode base effort is 20";
