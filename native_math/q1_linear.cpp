@@ -14,7 +14,10 @@
 
    The OCaml side passes lhs/out as int64 arrays holding binary64 bit
    patterns (matching the VM's bit-cell storage); the C side reinterprets
-   them as doubles without any conversion. */
+   them as doubles without any conversion. The lhs is copied once into a
+   contiguous buffer because the OCaml int64 array is boxed; the sign bits
+   are loaded as two little-endian 64-bit words (bit i maps to item i) and
+   decoded branchlessly. */
 
 #include <cmath>
 #include <cstdint>
@@ -98,7 +101,17 @@ CAMLprim value octra_native_q1_g128_linear(value lhs_arr, value out_arr,
     CAMLreturn(Val_int(-1));
   }
 
+  double* lhs_values =
+      new double[(uint64_t)(m * k) == 0 ? 1 : (uint64_t)(m * k)];
+  for (int64_t i = 0; i < m * k; ++i) {
+    const int64_t lhs_bits = Int64_val(Field(lhs_arr, i));
+    double lhs_value;
+    std::memcpy(&lhs_value, &lhs_bits, sizeof(lhs_value));
+    lhs_values[i] = lhs_value;
+  }
+
   for (int64_t row = 0; row < m; ++row) {
+    const int64_t lhs_row = row * k;
     for (int64_t col = 0; col < n; ++col) {
       double acc = 0.0;
       bool cell_ok = true;
@@ -108,27 +121,39 @@ CAMLprim value octra_native_q1_g128_linear(value lhs_arr, value out_arr,
         const uint64_t scale = scale_bits[q1_block];
         const uint64_t block_offset =
             static_cast<uint64_t>(off) + (q1_block * block_bytes);
-        for (uint64_t item = 0; item < group; ++item) {
-          const uint8_t sign_byte = q1[block_offset + 2 + (item >> 3)];
-          const uint64_t signed_scale =
-              ((sign_byte >> (item & 7)) & 1) == 1
-                  ? scale
-                  : (scale ^ 0x8000000000000000ull);
+        // The 128 sign bits are lsb-first; items 0..63 use bytes 2..9 and
+        // items 64..127 use bytes 10..17. Loading them as two little-endian
+        // 64-bit words maps bit i directly to item i.
+        uint64_t sign_a, sign_b;
+        std::memcpy(&sign_a, q1 + block_offset + 2, 8);
+        std::memcpy(&sign_b, q1 + block_offset + 10, 8);
+        const int64_t lhs_base =
+            lhs_row + static_cast<int64_t>(block * group);
+        for (uint64_t item = 0; item < 64; ++item) {
+          // Branchless sign decode: bit 1 -> +scale, 0 -> -scale.
+          const uint64_t sign_mask =
+              (((sign_a >> item) & 1ull) - 1ull) & 0x8000000000000000ull;
+          const uint64_t signed_scale = scale ^ sign_mask;
           double scale_value;
           std::memcpy(&scale_value, &signed_scale, sizeof(scale_value));
-          const int64_t lhs_bits =
-              Int64_val(Field(lhs_arr, (row * k) + (block * group) + item));
-          double lhs_value;
-          std::memcpy(&lhs_value, &lhs_bits, sizeof(lhs_value));
-          const double next = acc + (lhs_value * scale_value);
-          // Scalar parity: a non-finite intermediate rejects the whole
-          // opcode. NaN/Inf intermediates can never return to a finite
-          // accumulator, so the per-cell final check is equivalent.
+          const double next = acc + (lhs_values[lhs_base + item] * scale_value);
+          if (!std::isfinite(next)) cell_ok = false;
+          acc = next;
+        }
+        for (uint64_t item = 0; item < 64; ++item) {
+          const uint64_t sign_mask =
+              (((sign_b >> item) & 1ull) - 1ull) & 0x8000000000000000ull;
+          const uint64_t signed_scale = scale ^ sign_mask;
+          double scale_value;
+          std::memcpy(&scale_value, &signed_scale, sizeof(scale_value));
+          const double next =
+              acc + (lhs_values[lhs_base + 64 + item] * scale_value);
           if (!std::isfinite(next)) cell_ok = false;
           acc = next;
         }
       }
       if (!cell_ok) {
+        delete[] lhs_values;
         delete[] scale_bits;
         CAMLreturn(Val_int(-1));
       }
@@ -136,6 +161,7 @@ CAMLprim value octra_native_q1_g128_linear(value lhs_arr, value out_arr,
     }
   }
 
+  delete[] lhs_values;
   delete[] scale_bits;
   CAMLreturn(Val_int(0));
 }
