@@ -140,86 +140,78 @@ let sorted_bindings table _compare_key =
   end
 
 let candidate_root_and_size ~target_root state =
-  (* One pass computing both the candidate payload size (scratch limit
-     check) and the SHA256 of "octra:inference:candidate\000" ^ target_root
-     ^ "\000" ^ memory_payload state, without materializing the (large)
-     payload string: each cell encodes as length_prefix(key) ^ ":" ^ value,
-     joined by "|". *)
-  let digest = ref (Digestif.SHA256.init ()) in
-  let size = ref 0 in
-  let feed_counted value =
-    digest := Digestif.SHA256.feed_string !digest value;
-    size := !size + String.length value
-  in
-  feed_counted "octra:inference:candidate\000";
-  feed_counted target_root;
-  feed_counted "\000";
-  let feed_value = function
+  (* Build the candidate payload exactly as before (the prefix plus each
+     cell encoded as length_prefix(key) ^ ":" ^ value, joined by "|") in a
+     single Buffer and digest it once; the committed root is unchanged by
+     construction. Returns (payload_size, root_hex). *)
+  let buf = Buffer.create 1_000_000_000 in
+  let add value = Buffer.add_string buf value in
+  add "octra:inference:candidate\000";
+  add target_root;
+  add "\000";
+  let add_value = function
     | Contract_vm.VInt value ->
-      feed_counted ("int:" ^ Z.to_string value);
+      add ("int:" ^ Z.to_string value);
       Ok ()
     | Contract_vm.VBool value ->
-      feed_counted (if value then "bool:1" else "bool:0");
+      add (if value then "bool:1" else "bool:0");
       Ok ()
     | Contract_vm.VString value ->
-      feed_counted "string:";
-      feed_counted (string_of_int (String.length value));
-      feed_counted ":";
-      feed_counted value;
+      add "string:";
+      add (string_of_int (String.length value));
+      add ":";
+      add value;
       Ok ()
     | Contract_vm.VBytes value ->
-      feed_counted "bytes:";
-      feed_counted (string_of_int (String.length value));
-      feed_counted ":";
-      feed_counted value;
+      add "bytes:";
+      add (string_of_int (String.length value));
+      add ":";
+      add value;
       Ok ()
     | Contract_vm.VBytes32 value ->
-      feed_counted "bytes32:";
-      feed_counted (string_of_int (String.length value));
-      feed_counted ":";
-      feed_counted value;
+      add "bytes32:";
+      add (string_of_int (String.length value));
+      add ":";
+      add value;
       Ok ()
-    | Contract_vm.VU64 value -> feed_counted ("u64:" ^ Z.to_string value); Ok ()
-    | Contract_vm.VU128 value -> feed_counted ("u128:" ^ Z.to_string value); Ok ()
-    | Contract_vm.VU256 value -> feed_counted ("u256:" ^ Z.to_string value); Ok ()
+    | Contract_vm.VU64 value -> add ("u64:" ^ Z.to_string value); Ok ()
+    | Contract_vm.VU128 value -> add ("u128:" ^ Z.to_string value); Ok ()
+    | Contract_vm.VU256 value -> add ("u256:" ^ Z.to_string value); Ok ()
     | Contract_vm.VAddr value ->
-      feed_counted "address:";
-      feed_counted (string_of_int (String.length value));
-      feed_counted ":";
-      feed_counted value;
+      add "address:";
+      add (string_of_int (String.length value));
+      add ":";
+      add value;
       Ok ()
     | Contract_vm.VCipher _
     | Contract_vm.VPubKey _ -> Error Opaque_value
   in
-  let feed_cell (key, value) =
+  let add_cell (key, value) =
     let key_payload = string_of_int key in
-    feed_counted (string_of_int (String.length key_payload));
-    feed_counted ":";
-    feed_counted key_payload;
-    feed_counted ":";
-    feed_value value
+    add (string_of_int (String.length key_payload));
+    add ":";
+    add key_payload;
+    add ":";
+    add_value value
   in
   let bindings = sorted_bindings state.Contract_vm.memory.data compare in
-  let _ =
-    if !size < 0 then ()
-    else
-      Printf.eprintf
-        "candidate: cells=%d\n%!" (Hashtbl.length state.Contract_vm.memory.data)
-  in
   let rec loop = function
     | [] -> Ok ()
-    | [cell] -> feed_cell cell
+    | [cell] -> add_cell cell
     | cell :: rest ->
-      (match feed_cell cell with
+      (match add_cell cell with
        | Error error -> Error error
        | Ok () ->
-         feed_counted "|";
+         add "|";
          loop rest)
   in
   match loop bindings with
   | Error error -> Error error
   | Ok () ->
-    Ok (!size, Digestif.SHA256.to_hex (Digestif.SHA256.get !digest))
+    let payload = Buffer.contents buf in
+    Ok
+      ( String.length payload,
+        Digestif.SHA256.to_hex (Digestif.SHA256.digest_string payload) )
 
 let sha256 raw =
   Digestif.SHA256.(digest_string raw |> to_hex)
