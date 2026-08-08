@@ -1464,7 +1464,27 @@ CAMLprim value octra_native_candidate_root(value v_keys, value v_values,
   int64_t* order = (int64_t*)caml_stat_alloc(sizeof(int64_t) * (n + 1));
   int64_t* tmp = (int64_t*)caml_stat_alloc(sizeof(int64_t) * (n + 1));
   int64_t* counts = (int64_t*)caml_stat_alloc(sizeof(int64_t) * 65536);
+  int64_t min_key = INT64_MAX, max_key = INT64_MIN;
+  for (int64_t i = 0; i < n; ++i) {
+    int64_t key = Int64_val(Field(v_keys, i));
+    if (key < min_key) min_key = key;
+    if (key > max_key) max_key = key;
+  }
+  int64_t dense = max_key - min_key + 1;
   for (int64_t i = 0; i < n; ++i) order[i] = i;
+  if (dense <= 2 * n + 1) {
+    // Dense address range: place each key directly, then scan in order.
+    int64_t* pos = (int64_t*)caml_stat_alloc(sizeof(int64_t) * (dense + 1));
+    for (int64_t k = 0; k < dense; ++k) pos[k] = -1;
+    for (int64_t i = 0; i < n; ++i) {
+      int64_t key = Int64_val(Field(v_keys, i));
+      pos[key - min_key] = i;
+    }
+    int64_t count = 0;
+    for (int64_t k = 0; k < dense && count < n; ++k)
+      if (pos[k] >= 0) order[count++] = pos[k];
+    caml_stat_free(pos);
+  } else
   for (int pass = 0; pass < 4; ++pass) {
     int shift = pass * 16;
     for (int64_t d = 0; d < 65536; ++d) counts[d] = 0;
