@@ -117,6 +117,29 @@ type packed_model = {
 
 let active_packed_model : packed_model option ref = ref None
 
+let profile_prefill_ms = ref 0
+let profile_generation_ms = ref 0
+let profile_generated_forward_ms = ref 0
+let profile_lm_head_ms = ref 0
+let profile_forward_ms = ref 0
+let profile_gather_ms = ref 0
+let profile_attention_norm_ms = ref 0
+let profile_recurrent_layer_ms = ref 0
+let profile_full_attention_layer_ms = ref 0
+let profile_mixer_residual_ms = ref 0
+let profile_ffn_layer_ms = ref 0
+let profile_q1_projection_ms = ref 0
+let profile_q1_span_read_ms = ref 0
+let profile_q1_vm_run_ms = ref 0
+let profile_q1_projection_count = ref 0
+let profile_q1_projection_chunks = ref 0
+let profile_q1_physical_bundle_count = ref 0
+let profile_q1_dynamic_bundle_count = ref 0
+let profile_vm_program_count = ref 0
+let profile_vm_program_elapsed_ms = ref 0
+let profile_load_f32_elapsed_ms = ref 0
+let profile_token_elapsed_ms = ref []
+
 type activation_fixture = {
   activation_sha256 : string;
   token_id : int;
@@ -1354,6 +1377,8 @@ let assert_memory_close_atol ?(atol = 1e-8) st addr expected label =
   assert_arrays_close ~atol (memory_f64 st addr (Array.length expected)) expected label
 
 let run_vm_program state program label =
+  incr profile_vm_program_count;
+  let program_started = Unix.gettimeofday () in
   begin
     match VM.Verifier.verify program with
     | Ok () -> ()
@@ -1362,6 +1387,9 @@ let run_vm_program state program label =
   state.VM.pc <- 0;
   let encoded = Bytecode.encode program in
   let ok = VM.run state (Bytecode.decode_exn encoded) in
+  profile_vm_program_elapsed_ms :=
+    !profile_vm_program_elapsed_ms
+    + int_of_float ((Unix.gettimeofday () -. program_started) *. 1000.0);
   require
     ok
     (Printf.sprintf
@@ -3024,10 +3052,12 @@ let run_q1_projection_binding (plan : execution_plan) state (binding : plan_bind
   end;
   let decoded = Bytecode.decode_exn (Bytecode.encode program) in
   let started = Unix.gettimeofday () in
+  incr profile_q1_projection_count;
   let chunk_count = ref 0 in
   let row_start = ref 0 in
   while !row_start < rows do
     let chunk_n = min rows_per_chunk (rows - !row_start) in
+    let span_started = Unix.gettimeofday () in
     let raw =
       read_binding_span
         plan
@@ -3036,6 +3066,9 @@ let run_q1_projection_binding (plan : execution_plan) state (binding : plan_bind
         (chunk_n * row_bytes)
         label
     in
+    profile_q1_span_read_ms :=
+      !profile_q1_span_read_ms
+      + int_of_float ((Unix.gettimeofday () -. span_started) *. 1000.0);
     set_int state 0 (dst_addr + !row_start);
     set_int state 1 lhs_addr;
     VM.setr state 2 (VM.VBytes raw);
@@ -3044,7 +3077,11 @@ let run_q1_projection_binding (plan : execution_plan) state (binding : plan_bind
     set_int state 5 k;
     set_int state 6 chunk_n;
     state.VM.pc <- 0;
+    let run_started = Unix.gettimeofday () in
     let ok = VM.run state decoded in
+    profile_q1_vm_run_ms :=
+      !profile_q1_vm_run_ms
+      + int_of_float ((Unix.gettimeofday () -. run_started) *. 1000.0);
     require ok (label ^ " VM execution returned false");
     require (not state.VM.reverted) (label ^ " VM execution reverted");
     incr chunk_count;
@@ -3067,13 +3104,17 @@ let load_f32_binding_to_addr (plan : execution_plan) state (binding : plan_bindi
   run_vm_program state [| VM.LOAD_F32_LE_FP (0, 1, 2, 3); VM.STOP |] label
 
 let load_f32_name (plan : execution_plan) state name dst_addr expected_elements =
+  let started = Unix.gettimeofday () in
   load_f32_binding_to_addr
     plan
     state
     (plan_binding_by_name plan name)
     dst_addr
     expected_elements
-    name
+    name;
+  profile_load_f32_elapsed_ms :=
+    !profile_load_f32_elapsed_ms
+    + int_of_float ((Unix.gettimeofday () -. started) *. 1000.0)
 
 let copy_memory state src dst len =
   set_f64_array_data state.VM.memory.data dst (get_f64_array_data state.VM.memory.data src len)
@@ -3472,6 +3513,8 @@ let zero_session_states plan state =
     plan.layers
 
 let run_session_forward_token (plan : execution_plan) state addrs position token_id =
+  let forward_started = Unix.gettimeofday () in
+  let gather_started = Unix.gettimeofday () in
   ignore
     (run_q1_gather_row
        plan
@@ -3480,8 +3523,12 @@ let run_session_forward_token (plan : execution_plan) state addrs position token
        token_id
        addrs.hidden
        "token_embd.weight");
+  profile_gather_ms :=
+    !profile_gather_ms
+    + int_of_float ((Unix.gettimeofday () -. gather_started) *. 1000.0);
   List.iter
     (fun layer ->
+      let layer_started = Unix.gettimeofday () in
       copy_memory state addrs.hidden addrs.norm qwen35_hidden_dim;
       ignore
         (load_f32_name
@@ -3498,6 +3545,10 @@ let run_session_forward_token (plan : execution_plan) state addrs position token
            addrs.gamma
            1e-6
            (Printf.sprintf "blk.%d.attn_norm" layer.layer_index));
+      profile_attention_norm_ms :=
+        !profile_attention_norm_ms
+        + int_of_float ((Unix.gettimeofday () -. layer_started) *. 1000.0);
+      let kind_started = Unix.gettimeofday () in
       begin
         match layer.layer_kind with
         | "recurrent" ->
@@ -3506,6 +3557,15 @@ let run_session_forward_token (plan : execution_plan) state addrs position token
             run_full_attention_session_layer plan state addrs layer.layer_index position
         | other -> failwith ("unsupported qwen35 layer kind: " ^ other)
       end;
+      let layer_elapsed =
+        int_of_float ((Unix.gettimeofday () -. kind_started) *. 1000.0)
+      in
+      if String.equal layer.layer_kind "recurrent" then
+        profile_recurrent_layer_ms := !profile_recurrent_layer_ms + layer_elapsed
+      else
+        profile_full_attention_layer_ms :=
+          !profile_full_attention_layer_ms + layer_elapsed;
+      let mixer_started = Unix.gettimeofday () in
       ignore
         (run_residual_add
            state
@@ -3513,8 +3573,21 @@ let run_session_forward_token (plan : execution_plan) state addrs position token
            addrs.mixer
            qwen35_hidden_dim
            (Printf.sprintf "blk.%d.mixer_residual" layer.layer_index));
-      ignore (run_ffn_layer plan state addrs layer.layer_index 1e-6))
-    plan.layers
+      profile_mixer_residual_ms :=
+        !profile_mixer_residual_ms
+        + int_of_float ((Unix.gettimeofday () -. mixer_started) *. 1000.0);
+      let ffn_started = Unix.gettimeofday () in
+      ignore (run_ffn_layer plan state addrs layer.layer_index 1e-6);
+      profile_ffn_layer_ms :=
+        !profile_ffn_layer_ms
+        + int_of_float ((Unix.gettimeofday () -. ffn_started) *. 1000.0))
+    plan.layers;
+  profile_forward_ms :=
+    !profile_forward_ms
+    + int_of_float ((Unix.gettimeofday () -. forward_started) *. 1000.0);
+  profile_token_elapsed_ms :=
+    !profile_token_elapsed_ms
+    @ [ int_of_float ((Unix.gettimeofday () -. forward_started) *. 1000.0) ]
 
 let run_session_lm_head (plan : execution_plan) state addrs =
   copy_memory state addrs.hidden addrs.norm qwen35_hidden_dim;
@@ -3599,6 +3672,8 @@ let zero_session_states plan state =
     plan.layers
 
 let run_session_forward_token (plan : execution_plan) state addrs position token_id =
+  let forward_started = Unix.gettimeofday () in
+  let gather_started = Unix.gettimeofday () in
   ignore
     (run_q1_gather_row
        plan
@@ -3607,8 +3682,12 @@ let run_session_forward_token (plan : execution_plan) state addrs position token
        token_id
        addrs.hidden
        "token_embd.weight");
+  profile_gather_ms :=
+    !profile_gather_ms
+    + int_of_float ((Unix.gettimeofday () -. gather_started) *. 1000.0);
   List.iter
     (fun layer ->
+      let layer_started = Unix.gettimeofday () in
       copy_memory state addrs.hidden addrs.norm qwen35_hidden_dim;
       ignore
         (load_f32_name
@@ -3625,6 +3704,10 @@ let run_session_forward_token (plan : execution_plan) state addrs position token
            addrs.gamma
            1e-6
            (Printf.sprintf "blk.%d.attn_norm" layer.layer_index));
+      profile_attention_norm_ms :=
+        !profile_attention_norm_ms
+        + int_of_float ((Unix.gettimeofday () -. layer_started) *. 1000.0);
+      let kind_started = Unix.gettimeofday () in
       begin
         match layer.layer_kind with
         | "recurrent" ->
@@ -3633,6 +3716,15 @@ let run_session_forward_token (plan : execution_plan) state addrs position token
             run_full_attention_session_layer plan state addrs layer.layer_index position
         | other -> failwith ("unsupported qwen35 layer kind: " ^ other)
       end;
+      let layer_elapsed =
+        int_of_float ((Unix.gettimeofday () -. kind_started) *. 1000.0)
+      in
+      if String.equal layer.layer_kind "recurrent" then
+        profile_recurrent_layer_ms := !profile_recurrent_layer_ms + layer_elapsed
+      else
+        profile_full_attention_layer_ms :=
+          !profile_full_attention_layer_ms + layer_elapsed;
+      let mixer_started = Unix.gettimeofday () in
       ignore
         (run_residual_add
            state
@@ -3640,8 +3732,21 @@ let run_session_forward_token (plan : execution_plan) state addrs position token
            addrs.mixer
            qwen35_hidden_dim
            (Printf.sprintf "blk.%d.mixer_residual" layer.layer_index));
-      ignore (run_ffn_layer plan state addrs layer.layer_index 1e-6))
-    plan.layers
+      profile_mixer_residual_ms :=
+        !profile_mixer_residual_ms
+        + int_of_float ((Unix.gettimeofday () -. mixer_started) *. 1000.0);
+      let ffn_started = Unix.gettimeofday () in
+      ignore (run_ffn_layer plan state addrs layer.layer_index 1e-6);
+      profile_ffn_layer_ms :=
+        !profile_ffn_layer_ms
+        + int_of_float ((Unix.gettimeofday () -. ffn_started) *. 1000.0))
+    plan.layers;
+  profile_forward_ms :=
+    !profile_forward_ms
+    + int_of_float ((Unix.gettimeofday () -. forward_started) *. 1000.0);
+  profile_token_elapsed_ms :=
+    !profile_token_elapsed_ms
+    @ [ int_of_float ((Unix.gettimeofday () -. forward_started) *. 1000.0) ]
 
 let run_session_lm_head (plan : execution_plan) state addrs =
   copy_memory state addrs.hidden addrs.norm qwen35_hidden_dim;
@@ -3702,9 +3807,13 @@ let run_session_prefill
   let started = Unix.gettimeofday () in
   zero_session_states plan !state;
   let generated = Array.make max_new_tokens (-1) in
+  let prefill_started = Unix.gettimeofday () in
   Array.iteri
     (fun position token_id -> run_session_forward_token plan !state addrs position token_id)
     token_ids;
+  profile_prefill_ms :=
+    int_of_float ((Unix.gettimeofday () -. prefill_started) *. 1000.0);
+  let generation_started = Unix.gettimeofday () in
   let completed_effort = ref 0 in
   let checkpoint_root = ref "-" in
   let last_output_chunks = ref 0 in
@@ -3714,13 +3823,24 @@ let run_session_prefill
   let last_logits_hash = ref "-" in
   (try
     for index = 0 to max_new_tokens - 1 do
+      let lm_started = Unix.gettimeofday () in
       let token, output_chunks, output_ms, hidden_hash, norm_hash, logits_hash =
         run_session_lm_head plan !state addrs
       in
+      profile_lm_head_ms :=
+        !profile_lm_head_ms
+        + int_of_float ((Unix.gettimeofday () -. lm_started) *. 1000.0);
+      let token_started = Unix.gettimeofday () in
       generated.(index) <- token;
       last_output_chunks := output_chunks;
       last_output_ms := output_ms;
       if Array.exists (fun stop -> stop = token) stop_tokens then raise Exit;
+      let token_elapsed =
+        int_of_float ((Unix.gettimeofday () -. token_started) *. 1000.0)
+      in
+      profile_token_elapsed_ms :=
+        (!profile_token_elapsed_ms @ [ token_elapsed ]);
+      profile_generated_forward_ms := !profile_generated_forward_ms + token_elapsed;
     last_hidden_hash := hidden_hash;
     last_norm_hash := norm_hash;
     last_logits_hash := logits_hash;
@@ -3746,6 +3866,8 @@ let run_session_prefill
     end
   done
   with Exit -> ());
+  profile_generation_ms :=
+    int_of_float ((Unix.gettimeofday () -. generation_started) *. 1000.0);
   begin
     match generation_fixture with
     | None -> ()
@@ -3763,12 +3885,42 @@ let run_session_prefill
           generated
   end;
   let elapsed_ms = int_of_float ((Unix.gettimeofday () -. started) *. 1000.0) in
+  let model_root = execution_model_root () in
+  let execution_root = execution_semantics_root () in
+  let prompt_csv = string_of_int_array token_ids in
+  let prompt_sha256 =
+    sha256_hex ("octra-inference/prompt-token-ids/1\n" ^ prompt_csv)
+  in
+  let request_root =
+    sha256_hex
+      (Printf.sprintf
+         "octra-inference/inference-request/1\nmodel_root=%s\nexecution_semantics_root=%s\nprompt_sha256=%s\nprompt_token_ids=%s\n"
+         model_root execution_root prompt_sha256 prompt_csv)
+  in
+  let session_id =
+    sha256_hex
+      (Printf.sprintf
+         "octra-inference/inference-session/1\nmodel_root=%s\nexecution_semantics_root=%s\nrequest_root=%s\n"
+         model_root execution_root request_root)
+  in
+  let stop_reason =
+    if
+      Array.exists
+        (fun stop -> stop = generated.(max_new_tokens - 1))
+        stop_tokens
+    then "stop_token"
+    else "max_new_tokens"
+  in
   Printf.printf
-    "bonsai_session_prefill_vm_harness ok model=%s model_root=%s execution_semantics_root=%s source_sha256=%s prompt_tokens=%s max_new_tokens=%d generated_token_ids=%s final_check_token_id=%d layers_per_token=%d total_layer_visits=%d recurrent_transitions=%d full_attention_transitions=%d output_chunks=%d output_projection_elapsed_ms=%d elapsed_ms=%d effort=%d final_hidden_sha256=%s final_norm_sha256=%s logits_sha256=%s comparison=%s restart_resume=%s checkpoint_root=%s storage_boundary=%s boundary=local_candidate_vm_full_prompt_prefill_host_orchestrated\n%!"
+    "bonsai_session_prefill_vm_harness ok model=%s model_root=%s execution_semantics_root=%s source_sha256=%s prompt_sha256=%s request_root=%s session_id=%s stop_reason=%s prompt_tokens=%s max_new_tokens=%d generated_token_ids=%s final_check_token_id=%d layers_per_token=%d total_layer_visits=%d recurrent_transitions=%d full_attention_transitions=%d output_chunks=%d output_projection_elapsed_ms=%d elapsed_ms=%d effort=%d final_hidden_sha256=%s final_norm_sha256=%s logits_sha256=%s comparison=%s restart_resume=%s checkpoint_root=%s storage_boundary=%s boundary=local_candidate_vm_full_prompt_prefill_host_orchestrated prefill_elapsed_ms=%d generation_elapsed_ms=%d generated_forward_elapsed_ms=%d lm_head_elapsed_ms=%d token_elapsed_ms=%s profile_forward_elapsed_ms=%d profile_gather_elapsed_ms=%d profile_attention_norm_elapsed_ms=%d profile_recurrent_layer_elapsed_ms=%d profile_full_attention_layer_elapsed_ms=%d profile_mixer_residual_elapsed_ms=%d profile_ffn_layer_elapsed_ms=%d profile_q1_projection_elapsed_ms=%d profile_q1_span_read_elapsed_ms=%d profile_q1_vm_run_elapsed_ms=%d profile_q1_projection_count=%d profile_q1_projection_chunks=%d profile_q1_physical_bundle_count=%d profile_q1_dynamic_bundle_count=%d profile_vm_program_count=%d profile_vm_program_elapsed_ms=%d profile_load_f32_elapsed_ms=%d\n%!"
     (Option.value plan.model_name ~default:"-")
     (execution_model_root ())
     (execution_semantics_root ())
     source_sha256
+    prompt_sha256
+    request_root
+    session_id
+    stop_reason
     (string_of_int_array token_ids)
     max_new_tokens
     (string_of_int_array generated)
@@ -3787,9 +3939,31 @@ let run_session_prefill
     !last_norm_hash
     !last_logits_hash
     (if Option.is_some generation_fixture then "token_match_fail_closed" else "not_checked")
-    (if Option.is_some checkpoint_after_tokens then "host_checkpoint_roundtrip" else "not_requested")
+    (if Option.is_some checkpoint_after_tokens then "host_checkpoint_roundtrip" else "not_performed")
     !checkpoint_root
     (execution_storage_boundary ())
+    !profile_prefill_ms
+    !profile_generation_ms
+    !profile_generated_forward_ms
+    !profile_lm_head_ms
+    (String.concat "," (List.map string_of_int !profile_token_elapsed_ms))
+    !profile_forward_ms
+    !profile_gather_ms
+    !profile_attention_norm_ms
+    !profile_recurrent_layer_ms
+    !profile_full_attention_layer_ms
+    !profile_mixer_residual_ms
+    !profile_ffn_layer_ms
+    !profile_q1_projection_ms
+    !profile_q1_span_read_ms
+    !profile_q1_vm_run_ms
+    !profile_q1_projection_count
+    !profile_q1_projection_chunks
+    !profile_q1_physical_bundle_count
+    !profile_q1_dynamic_bundle_count
+    !profile_vm_program_count
+    !profile_vm_program_elapsed_ms
+    !profile_load_f32_elapsed_ms
 
 let run_all_layers_first_token ?activation ?single_token_fixture ?layer0_wrapper (plan : execution_plan) token_id =
   require (String.equal plan.status "candidate_complete") "execution plan is not candidate_complete";
