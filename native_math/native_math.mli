@@ -16,3 +16,10 @@ val fp64_sub : int64 -> int64 -> int64 array -> int
 val fp64_mul : int64 -> int64 -> int64 array -> int
 
 val fp64_div : int64 -> int64 -> int64 array -> int
+
+val fp64_silu : int64 array -> int -> int
+
+val gdn_kernel :
+  int64 array -> int64 array -> int64 array -> int64 array -> int64 array ->
+  int64 array -> int64 -> int64 -> int64 -> int64 -> int64 -> int64 ->
+  int64 -> int64 array -> int

@@ -26,3 +26,12 @@ external fp64_mul : int64 -> int64 -> int64 array -> int
 
 external fp64_div : int64 -> int64 -> int64 array -> int
   = "octra_native_fp64_div"
+
+external fp64_silu : int64 array -> int -> int
+  = "octra_native_fp64_silu"
+
+external gdn_kernel :
+  int64 array -> int64 array -> int64 array -> int64 array -> int64 array ->
+  int64 array -> int64 -> int64 -> int64 -> int64 -> int64 -> int64 ->
+  int64 -> int64 array -> int
+  = "octra_native_gdn_kernel_bytecode" "octra_native_gdn_kernel"

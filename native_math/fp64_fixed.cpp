@@ -990,19 +990,139 @@ bool kernel_rope_pair_sin_cos(int64_t position, uint64_t base_bits, int i,
   return kernel_sin_cos(theta_bits, sin_out, cos_out);
 }
 
+/* Whole-opcode kernels: replicate the VM's per-element op sequence with
+   hardware ops (each correctly rounded, -ffp-contract=off) and reject
+   exactly where the scalar rejects. */
+
+/* SILU: for x >= 0: x / (1 + exp(-x)); for x < 0: x * exp(x) / (1 + exp(x)). */
+static bool silu_bits(uint64_t bits, uint64_t* out) {
+  double x;
+  std::memcpy(&x, &bits, sizeof(x));
+  if (!std::isfinite(x)) return false;
+  uint64_t e_bits;
+  uint64_t exp_in = (bits >> 63) != 0 ? bits : (bits ^ 0x8000000000000000ULL);
+  /* exp(-x) for x >= 0 (including -0 -> +0 input handled by kernel: -0
+     gives exp(+0) = 1); exp(x) for x < 0. */
+  if (!kernel_exp_nonpositive(exp_in, &e_bits)) return false;
+  double e;
+  std::memcpy(&e, &e_bits, sizeof(e));
+  double denom = 1.0 + e;
+  double sig = (bits >> 63) != 0 ? e / denom : 1.0 / denom;
+  double r = x * sig;
+  if (!std::isfinite(r)) return false;
+  std::memcpy(out, &r, sizeof(r));
+  return true;
+}
+
+/* GDN recurrence: mirrors the VM loop ordering exactly. Returns 0 ok,
+   -1 reject. state_out/out arrays are int64 bit arrays. */
+static int gdn_kernel(const int64_t* q, const int64_t* k, const int64_t* v,
+                      const int64_t* log_decay, const int64_t* beta,
+                      int64_t* state, uint64_t scale_bits, int64_t timesteps,
+                      int64_t q_heads, int64_t k_heads, int64_t v_heads,
+                      int64_t key_dim, int64_t value_dim,
+                      int64_t* output) {
+  uint64_t state_n =
+      (uint64_t)(v_heads * value_dim * key_dim);
+  uint64_t output_n = (uint64_t)(timesteps * v_heads * value_dim);
+  uint64_t state_per_head = (uint64_t)(value_dim * key_dim);
+  for (int64_t timestep = 0; timestep < timesteps; ++timestep) {
+    uint64_t q_t = (uint64_t)(timestep * q_heads * key_dim);
+    uint64_t k_t = (uint64_t)(timestep * k_heads * key_dim);
+    uint64_t v_t = (uint64_t)(timestep * v_heads * value_dim);
+    uint64_t gate_t = (uint64_t)(timestep * v_heads);
+    uint64_t out_t = (uint64_t)(timestep * v_heads * value_dim);
+    for (int64_t head = 0; head < v_heads; ++head) {
+      int64_t q_head = head % q_heads;
+      int64_t k_head = head % k_heads;
+      uint64_t q_base = q_t + (uint64_t)(q_head * key_dim);
+      uint64_t k_base = k_t + (uint64_t)(k_head * key_dim);
+      uint64_t v_base = v_t + (uint64_t)(head * value_dim);
+      uint64_t state_base = (uint64_t)head * state_per_head;
+      uint64_t decay_bits = 0;
+      if (!kernel_exp_nonpositive(
+              (uint64_t)log_decay[gate_t + (uint64_t)head], &decay_bits))
+        return -1;
+      double decay;
+      std::memcpy(&decay, &decay_bits, sizeof(decay));
+      for (uint64_t i = 0; i < state_per_head; ++i) {
+        double s;
+        std::memcpy(&s, &state[state_base + i], sizeof(s));
+        double r = s * decay;
+        if (!std::isfinite(r)) return -1;
+        std::memcpy(&state[state_base + i], &r, sizeof(r));
+      }
+      for (int64_t row = 0; row < value_dim; ++row) {
+        uint64_t row_base = state_base + (uint64_t)(row * key_dim);
+        double memory = 0.0;
+        for (int64_t col = 0; col < key_dim; ++col) {
+          double s, kv;
+          std::memcpy(&s, &state[row_base + (uint64_t)col], sizeof(s));
+          std::memcpy(&kv, &k[k_base + (uint64_t)col], sizeof(kv));
+          double p = s * kv;
+          double nxt = memory + p;
+          if (!std::isfinite(nxt)) return -1;
+          memory = nxt;
+        }
+        double vv, bv;
+        std::memcpy(&vv, &v[v_base + (uint64_t)row], sizeof(vv));
+        std::memcpy(&bv, &beta[gate_t + (uint64_t)head], sizeof(bv));
+        double diff = vv - memory;
+        double delta = diff * bv;
+        if (!std::isfinite(delta)) return -1;
+        for (int64_t col = 0; col < key_dim; ++col) {
+          uint64_t idx = row_base + (uint64_t)col;
+          double s, kv;
+          std::memcpy(&s, &state[idx], sizeof(s));
+          std::memcpy(&kv, &k[k_base + (uint64_t)col], sizeof(kv));
+          double p = s + kv * delta;
+          if (!std::isfinite(p)) return -1;
+          std::memcpy(&state[idx], &p, sizeof(p));
+        }
+      }
+      for (int64_t row = 0; row < value_dim; ++row) {
+        uint64_t row_base = state_base + (uint64_t)(row * key_dim);
+        double value = 0.0;
+        for (int64_t col = 0; col < key_dim; ++col) {
+          double s, qv;
+          std::memcpy(&s, &state[row_base + (uint64_t)col], sizeof(s));
+          std::memcpy(&qv, &q[q_base + (uint64_t)col], sizeof(qv));
+          double p = value + s * qv;
+          if (!std::isfinite(p)) return -1;
+          value = p;
+        }
+        double scale;
+        std::memcpy(&scale, &scale_bits, sizeof(scale));
+        double scaled = value * scale;
+        if (!std::isfinite(scaled)) return -1;
+        std::memcpy(&output[out_t + (uint64_t)(head * value_dim + row)],
+                    &scaled, sizeof(scaled));
+      }
+    }
+  }
+  (void)state_n;
+  (void)output_n;
+  return 0;
+}
+
 }  // namespace
 
 extern "C" {
 
-/* Correctly-rounded f64 binary ops. IEEE roundTiesToEven results are
+static double dbl_of(int64_t bits) {
+  double d;
+  std::memcpy(&d, &bits, sizeof(d));
+  return d;
+}
+
+/* Correctly-rounded f64 binary ops: IEEE roundTiesToEven results are
    unique, so hardware ops are bit-exact vs the scalar bignum semantics;
-   the kernel rejects (None) exactly where the scalar does: non-finite
-   inputs, non-finite (overflowed) results, and division by zero. */
+   rejects (None) exactly where the scalar does: non-finite inputs,
+   non-finite (overflowed) results, and division by zero. */
 static bool kernel_fp64_binop(int op, uint64_t a_bits, uint64_t b_bits,
                               uint64_t* out) {
-  double a, b;
-  std::memcpy(&a, &a_bits, sizeof(a));
-  std::memcpy(&b, &b_bits, sizeof(b));
+  double a = dbl_of((int64_t)a_bits);
+  double b = dbl_of((int64_t)b_bits);
   if (!std::isfinite(a) || !std::isfinite(b)) return false;
   double r;
   switch (op) {
@@ -1035,9 +1155,7 @@ DEFINE_FP64_BINOP(octra_native_fp64_sub, 1)
 DEFINE_FP64_BINOP(octra_native_fp64_mul, 2)
 DEFINE_FP64_BINOP(octra_native_fp64_div, 3)
 
-
-/* All kernels write outputs into an int64 array passed from OCaml and
-   return 0 on success, -1 on None/arithmetic failure. */
+/* Q256 fixed-point kernels: bits in -> bits out via the out array. */
 CAMLprim value octra_native_fp64_exp_nonpositive(value v_bits, value v_out) {
   CAMLparam2(v_bits, v_out);
   uint64_t bits = (uint64_t)Int64_val(v_bits);
@@ -1091,6 +1209,121 @@ CAMLprim value octra_native_fp64_rope_pair_sin_cos(value v_position,
   Store_field(v_out, 0, caml_copy_int64((int64_t)s));
   Store_field(v_out, 1, caml_copy_int64((int64_t)c));
   CAMLreturn(Val_int(0));
+}
+
+CAMLprim value octra_native_fp64_silu(value v_arr, value v_n) {
+  CAMLparam2(v_arr, v_n);
+  int64_t n = Int_val(v_n);
+  if (n <= 0 || n > (int64_t)(1 << 30)) CAMLreturn(Val_int(-1));
+  for (int64_t i = 0; i < n; ++i) {
+    uint64_t bits = (uint64_t)Int64_val(Field(v_arr, i));
+    uint64_t out = 0;
+    if (!silu_bits(bits, &out)) CAMLreturn(Val_int(-1));
+    Store_field(v_arr, i, caml_copy_int64((int64_t)out));
+  }
+  CAMLreturn(Val_int(0));
+}
+
+static CAMLprim value gdn_kernel_impl(value v_q, value v_k, value v_v,
+                                      value v_log_decay, value v_beta,
+                                      value v_state, value v_scale_bits,
+                                      value v_timesteps, value v_q_heads,
+                                      value v_k_heads, value v_v_heads,
+                                      value v_key_dim, value v_value_dim,
+                                      value v_out);
+
+CAMLprim value octra_native_gdn_kernel(value v_q, value v_k, value v_v,
+                                       value v_log_decay, value v_beta,
+                                       value v_state, value v_scale_bits,
+                                       value v_timesteps, value v_q_heads,
+                                       value v_k_heads, value v_v_heads,
+                                       value v_key_dim, value v_value_dim,
+                                       value v_out) {
+  CAMLparam1(v_q);
+  CAMLxparam5(v_k, v_v, v_log_decay, v_beta, v_state);
+  CAMLxparam5(v_scale_bits, v_timesteps, v_q_heads, v_k_heads, v_v_heads);
+  CAMLxparam3(v_key_dim, v_value_dim, v_out);
+  int64_t timesteps = Int64_val(v_timesteps);
+  int64_t q_heads = Int64_val(v_q_heads);
+  int64_t k_heads = Int64_val(v_k_heads);
+  int64_t v_heads = Int64_val(v_v_heads);
+  int64_t key_dim = Int64_val(v_key_dim);
+  int64_t value_dim = Int64_val(v_value_dim);
+  int64_t q_n = timesteps * q_heads * key_dim;
+  int64_t k_n = timesteps * k_heads * key_dim;
+  int64_t v_n = timesteps * v_heads * value_dim;
+  int64_t gate_n = timesteps * v_heads;
+  int64_t state_n = v_heads * value_dim * key_dim;
+  int64_t output_n = v_n;
+  for (int64_t i = 0; i < q_n; ++i)
+    if (!std::isfinite(dbl_of(Int64_val(Field(v_q, i)))))
+      CAMLreturn(Val_int(-1));
+  for (int64_t i = 0; i < k_n; ++i)
+    if (!std::isfinite(dbl_of(Int64_val(Field(v_k, i)))))
+      CAMLreturn(Val_int(-1));
+  for (int64_t i = 0; i < v_n; ++i)
+    if (!std::isfinite(dbl_of(Int64_val(Field(v_v, i)))))
+      CAMLreturn(Val_int(-1));
+  for (int64_t i = 0; i < gate_n; ++i) {
+    if (!std::isfinite(dbl_of(Int64_val(Field(v_log_decay, i)))))
+      CAMLreturn(Val_int(-1));
+    if (!std::isfinite(dbl_of(Int64_val(Field(v_beta, i)))))
+      CAMLreturn(Val_int(-1));
+  }
+  for (int64_t i = 0; i < state_n; ++i)
+    if (!std::isfinite(dbl_of(Int64_val(Field(v_state, i)))))
+      CAMLreturn(Val_int(-1));
+  if (Wosize_val(v_out) < (size_t)(state_n + output_n))
+    CAMLreturn(Val_int(-1));
+  int64_t* q = (int64_t*)caml_stat_alloc((size_t)q_n * sizeof(int64_t));
+  int64_t* k = (int64_t*)caml_stat_alloc((size_t)k_n * sizeof(int64_t));
+  int64_t* vv = (int64_t*)caml_stat_alloc((size_t)v_n * sizeof(int64_t));
+  int64_t* ld = (int64_t*)caml_stat_alloc((size_t)gate_n * sizeof(int64_t));
+  int64_t* bt = (int64_t*)caml_stat_alloc((size_t)gate_n * sizeof(int64_t));
+  int64_t* st = (int64_t*)caml_stat_alloc((size_t)state_n * sizeof(int64_t));
+  int64_t* out = (int64_t*)caml_stat_alloc((size_t)output_n * sizeof(int64_t));
+  for (int64_t i = 0; i < q_n; ++i) q[i] = Int64_val(Field(v_q, i));
+  for (int64_t i = 0; i < k_n; ++i) k[i] = Int64_val(Field(v_k, i));
+  for (int64_t i = 0; i < v_n; ++i) vv[i] = Int64_val(Field(v_v, i));
+  for (int64_t i = 0; i < gate_n; ++i) {
+    ld[i] = Int64_val(Field(v_log_decay, i));
+    bt[i] = Int64_val(Field(v_beta, i));
+  }
+  for (int64_t i = 0; i < state_n; ++i) st[i] = Int64_val(Field(v_state, i));
+  uint64_t scale_bits = (uint64_t)Int64_val(v_scale_bits);
+  int status = gdn_kernel(q, k, vv, ld, bt, st, scale_bits, timesteps,
+                          q_heads, k_heads, v_heads, key_dim, value_dim, out);
+  if (status == 0) {
+    for (int64_t i = 0; i < state_n; ++i)
+      Store_field(v_out, i, caml_copy_int64(st[i]));
+    for (int64_t i = 0; i < output_n; ++i)
+      Store_field(v_out, state_n + i, caml_copy_int64(out[i]));
+  }
+  caml_stat_free(q);
+  caml_stat_free(k);
+  caml_stat_free(vv);
+  caml_stat_free(ld);
+  caml_stat_free(bt);
+  caml_stat_free(st);
+  caml_stat_free(out);
+  CAMLreturn(Val_int(status));
+}
+
+CAMLprim value octra_native_gdn_kernel_bytecode(value v_q, value v_k,
+                                                value v_v, value v_log_decay,
+                                                value v_beta, value v_state,
+                                                value v_scale_bits,
+                                                value v_timesteps,
+                                                value v_q_heads,
+                                                value v_k_heads,
+                                                value v_v_heads,
+                                                value v_key_dim,
+                                                value v_value_dim,
+                                                value v_out) {
+  return octra_native_gdn_kernel(v_q, v_k, v_v, v_log_decay, v_beta, v_state,
+                                 v_scale_bits, v_timesteps, v_q_heads,
+                                 v_k_heads, v_v_heads, v_key_dim, v_value_dim,
+                                 v_out);
 }
 
 }  // extern "C"

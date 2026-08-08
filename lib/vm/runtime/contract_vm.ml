@@ -2760,13 +2760,15 @@ let exec_one st op =
                         | None -> 0L, false)
                      | None -> 0L, false
                    in
-                   let ok = ref scale_ok in
-                   let mul_add acc left right =
-                     match fp64_mul left right with
-                     | Some product -> fp64_add acc product
-                     | None -> None
-                   in
-                   for timestep = 0 to timesteps - 1 do
+                    let ok = ref scale_ok in
+                    let mul_add acc left right =
+                      match fp64_mul left right with
+                      | Some product -> fp64_add acc product
+                      | None -> None
+                    in
+                    if not (Lazy.force fp64_native_enabled) || not !ok then
+                    begin
+                    for timestep = 0 to timesteps - 1 do
                      let q_t = timestep * q_heads * key_dim in
                      let k_t = timestep * k_heads * key_dim in
                      let v_t = timestep * v_heads * value_dim in
@@ -2862,29 +2864,59 @@ let exec_one st op =
                             output_values.(out_base + row) <- scaled
                           | None -> ok := false)
                        done
-                     done
-                   done;
-                   if not !ok
-                      || not (Array.for_all Inference_fp64.finite state_values)
-                      || not (Array.for_all Inference_fp64.finite output_values)
-                      || not (Inference_fp64.finite scale_bits) then
-                     revert st
-                   else begin
-                     for i = 0 to output_n - 1 do
-                       mem_set_fp64_bits
-                         st.memory.data
-                         (output + i)
-                         output_values.(i)
-                     done;
-                     for i = 0 to state_n - 1 do
-                       mem_set_fp64_bits
-                         st.memory.data
-                         (state_dst + i)
-                         state_values.(i)
-                     done;
-                     true
-                   end
-                 | _ -> revert st))
+                      done
+                    done;
+                    if not !ok
+                       || not (Array.for_all Inference_fp64.finite state_values)
+                       || not (Array.for_all Inference_fp64.finite output_values)
+                       || not (Inference_fp64.finite scale_bits) then
+                      revert st
+                    else begin
+                      for i = 0 to output_n - 1 do
+                        mem_set_fp64_bits
+                          st.memory.data
+                          (output + i)
+                          output_values.(i)
+                      done;
+                      for i = 0 to state_n - 1 do
+                        mem_set_fp64_bits
+                          st.memory.data
+                          (state_dst + i)
+                          state_values.(i)
+                      done;
+                      true
+                    end
+                    end
+                    else begin
+                      let state_out = Array.make (state_n + output_n) 0L in
+                      if
+                        Native_math.gdn_kernel
+                          q_values k_values v_values log_decay_values
+                          beta_values state_values scale_bits
+                          (Int64.of_int timesteps)
+                          (Int64.of_int q_heads) (Int64.of_int k_heads)
+                          (Int64.of_int v_heads) (Int64.of_int key_dim)
+                          (Int64.of_int value_dim)
+                          state_out
+                        <> 0
+                      then revert st
+                      else begin
+                        for i = 0 to output_n - 1 do
+                          mem_set_fp64_bits
+                            st.memory.data
+                            (output + i)
+                            state_out.(state_n + i)
+                        done;
+                        for i = 0 to state_n - 1 do
+                          mem_set_fp64_bits
+                            st.memory.data
+                            (state_dst + i)
+                            state_out.(i)
+                        done;
+                        true
+                      end
+                    end
+                  | _ -> revert st))
         | _ -> revert st)
      | _ -> revert st)
   | MATMUL_FP (rd_addr, rs_lhs, rs_rhs, rs_m, rs_k, rs_n) ->
@@ -3061,8 +3093,43 @@ let exec_one st op =
      | _ -> revert st)
   | SILU_FP (rs_addr, rs_n) ->
     (match read_int st rs_addr, read_int st rs_n with
-     | Some addr, Some n ->
-       map_fp64_bits_inplace st addr n fp64_silu_bits
+     | Some addr, Some n when n > 0 ->
+       if n > 131072 || not (valid_mem_span addr n) then revert st
+       else if not (add_dyn_product st [n; 3] 1) then revert st
+       else
+         (match read_fp64_bits_array st.memory.data addr n with
+          | None -> revert st
+          | Some input ->
+            if Lazy.force fp64_native_enabled then begin
+              let values = Array.copy input in
+              if Native_math.fp64_silu values n <> 0 then revert st
+              else begin
+                for i = 0 to n - 1 do
+                  mem_set_fp64_bits st.memory.data (addr + i) values.(i)
+                done;
+                true
+              end
+            end
+            else begin
+              let output = Array.map fp64_silu_bits input in
+              if
+                not
+                  (Array.for_all
+                     (function
+                       | Some bits -> Inference_fp64.finite bits
+                       | None -> false)
+                     output)
+              then revert st
+              else begin
+                for i = 0 to n - 1 do
+                  mem_set_fp64_bits
+                    st.memory.data
+                    (addr + i)
+                    (Option.get output.(i))
+                done;
+                true
+              end
+            end)
      | _ -> revert st)
   | ELEMWISE_MUL_FP (rs_dst, rs_src, rs_n) ->
     (match read_int st rs_dst, read_int st rs_src, read_int st rs_n with
