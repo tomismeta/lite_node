@@ -38,6 +38,10 @@ Baseline: `octra-labs/lite_node` `main` at
   producer stage ids or model families; a non-normative mapping may mention
   them. Producer stage claims live only in the external `octra-inference`
   spine-stages docs.
+- [`octra-native-inference-program.md`](octra-native-inference-program.md) owns
+  the Circle-backed integration direction, parallel workstream boundaries, and
+  delivery gates. It coordinates implementation but cannot override the VM,
+  runtime-contract, numerical-profile, or capability-ladder authorities above.
 
 On conflict, contracts override this document for roots, identity, effort,
 sessions, cancellation, and receipts. The determinism hardening plan overrides
