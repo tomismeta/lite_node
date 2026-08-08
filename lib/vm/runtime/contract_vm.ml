@@ -2720,6 +2720,9 @@ let exec_one st op =
           let spans =
             input_spans @ [state_src, state_n; output, output_n; state_dst, state_n]
           in
+              "gdn: spans q=%d/%d k=%d/%d v=%d/%d ld=%d/%d b=%d/%d s=%d/%d o=%d/%d sd=%d/%d\n%!"
+              q q_n k k_n v v_n log_decay gate_n beta gate_n
+              state_src state_n output output_n state_dst state_n;
           if not (List.for_all (fun (addr, n) -> valid_large_mem_span addr n) spans) then
             revert st
           else
@@ -2781,10 +2784,10 @@ let exec_one st op =
                        let k_base = k_t + (k_head * key_dim) in
                        let v_base = v_t + (head * value_dim) in
                        let state_base = head * state_per_head in
-                       let decay_input_bits =
-                         log_decay_values.(gate_t + head)
-                       in
-                       let decay_bits =
+                        let decay_input_bits =
+                          log_decay_values.(gate_t + head)
+                        in
+                                                let decay_bits =
                          match
                           exp_nonpositive decay_input_bits
                          with
@@ -2981,7 +2984,7 @@ let exec_one st op =
            read_fp64_reg_bits st rs_epsilon with
      | Some addr, Some n, Some gamma, Some epsilon_bits
        when n > 0 && fp64_positive_bits epsilon_bits ->
-       if not
+              if not
             (List.for_all
                (fun (addr, n) -> valid_large_mem_span addr n)
                [addr, n; gamma, n])
@@ -2993,7 +2996,7 @@ let exec_one st op =
         (match read_fp64_bits_array st.memory.data addr n,
                read_fp64_bits_array st.memory.data gamma n with
          | Some input_values, Some gamma_values ->
-            let ok = ref true in
+                        let ok = ref true in
             let sum_sq_bits = ref 0L in
             Array.iter
               (fun value ->
@@ -3016,16 +3019,16 @@ let exec_one st op =
                  | None -> None)
               | None -> None
             in
-            let output =
-              Array.init n (fun i ->
-                match inv_rms_bits with
-                | Some inv_rms_bits ->
-                  (match fp64_mul input_values.(i) inv_rms_bits with
-                   | Some scaled ->
-                     fp64_mul scaled gamma_values.(i)
-                   | None -> None)
-                | None -> None)
-            in
+             let output =
+                              Array.init n (fun i ->
+                 match inv_rms_bits with
+                 | Some inv_rms_bits ->
+                   (match fp64_mul input_values.(i) inv_rms_bits with
+                    | Some scaled ->
+                      fp64_mul scaled gamma_values.(i)
+                    | None -> None)
+                 | None -> None)
+             in
             if not !ok
                || Option.is_none inv_rms_bits
                || not (Array.for_all Option.is_some output) then
@@ -3223,20 +3226,20 @@ let exec_one st op =
     end
   | ROPE_APPLY_INDEXED_FP
       (rs_addr, rs_count, rs_head_dim, rs_rot_dim, rs_positions, rs_base) ->
-    (match read_int st rs_addr, read_int st rs_count,
+        (match read_int st rs_addr, read_int st rs_count,
            read_int st rs_head_dim, read_int st rs_rot_dim,
            read_int st rs_positions,
            read_fp64_reg_bits st rs_base with
-     | Some addr, Some count, Some head_dim, Some rot_dim,
-       Some positions_addr, Some base_bits
-       when count > 0 && head_dim > 0 && rot_dim > 0
-            && rot_dim <= head_dim && rot_dim land 1 = 0
-            && Inference_fp64.finite base_bits
-            && Inference_fp64.compare base_bits fp64_one_bits = Some 1
-            && count mod head_dim = 0 ->
-       let pairs = rot_dim / 2 in
-       if not
-            (valid_large_mem_span addr count
+      | Some addr, Some count, Some head_dim, Some rot_dim,
+        Some positions_addr, Some base_bits
+        when count > 0 && head_dim > 0 && rot_dim > 0
+             && rot_dim <= head_dim && rot_dim land 1 = 0
+             && Inference_fp64.finite base_bits
+             && Inference_fp64.compare base_bits fp64_one_bits = Some 1
+             && count mod head_dim = 0 ->
+                let pairs = rot_dim / 2 in
+                if not
+             (valid_large_mem_span addr count
              && valid_large_mem_span positions_addr pairs)
           || ranges_overlap addr count positions_addr pairs then
          revert st
@@ -3295,8 +3298,10 @@ let exec_one st op =
                 done;
                 true
               end
-            | _ -> revert st)
-     | _ -> revert st)
+            | _ ->
+                            revert st)
+     | _ ->
+              revert st)
   | LOAD_INT8_FP (rs_dst, rs_src, rs_off, rs_n, rs_scale) ->
     let dst = Z.to_int (to_z (getr st rs_dst)) in
     let src_b64 = to_string (getr st rs_src) in

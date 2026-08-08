@@ -1,0 +1,3 @@
+(executable
+ (name bonsai_layer0_vm_harness)
+ (libraries octra_vm base64 zarith yojson digestif.c))
