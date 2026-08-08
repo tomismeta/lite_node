@@ -5,9 +5,12 @@
    VM feeds all fit: |exp| <= 750, t in [0,1], angles up to 2^53,
    ln(base) <= 710. */
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <string>
 
 #include <caml/alloc.h>
 #include <caml/memory.h>
@@ -1324,6 +1327,266 @@ CAMLprim value octra_native_gdn_kernel_bytecode(value v_q, value v_k,
                                  v_scale_bits, v_timesteps, v_q_heads,
                                  v_k_heads, v_v_heads, v_key_dim, v_value_dim,
                                  v_out);
+}
+
+}  // extern "C"
+
+extern "C" {
+
+/* Native candidate payload: radix-sort the cell keys, serialize each cell
+   exactly as the OCaml binding payload (length_prefix(key) ^ ":" ^
+   value, joined by "|", prefixed with the candidate header) and SHA256
+   the result, all in one C pass. The committed root is bit-identical to
+   the OCaml implementation by construction. */
+
+static void sha256_compress(uint32_t h[8], const uint8_t* block) {
+  static const uint32_t k[64] = {
+      0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b,
+      0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01,
+      0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7,
+      0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+      0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152,
+      0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+      0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+      0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+      0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819,
+      0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08,
+      0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f,
+      0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+      0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+  uint32_t w[64];
+  for (int i = 0; i < 16; ++i)
+    w[i] = ((uint32_t)block[4 * i] << 24) | ((uint32_t)block[4 * i + 1] << 16) |
+           ((uint32_t)block[4 * i + 2] << 8) | block[4 * i + 3];
+  for (int i = 16; i < 64; ++i) {
+    uint32_t s0 = (w[i - 15] >> 7) | (w[i - 15] << 25);
+    s0 ^= (w[i - 15] >> 18) | (w[i - 15] << 14);
+    s0 ^= w[i - 15] >> 3;
+    uint32_t s1 = (w[i - 2] >> 17) | (w[i - 2] << 15);
+    s1 ^= (w[i - 2] >> 19) | (w[i - 2] << 13);
+    s1 ^= w[i - 2] >> 10;
+    w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+  }
+  uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5],
+           g = h[6], hh = h[7];
+  for (int i = 0; i < 64; ++i) {
+    uint32_t S1 = (e >> 6) | (e << 26);
+    S1 ^= (e >> 11) | (e << 21);
+    S1 ^= (e >> 25) | (e << 7);
+    uint32_t ch = (e & f) ^ (~e & g);
+    uint32_t t1 = hh + S1 + ch + k[i] + w[i];
+    uint32_t S0 = (a >> 2) | (a << 30);
+    S0 ^= (a >> 13) | (a << 19);
+    S0 ^= (a >> 22) | (a << 10);
+    uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+    uint32_t t2 = S0 + maj;
+    hh = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+  }
+  h[0] += a; h[1] += b; h[2] += c; h[3] += d;
+  h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
+}
+
+static void sha256_block(uint32_t h[8], const uint8_t* p, size_t len) {
+  size_t full = len / 64;
+  for (size_t c = 0; c < full; ++c) sha256_compress(h, p + c * 64);
+  size_t rem = len % 64;
+  uint8_t buf[128];
+  std::memcpy(buf, p + full * 64, rem);
+  buf[rem] = 0x80;
+  size_t pad_start = rem + 1;
+  size_t final_len = ((pad_start + 8 + 63) / 64) * 64;
+  std::memset(buf + pad_start, 0, final_len - 8 - pad_start);
+  uint64_t bitlen = (uint64_t)len * 8;
+  for (int i = 0; i < 8; ++i) buf[final_len - 1 - i] = (uint8_t)(bitlen >> (8 * i));
+  sha256_compress(h, buf);
+  if (final_len > 64) sha256_compress(h, buf + 64);
+}
+
+/* Convert a zarith Z.t to its decimal string. A Z.t is either an OCaml
+   int (when it fits) or a block whose first data word is a header holding
+   the sign (bit 63) and the limb count (bits 0..62), followed by 64-bit
+   little-endian limbs. */
+static std::string z_to_decimal(value z) {
+  bool negative;
+  int64_t nlimbs;
+  const uint64_t* limbs;
+  uint64_t small_abs = 0;
+  if (Is_long(z)) {
+    intnat v = Long_val(z);
+    negative = v < 0;
+    small_abs = (uint64_t)(v < 0 ? -v : v);
+    nlimbs = 1;
+    limbs = &small_abs;
+  } else {
+    const uint64_t head = *(const uint64_t*)Data_custom_val(z);
+    negative = (head >> 63) != 0;
+    nlimbs = (int64_t)(head & 0x7fffffffffffffffULL);
+    /* The data is [head, limbs...] with 64-bit little-endian limbs. */
+    limbs = (const uint64_t*)((const char*)Data_custom_val(z) + 8);
+  }
+  std::string digits = "0";
+  for (int64_t i = nlimbs - 1; i >= 0; --i) {
+    unsigned __int128 carry = limbs[i];
+    for (size_t j = 0; j < digits.size(); ++j) {
+      unsigned __int128 cur =
+          (unsigned __int128)(digits[j] - '0') * ((unsigned __int128)1 << 64) +
+          carry;
+      digits[j] = (char)('0' + (unsigned int)(cur % 10));
+      carry = cur / 10;
+    }
+    while (carry) {
+      digits.push_back((char)('0' + (unsigned int)(carry % 10)));
+      carry /= 10;
+    }
+  }
+  while (digits.size() > 1 && digits.back() == '0') digits.pop_back();
+  if (negative) digits += "-";
+  std::reverse(digits.begin(), digits.end());
+  return digits;
+}
+
+CAMLprim value octra_native_candidate_root(value v_keys, value v_values,
+                                           value v_target_root,
+                                           value v_root_out,
+                                           value v_size_out) {
+  CAMLparam5(v_keys, v_values, v_target_root, v_root_out, v_size_out);
+  int64_t n = Wosize_val(v_keys);
+  std::string payload;
+  payload.reserve(1u << 30);
+  auto add = [&payload](const char* s, size_t len) {
+    payload.append(s, len);
+  };
+  const std::string prefix =
+      std::string("octra:inference:candidate\000", 26) +
+      std::string(String_val(v_target_root)) + std::string("\000", 1);
+  add(prefix.data(), prefix.size());
+  // Radix sort the keys with their values (4 x 16-bit LSD passes).
+  int64_t* order = (int64_t*)caml_stat_alloc(sizeof(int64_t) * (n + 1));
+  int64_t* tmp = (int64_t*)caml_stat_alloc(sizeof(int64_t) * (n + 1));
+  int64_t* counts = (int64_t*)caml_stat_alloc(sizeof(int64_t) * 65536);
+  for (int64_t i = 0; i < n; ++i) order[i] = i;
+  for (int pass = 0; pass < 4; ++pass) {
+    int shift = pass * 16;
+    for (int64_t d = 0; d < 65536; ++d) counts[d] = 0;
+    for (int64_t i = 0; i < n; ++i) {
+      int64_t key = Int64_val(Field(v_keys, order[i]));
+      counts[(key >> shift) & 0xffff]++;
+    }
+    int64_t total = 0;
+    for (int64_t d = 0; d < 65536; ++d) {
+      int64_t c = counts[d];
+      counts[d] = total;
+      total += c;
+    }
+    for (int64_t i = 0; i < n; ++i) {
+      int64_t key = Int64_val(Field(v_keys, order[i]));
+      int64_t pos = counts[(key >> shift) & 0xffff]++;
+      tmp[pos] = order[i];
+    }
+    std::memcpy(order, tmp, sizeof(int64_t) * n);
+  }
+  auto add_payload = [&](value v) {
+    int tag = Tag_val(v);
+    switch (tag) {
+      case 0: {  /* VInt of Z.t */
+        std::string d = z_to_decimal(Field(v, 0));
+        add("int:", 4);
+        add(d.data(), d.size());
+        break;
+      }
+      case 1: {  /* VBool */
+        add(Bool_val(Field(v, 0)) ? "bool:1" : "bool:0", 6);
+        break;
+      }
+      case 2: {  /* VString */
+        add("string:", 7);
+        std::string l = std::to_string(caml_string_length(Field(v, 0)));
+        add(l.data(), l.size());
+        add(":", 1);
+        add(String_val(Field(v, 0)), caml_string_length(Field(v, 0)));
+        break;
+      }
+      case 3: {  /* VBytes */
+        add("bytes:", 6);
+        std::string l = std::to_string(caml_string_length(Field(v, 0)));
+        add(l.data(), l.size());
+        add(":", 1);
+        add(String_val(Field(v, 0)), caml_string_length(Field(v, 0)));
+        break;
+      }
+      case 4: {  /* VBytes32 */
+        add("bytes32:", 8);
+        std::string l = std::to_string(caml_string_length(Field(v, 0)));
+        add(l.data(), l.size());
+        add(":", 1);
+        add(String_val(Field(v, 0)), caml_string_length(Field(v, 0)));
+        break;
+      }
+      case 5: {  /* VU64 */
+        add("u64:", 4);
+        std::string d = z_to_decimal(Field(v, 0));
+        add(d.data(), d.size());
+        break;
+      }
+      case 6: {  /* VU128 */
+        add("u128:", 5);
+        std::string d = z_to_decimal(Field(v, 0));
+        add(d.data(), d.size());
+        break;
+      }
+      case 7: {  /* VU256 */
+        add("u256:", 5);
+        std::string d = z_to_decimal(Field(v, 0));
+        add(d.data(), d.size());
+        break;
+      }
+      case 8: {  /* VAddr */
+        add("address:", 8);
+        std::string l = std::to_string(caml_string_length(Field(v, 0)));
+        add(l.data(), l.size());
+        add(":", 1);
+        add(String_val(Field(v, 0)), caml_string_length(Field(v, 0)));
+        break;
+      }
+      default:
+        caml_stat_free(order);
+        caml_stat_free(tmp);
+        caml_stat_free(counts);
+        return false;
+    }
+    return true;
+  };
+  bool ok = true;
+  for (int64_t i = 0; i < n; ++i) {
+    int64_t key = Int64_val(Field(v_keys, order[i]));
+    std::string key_s = std::to_string(key);
+    std::string len_s = std::to_string(key_s.size());
+    add(len_s.data(), len_s.size());
+    add(":", 1);
+    add(key_s.data(), key_s.size());
+    add(":", 1);
+    if (!add_payload(Field(v_values, order[i]))) {
+      ok = false;
+      break;
+    }
+    if (i + 1 < n) add("|", 1);
+  }
+  if (!ok) {
+    caml_stat_free(order);
+    caml_stat_free(tmp);
+    caml_stat_free(counts);
+    CAMLreturn(Val_int(-1));
+  }
+  uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                   0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+  sha256_block(h, (const uint8_t*)payload.data(), payload.size());
+  char hex[65];
+  for (int i = 0; i < 8; ++i) {
+    snprintf(hex + 8 * i, 9, "%08x", h[i]);
+  }
+  Store_field(v_root_out, 0, caml_copy_string(hex));
+  Store_field(v_size_out, 0, caml_copy_int64((int64_t)payload.size()));
+  CAMLreturn(Val_int(0));
 }
 
 }  // extern "C"

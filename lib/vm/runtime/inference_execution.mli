@@ -56,6 +56,9 @@ type error =
   | Committed_target_state_root_mismatch of string * string
   | Execution_failed
 
+val candidate_root_and_size :
+  target_root:string -> Contract_vm.s -> (int * string, error) Stdlib.result
+
 val run :
   ?session_context:Inference_session_abi.continuation_context ->
   plan:Inference_plan.t ->

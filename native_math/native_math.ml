@@ -35,3 +35,7 @@ external gdn_kernel :
   int64 array -> int64 -> int64 -> int64 -> int64 -> int64 -> int64 ->
   int64 -> int64 array -> int
   = "octra_native_gdn_kernel_bytecode" "octra_native_gdn_kernel"
+
+external candidate_root :
+  int64 array -> 'a array -> string -> string array -> int64 array -> int
+  = "octra_native_candidate_root"

@@ -139,7 +139,7 @@ let sorted_bindings table _compare_key =
     Array.to_list arr
   end
 
-let candidate_root_and_size ~target_root state =
+let candidate_root_and_size_ocaml ~target_root state =
   (* Build the candidate payload exactly as before (the prefix plus each
      cell encoded as length_prefix(key) ^ ":" ^ value, joined by "|") in a
      single Buffer and digest it once; the committed root is unchanged by
@@ -212,6 +212,32 @@ let candidate_root_and_size ~target_root state =
     Ok
       ( String.length payload,
         Digestif.SHA256.to_hex (Digestif.SHA256.digest_string payload) )
+
+let candidate_root_and_size ~target_root state =
+  (* Native single-pass candidate (radix sort + exact cell serialization +
+     SHA256 in C); falls back to the OCaml Buffer path on rejection or
+     when OCTRA_NATIVE_FP64=1 forces the scalar. *)
+  if Sys.getenv_opt "OCTRA_NATIVE_FP64" = None then begin
+    let n = Hashtbl.length state.Contract_vm.memory.data in
+    let keys = Array.make n 0L in
+    let values = Array.make n (Obj.magic ()) in
+    ignore
+      (Hashtbl.fold
+         (fun key value index ->
+           Array.unsafe_set keys index (Int64.of_int key);
+           Array.unsafe_set values index (Obj.magic value);
+           index + 1)
+         state.Contract_vm.memory.data 0);
+    let root_out = Array.make 1 "" in
+    let size_out = Array.make 1 0L in
+    if
+      Native_math.candidate_root keys values target_root root_out size_out
+      = 0
+    then Ok (Int64.to_int size_out.(0), root_out.(0))
+    else candidate_root_and_size_ocaml ~target_root state
+  end
+  else candidate_root_and_size_ocaml ~target_root state
+
 
 let sha256 raw =
   Digestif.SHA256.(digest_string raw |> to_hex)

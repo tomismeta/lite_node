@@ -23,3 +23,6 @@ val gdn_kernel :
   int64 array -> int64 array -> int64 array -> int64 array -> int64 array ->
   int64 array -> int64 -> int64 -> int64 -> int64 -> int64 -> int64 ->
   int64 -> int64 array -> int
+
+val candidate_root :
+  int64 array -> 'a array -> string -> string array -> int64 array -> int
