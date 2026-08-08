@@ -97,9 +97,47 @@ let value_payload = function
   | Contract_vm.VCipher _
   | Contract_vm.VPubKey _ -> Error Opaque_value
 
-let sorted_bindings table compare_key =
-  Hashtbl.fold (fun key value values -> (key, value) :: values) table []
-  |> List.sort (fun (left, _) (right, _) -> compare_key left right)
+let sorted_bindings table _compare_key =
+  (* The memory keys are non-negative integer addresses; an O(n) LSD radix
+     sort (four 16-bit digit passes with counting buckets) replaces the
+     O(n log n) List.sort over millions of cells in the candidate payload
+     path while producing the identical ascending order. *)
+  let bindings =
+    Hashtbl.fold (fun key value values -> (key, value) :: values) table []
+  in
+  if bindings = [] then []
+  else begin
+    let arr = Array.of_list bindings in
+    let n = Array.length arr in
+    let tmp = Array.make n (0, Obj.magic ()) in
+    let counts = Array.make 65536 0 in
+    for pass = 0 to 3 do
+      let shift = pass * 16 in
+      Array.fill counts 0 65536 0;
+      for i = 0 to n - 1 do
+        let key = fst arr.(i) in
+        let digit = (key lsr shift) land 0xffff in
+        counts.(digit) <- counts.(digit) + 1
+      done;
+      let total = ref 0 in
+      for d = 0 to 65535 do
+        let c = counts.(d) in
+        counts.(d) <- !total;
+        total := !total + c
+      done;
+      for i = 0 to n - 1 do
+        let pair = arr.(i) in
+        let digit = (fst pair lsr shift) land 0xffff in
+        let pos = counts.(digit) in
+        counts.(digit) <- pos + 1;
+        tmp.(pos) <- pair
+      done;
+      for i = 0 to n - 1 do
+        arr.(i) <- tmp.(i)
+      done
+    done;
+    Array.to_list arr
+  end
 
 let candidate_root_and_size ~target_root state =
   (* One pass computing both the candidate payload size (scratch limit
@@ -162,6 +200,12 @@ let candidate_root_and_size ~target_root state =
     feed_value value
   in
   let bindings = sorted_bindings state.Contract_vm.memory.data compare in
+  let _ =
+    if !size < 0 then ()
+    else
+      Printf.eprintf
+        "candidate: cells=%d\n%!" (Hashtbl.length state.Contract_vm.memory.data)
+  in
   let rec loop = function
     | [] -> Ok ()
     | [cell] -> feed_cell cell
