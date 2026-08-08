@@ -101,34 +101,81 @@ let sorted_bindings table compare_key =
   Hashtbl.fold (fun key value values -> (key, value) :: values) table []
   |> List.sort (fun (left, _) (right, _) -> compare_key left right)
 
-let bindings_payload ~key_payload bindings value_payload =
-  let rec loop acc = function
-    | [] -> Ok (String.concat "|" (List.rev acc))
-    | (key, value) :: rest ->
-      (match value_payload value with
-       | Error error -> Error error
-       | Ok value ->
-         loop
-           ((length_prefix (key_payload key) ^ ":" ^ value) :: acc)
-           rest)
+let candidate_root_and_size ~target_root state =
+  (* One pass computing both the candidate payload size (scratch limit
+     check) and the SHA256 of "octra:inference:candidate\000" ^ target_root
+     ^ "\000" ^ memory_payload state, without materializing the (large)
+     payload string: each cell encodes as length_prefix(key) ^ ":" ^ value,
+     joined by "|". *)
+  let digest = ref (Digestif.SHA256.init ()) in
+  let size = ref 0 in
+  let feed_counted value =
+    digest := Digestif.SHA256.feed_string !digest value;
+    size := !size + String.length value
   in
-  loop [] bindings
-
-let memory_payload state =
+  feed_counted "octra:inference:candidate\000";
+  feed_counted target_root;
+  feed_counted "\000";
+  let feed_value = function
+    | Contract_vm.VInt value ->
+      feed_counted ("int:" ^ Z.to_string value);
+      Ok ()
+    | Contract_vm.VBool value ->
+      feed_counted (if value then "bool:1" else "bool:0");
+      Ok ()
+    | Contract_vm.VString value ->
+      feed_counted "string:";
+      feed_counted (string_of_int (String.length value));
+      feed_counted ":";
+      feed_counted value;
+      Ok ()
+    | Contract_vm.VBytes value ->
+      feed_counted "bytes:";
+      feed_counted (string_of_int (String.length value));
+      feed_counted ":";
+      feed_counted value;
+      Ok ()
+    | Contract_vm.VBytes32 value ->
+      feed_counted "bytes32:";
+      feed_counted (string_of_int (String.length value));
+      feed_counted ":";
+      feed_counted value;
+      Ok ()
+    | Contract_vm.VU64 value -> feed_counted ("u64:" ^ Z.to_string value); Ok ()
+    | Contract_vm.VU128 value -> feed_counted ("u128:" ^ Z.to_string value); Ok ()
+    | Contract_vm.VU256 value -> feed_counted ("u256:" ^ Z.to_string value); Ok ()
+    | Contract_vm.VAddr value ->
+      feed_counted "address:";
+      feed_counted (string_of_int (String.length value));
+      feed_counted ":";
+      feed_counted value;
+      Ok ()
+    | Contract_vm.VCipher _
+    | Contract_vm.VPubKey _ -> Error Opaque_value
+  in
+  let feed_cell (key, value) =
+    let key_payload = string_of_int key in
+    feed_counted (string_of_int (String.length key_payload));
+    feed_counted ":";
+    feed_counted key_payload;
+    feed_counted ":";
+    feed_value value
+  in
   let bindings = sorted_bindings state.Contract_vm.memory.data compare in
-  bindings_payload
-    ~key_payload:string_of_int
-    bindings
-    (fun value -> value_payload value)
-
-let candidate_payload state =
-  memory_payload state
-
-let candidate_root ~target_root payload =
-  Digestif.SHA256.(
-    digest_string
-      ("octra:inference:candidate\000" ^ target_root ^ "\000" ^ payload)
-    |> to_hex)
+  let rec loop = function
+    | [] -> Ok ()
+    | [cell] -> feed_cell cell
+    | cell :: rest ->
+      (match feed_cell cell with
+       | Error error -> Error error
+       | Ok () ->
+         feed_counted "|";
+         loop rest)
+  in
+  match loop bindings with
+  | Error error -> Error error
+  | Ok () ->
+    Ok (!size, Digestif.SHA256.to_hex (Digestif.SHA256.get !digest))
 
 let sha256 raw =
   Digestif.SHA256.(digest_string raw |> to_hex)
@@ -263,9 +310,9 @@ let bind_session_context state context =
       (Invalid_committed_target_state
          "committed target state payload requires a root")
 
-let check_scratch_payload payload ~max_bytes =
-  let length = String.length payload in
-  if length > max_bytes then Error (Scratch_limit_exceeded (length, max_bytes))
+let check_scratch_payload payload_size ~max_bytes =
+  if payload_size > max_bytes then
+    Error (Scratch_limit_exceeded (payload_size, max_bytes))
   else Ok ()
 
 let plain_ctx =
@@ -449,18 +496,20 @@ let run_internal ?profile ?session_context ~plan () =
        if not success || state.Contract_vm.reverted then
          Error Execution_failed
        else
-         (match
-            profile_phase profile execution_profile "candidate_payload" (fun () ->
-              candidate_payload state)
-         with
-          | Error error -> Error error
-          | Ok candidate ->
-            (match
-               profile_phase profile execution_profile "scratch_check" (fun () ->
-                 check_scratch_payload
-                   candidate
-                   ~max_bytes:
-                     requirement.Execution_requirement.limits.max_scratch_bytes)
+          (match
+             profile_phase profile execution_profile "candidate_payload" (fun () ->
+               candidate_root_and_size
+                 ~target_root:(Inference_target.root target)
+                 state)
+          with
+           | Error error -> Error error
+           | Ok (candidate_size, candidate_root) ->
+             (match
+                profile_phase profile execution_profile "scratch_check" (fun () ->
+                  check_scratch_payload
+                    candidate_size
+                    ~max_bytes:
+                      requirement.Execution_requirement.limits.max_scratch_bytes)
              with
              | Error error -> Error error
              | Ok () ->
@@ -477,12 +526,6 @@ let run_internal ?profile ?session_context ~plan () =
                         ~target_root:(Inference_target.root target)
                         ~session_abi_root:target.Inference_target.session_abi_root
                         output)
-                  in
-                  let candidate_root =
-                    profile_phase profile execution_profile "candidate_root" (fun () ->
-                      candidate_root
-                        ~target_root:(Inference_target.root target)
-                        candidate)
                   in
                   let committed =
                     if committed_state_supported then
